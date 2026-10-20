@@ -189,22 +189,18 @@ local function holdActionDetails(params)
   return details
 end
 
+-- Only a complete read counts as data. A closed socket hands back an empty
+-- partial string, which must not be parsed as a byte.
 local function recvBytes(sock, n)
-  local data, err, partial = sock:receive(n)
-  if data then
+  local data, err = sock:receive(n)
+  if data and #data == n then
     return data
   end
-  if err == "timeout" then
-    return nil, "timeout"
-  end
-  return partial, err
+  return nil, err or "short read"
 end
 
-local function recvPacket(sock)
-  local h, err = recvBytes(sock, 1)
-  if not h then
-    return nil, err
-  end
+local function recvPacketRest(sock, h)
+  local err
   local multiplier = 1
   local length = 0
   while true do
@@ -228,6 +224,23 @@ local function recvPacket(sock)
     end
   end
   return {kind = math.floor(string.byte(h, 1) / 16), flags = string.byte(h, 1) % 16, body = body}
+end
+
+local function recvPacket(sock)
+  local h, err = recvBytes(sock, 1)
+  if not h then
+    return nil, err
+  end
+  -- The idle poll uses a 1 s timeout; once a packet has started, give the
+  -- rest of it longer, and treat a mid-packet timeout as a broken stream.
+  sock:settimeout(8)
+  local pkt
+  pkt, err = recvPacketRest(sock, h)
+  sock:settimeout(1)
+  if not pkt and err == "timeout" then
+    err = "timeout inside packet"
+  end
+  return pkt, err
 end
 
 local function publish(sock, topic, payload, retain)
@@ -737,9 +750,18 @@ local function mqttLoop()
   mqttTask = nil
 end
 
+local function taskAlive()
+  return mqttTask ~= nil and system.taskStatus(mqttTask) ~= "dead"
+end
+
+-- A task that dies on an error keeps its handle, so check its status rather
+-- than the handle; monitor() calls this every minute to restart it.
 local function start()
   stopRequested = false
-  if not mqttTask then
+  if not taskAlive() then
+    if mqttTask then
+      log.notice("codexmqtt task was dead; restarting")
+    end
     mqttTask = system.addTask("codexmqtt", mqttLoop)
   end
   return true
@@ -764,11 +786,14 @@ function monitor(self)
   start()
   while not stopRequested do
     system.sleep(60000)
+    if not stopRequested then
+      start()
+    end
   end
 end
 
 function status(self)
-  return {state = mqttTask and "running" or "stopped", config = CONFIG_FILE}
+  return {state = taskAlive() and "running" or "stopped", config = CONFIG_FILE}
 end
 
 function exit(self)
