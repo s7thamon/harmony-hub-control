@@ -3,7 +3,7 @@
 Suggested repository:
 
 ```text
-Ripthulhu/harmony-hub-control
+schlambos/harmony-hub-control
 ```
 
 Recommended visibility: private while the project still ships local-control
@@ -30,14 +30,14 @@ git init
 git add .
 git commit -m "Initial Harmony Hub Control web UI"
 git branch -M main
-git remote add origin https://github.com/Ripthulhu/harmony-hub-control.git
+git remote add origin https://github.com/schlambos/harmony-hub-control.git
 git push -u origin main
 ```
 
 ## Clone Workflow For Collaborators
 
 ```powershell
-git clone https://github.com/Ripthulhu/harmony-hub-control.git
+git clone https://github.com/schlambos/harmony-hub-control.git
 cd harmony-hub-control
 ```
 

@@ -300,7 +300,6 @@ function handleActivitySync(res) {
     remoteRefreshed: true,
     syncQueued: false,
     synced: false,
-    activityEngineReady: true,
     revision: state.revision,
     message: "The local activity engine and paired-remote configuration revision were refreshed.",
     reply: JSON.stringify({ code: 200, msg: "OK", simulated: true })
@@ -546,7 +545,7 @@ async function handleApi(req, res, pathname, url) {
     case "GET /api/update-status":
       sendJson(res, 200, {
         ok: true,
-        repo: "https://github.com/Ripthulhu/harmony-hub-control",
+        repo: "https://github.com/schlambos/harmony-hub-control",
         rawBase: "",
         files: []
       });

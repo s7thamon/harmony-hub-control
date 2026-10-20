@@ -3,7 +3,7 @@
    through POST /api/irdb-import. Parsers align with tools/ir_database_smoke_test.mjs
    and the hub's bulk_import_irdb_commands line shapes. */
 
-import { LIMITS, parseIrdbLines, prontoToHarmonyRaw, isSafeLabel } from "./views/ir-model.js";
+import { LIMITS, parseIrdbLines, prontoToHarmonyRaw, harmonyRawFromTimings, isSafeLabel } from "./views/ir-model.js";
 
 /**
  * Browser-searchable sources only. Flipper-IRDB is intentionally absent:
@@ -53,6 +53,44 @@ function rev8(v) {
   return v & 255;
 }
 
+function lsbBits(value, count) {
+  const out = [];
+  for (let i = 0; i < count; i += 1) out.push((value >> i) & 1);
+  return out;
+}
+
+/** Sony SIRC (12/15/20-bit) IRDB row to Harmony raw timings at 40 kHz.
+    IRDB device is the address; for 20-bit codes, subdevice is the extension
+    byte above the 5 low device bits. The command is always 7 bits. */
+function sonyRawFromParts(device, subdevice, fn, proto) {
+  const d = Number(device);
+  const f = Number(fn);
+  if (!Number.isFinite(d) || !Number.isFinite(f) || d < 0 || f < 0) return "";
+  const bits = /20/i.test(String(proto || "")) ? 20 : /15/i.test(proto) ? 15 : 12;
+  const command = f & 127;
+  if (f > 127) return "";
+  let address = d;
+  if (bits === 20) {
+    const sub = String(subdevice === undefined ? "" : subdevice).trim();
+    if (sub !== "" && sub !== "-1") {
+      const ext = Number(sub);
+      if (Number.isFinite(ext) && ext >= 0) address = (d & 31) | ((ext & 255) << 5);
+      else return "";
+    }
+  }
+  const addressBits = bits - 7;
+  if (address < 0 || address >= 1 << addressBits) return "";
+  const timings = [2400, 600];
+  lsbBits(command, 7).concat(lsbBits(address, addressBits)).forEach((bit) => {
+    timings.push(bit ? 1200 : 600, 600);
+  });
+  return harmonyRawFromTimings(40000, timings);
+}
+
+function isSonyProtocol(proto) {
+  return /^Sony(?:12|15|20)?$/i.test(String(proto || ""));
+}
+
 /** NEC-family compact keycode used by IRDB CSV rows (same shape as hub/smoke). */
 export function keyFromParts(proto, d, s, f) {
   if (!/^(NEC|Samsung32|Pioneer)/i.test(proto || "")) return "";
@@ -77,6 +115,7 @@ export function detectFormat(text, filename = "") {
   if (/<html|Infrared Hex|Copy to Clipboard/i.test(t)) return "remotecentral";
   if ((t.includes("|") && /\|(raw|keycode)\|/i.test(t)) || /^\s*\S+\|[^\n]+$/m.test(t)) return "pipe";
   if (/(?:0000|0100)\s+[0-9a-fA-F]{4}\s+/i.test(t)) return "pronto";
+  if (looksLikeIrdbCsv(t)) return "irdb-csv";
   if (low.endsWith(".json") || /^\s*[\[{]/.test(t.trim())) return "json";
   return "unknown";
 }
@@ -112,17 +151,56 @@ function parseIrdbCsv(text) {
     if (!trimmed) continue;
     const p = csvCells(trimmed);
     if (!p[0] || /^functionname$/i.test(p[0])) continue;
-    const proto = p[1] || "";
-    const keycode = keyFromParts(proto, p[2] || "", p[3] || "", p[4] || "");
-    rows.push({
-      name: safeName(p[0]),
-      mode: keycode ? "keycode" : "skip",
-      code: keycode,
-      meta: `${proto} ${p[2] || ""},${p[3] || ""},${p[4] || ""}`,
-      supported: Boolean(keycode),
-    });
+    const row = irdbCsvRow(p[0], p[1] || "", p[2] || "", p[3] || "", p[4] || "");
+    if (row) rows.push(row);
   }
   return rows;
+}
+
+function irdbCsvRow(rawName, proto, device, subdevice, fn) {
+  const name = safeName(rawName);
+  if (!name || /^functionname$/i.test(name)) return null;
+  const protocol = String(proto || "");
+  const d = String(device || "").trim();
+  const sub = String(subdevice === undefined ? "" : subdevice).trim();
+  const f = String(fn || "").trim();
+  const meta = `${protocol} ${d},${sub},${f}`;
+  if (isSonyProtocol(protocol)) {
+    const raw = sonyRawFromParts(Number(d), sub, Number(f), protocol);
+    return { name, mode: raw ? "raw" : "skip", code: raw, meta, supported: Boolean(raw) };
+  }
+  const keycode = keyFromParts(protocol, d, sub, f);
+  return { name, mode: keycode ? "keycode" : "skip", code: keycode, meta, supported: Boolean(keycode) };
+}
+
+/** Headerless IRDB CSV: any 5-cell row with a known protocol and numeric codes. */
+function looksLikeIrdbCsv(text) {
+  const lines = String(text || "").replace(/\r/g, "").split("\n").map((line) => line.trim()).filter(Boolean);
+  if (!lines.length) return false;
+  const head = csvCells(lines[0]).map((cell) => cell.toLowerCase());
+  if (
+    head.length >= 5 &&
+    head[0] === "functionname" &&
+    head[1] === "protocol" &&
+    head[2] === "device" &&
+    head[3] === "subdevice" &&
+    head[4] === "function"
+  ) {
+    return true;
+  }
+  for (const line of lines) {
+    const p = csvCells(line);
+    if (p.length < 5) continue;
+    const row = irdbCsvRow(p[0], p[1], p[2], p[3], p[4]);
+    if (row && row.name && (row.supported || /^(NEC|Samsung32|Pioneer|Sony(?:12|15|20)?)$/i.test(p[1] || ""))) {
+      const d = Number(p[2]);
+      const f = Number(p[4]);
+      const sub = String(p[3] === undefined ? "" : p[3]).trim();
+      const subdeviceOk = sub === "" || sub === "-1" || (Number.isFinite(Number(sub)) && Number(sub) >= 0);
+      if (Number.isFinite(d) && d >= 0 && Number.isFinite(f) && f >= 0 && subdeviceOk) return true;
+    }
+  }
+  return false;
 }
 
 function parseFlipper(text) {

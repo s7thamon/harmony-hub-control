@@ -129,6 +129,38 @@ local function offlineResourcePut(cmd, verb, params)
     etag = resMgr.getEtag(resourceName)
     hetag = resMgr.getHubEtag(resourceName)
   end
+  -- CODEX DIAG (removable, behaviour-neutral): capture the paired remote's put payload
+  do
+    local body = params.resource
+    local encoded
+    if type(body) == "string" then
+      encoded = body
+    elseif body ~= nil then
+      local ok, enc = pcall(json.encode, body)
+      encoded = ok and enc or nil
+    end
+    log.notice(
+      "codex put payload",
+      uri,
+      "type", type(body),
+      "len", encoded and #encoded or 0
+    )
+    if encoded and #encoded < 262144 then
+      local path = "/var/volatile/codex-put-" .. tostring(resourceName or "unknown") .. ".json"
+      local f = io.open(path, "w")
+      if f then
+        f:write(encoded)
+        f:close()
+      end
+    end
+    if type(params) == "table" then
+      local names = {}
+      for k in pairs(params) do
+        names[#names + 1] = tostring(k)
+      end
+      log.notice("codex put param keys", uri, table.concat(names, ","))
+    end
+  end
   log.notice(
     "codex offline guard acknowledged resource put without cloud or mutation",
     uri

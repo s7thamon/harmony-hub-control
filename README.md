@@ -485,7 +485,7 @@ hub backups, firmware dumps, or rooting tools. See
 before sharing changes.
 
 - Hub rooting: [harmony-hub-root](https://github.com/Ripthulhu/harmony-hub-root)
-- Upstream project: [Ripthulhu/harmony-hub-control](https://github.com/Ripthulhu/harmony-hub-control)
+- Project: [schlambos/harmony-hub-control](https://github.com/schlambos/harmony-hub-control)
 
 **License:** this repository does not currently include a license file, so
 default copyright applies. Confirm redistribution rights with the author

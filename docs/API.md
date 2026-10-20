@@ -183,10 +183,10 @@ POST /api/activity-sync
 
 This endpoint is also strictly local. It returns `syncQueued: false` and
 `synced: false`; `remoteRefreshed: true` means the Hub published a new local
-configuration revision for paired remotes. The writer waits for the separate
-activity-execution task to finish rebuilding before it publishes that revision;
-the embedded writer reply reports `activityEngineReady: true` when the paired
-remote can safely start an activity.
+configuration revision for paired remotes. The deployed writer publishes that
+revision as soon as the resources are saved and reloaded; it does not wait for
+the activity-execution task to finish rebuilding, so a paired remote can see
+the new revision slightly before the activity engine is ready.
 
 ## Inventory
 

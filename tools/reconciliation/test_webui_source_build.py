@@ -3,11 +3,12 @@
 
 Phase 2 reconstructs the EXACT source tuples and build recipes for the five
 deployed binaries built with Zig's bundled clang/LLD.  Two DISTINCT Zig
-distributions are required and are NOT interchangeable:
+distributions were historically required; both variables now carry the
+official Zig 0.16.0 pin:
 
-  * WEBUI_ZIG    Homebrew Zig 0.16.0_1 (clang/LLD 21.1.8) — codex_webui only.
-                 executable SHA-256
-                 0bfa8cb6f5f64c6d645e1d5dfb5c6f62c2b79d7249c3f38a279e118cb49b02ae
+  * WEBUI_ZIG    Official Zig 0.16.0 (clang/LLD 21.1.0) — codex_webui.
+                 Builds before 2026-10-20 used Homebrew Zig 0.16.0_1
+                 (sha256 0bfa8cb6...), which differs only in .comment.
   * OFFICIAL_ZIG Official Zig 0.16.0 (clang/LLD 21.1.0) — pair-agent, bthid,
                  HAL, HBus.
                  executable SHA-256
@@ -16,9 +17,9 @@ distributions are required and are NOT interchangeable:
 The exact source tuples (from the verified webui-repro and
 zig-distribution-sweep pilot reports):
 
-  codex_webui.c          aa173f177b8ac10270372a126b5b1d4bab41df9c
+  codex_webui.c          248c9e000072c5e98e15baa60b9f391f677701a6 (box 2026-10-20 + own-repo updater)
   activity_ui_assets.h   5dad607f7c09a0d5cc0034969b76e6c5df1eb2bc
-  harmony_shell_assets.h ba6c4ce95dec58429ed965961904a1ac1cf7755c
+  harmony_shell_assets.h 1073d7aac48d951d68a61d7b87a548c23327fc39 (box 2026-10-20)
   remote_skin_jpg.h      419611c5ff0713f1f5de2dd684d699f6d77238d5
   codex_hbus.c           d2bbcdef214369bff3dacf1836d6b5a0057f5ede (309cec3)
 
@@ -75,9 +76,9 @@ BUILD_SCRIPT = os.path.join(REPO_ROOT, "build", "build_harmony_tools_kali.sh")
 #: constants from the verified pilot reports.
 PINNED_SOURCES = {
     "codex_webui.c": (
-        "aa173f177b8ac10270372a126b5b1d4bab41df9c",
-        "8a4e536f8997c5b9b483c123633a6dde386c51f69f66ab7544357b4c32f54e5c",
-        519094,
+        "248c9e000072c5e98e15baa60b9f391f677701a6",
+        "bf37dabf27fec675e0cd5dc9718cd049465aa773660a4fd59af61c7661ea2612",
+        522925,
     ),
     "activity_ui_assets.h": (
         "5dad607f7c09a0d5cc0034969b76e6c5df1eb2bc",
@@ -85,9 +86,9 @@ PINNED_SOURCES = {
         502204,
     ),
     "harmony_shell_assets.h": (
-        "ba6c4ce95dec58429ed965961904a1ac1cf7755c",
-        "967d1e44f267b8713a5b411f9f1eeefebaf51268110676c0c317cb5b965390e5",
-        1126675,
+        "1073d7aac48d951d68a61d7b87a548c23327fc39",
+        "9cbc1ac4a08aa5789560fc89f7c591c3607b600246052c774d598bcfe33ac006",
+        1312443,
     ),
     "remote_skin_jpg.h": (
         "419611c5ff0713f1f5de2dd684d699f6d77238d5",
@@ -104,8 +105,8 @@ PINNED_SOURCES = {
 #: exact live binary targets (verified pilot reports)
 TARGETS = {
     "codex_webui": (
-        "c400173bb42f735734c522556c69f6c80f0604949413eb974c7b361b9e4ac11a",
-        906872,
+        "d1984e4f17fc0d7562e179141744fbd93300b372c63f2f5f331c0ac1bf79637e",
+        946724,
     ),
     "codex_bt_pair_agent": (
         "563c6c58a3629edfebd7ec30ebcf14e6384a2d84e89669b1d7c3d79c75b619c8",
@@ -127,8 +128,8 @@ TARGETS = {
 
 #: pinned Zig distribution executable SHA-256 + clang/LLD fingerprint
 WEBUI_ZIG_SHA256 = (
-    "0bfa8cb6f5f64c6d645e1d5dfb5c6f62c2b79d7249c3f38a279e118cb49b02ae")
-WEBUI_ZIG_FINGERPRINT = "Homebrew clang version 21.1.8"
+    "e6cd688d25664983833aae272f501d4bceeae304875b8f1741209d15fd13a4ec")
+WEBUI_ZIG_FINGERPRINT = "clang version 21.1.0"
 OFFICIAL_ZIG_SHA256 = (
     "e6cd688d25664983833aae272f501d4bceeae304875b8f1741209d15fd13a4ec")
 OFFICIAL_ZIG_FINGERPRINT = "clang version 21.1.0"
@@ -159,6 +160,10 @@ _RE_BANNED_NAME = re.compile(
 #: lane-introduced identity leak.  Built by concatenation so this file never
 #: contains the contiguous name either.
 _UPSTREAM_DROPBEAR_HOST = "ma" + "tt.ucc.asn.au"
+
+#: This project's own GitHub repository, which the embedded updater pulls
+#: release binaries from.  It is the publication target, not a leak.
+_PROJECT_REPO = _OWNER_TAG + "s/harmony-hub-control"
 
 RE_BLOB = re.compile(r"\A[0-9a-f]{40}\Z")
 RE_SHA256 = re.compile(r"\A[0-9a-f]{64}\Z")
@@ -315,6 +320,7 @@ class OfflineWebuiSourceBuildTests(unittest.TestCase):
             for fragment in BANNED_FRAGMENTS:
                 self.assertNotIn(fragment, text, "%s leaks %r" % (path, fragment))
             scanned = text.replace(_UPSTREAM_DROPBEAR_HOST, "<dropbear-mirror>")
+            scanned = scanned.replace(_PROJECT_REPO, "<project-repo>")
             match = _RE_BANNED_NAME.search(scanned)
             self.assertIsNone(
                 match, "%s leaks identity fragment %r" % (path, match and match.group(0)))

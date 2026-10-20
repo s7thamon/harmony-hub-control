@@ -18,7 +18,6 @@ import {
   analyzeCapture,
   normalizeSignal,
   chunkCommands,
-  parseIrdbLines,
   remoteCentralCommands,
   normalizeRemoteCentralPath,
   describeInventory,
@@ -813,39 +812,59 @@ export function createIrView(section) {
     sourceErrors: [],
   };
 
-  function updateImportPreview() {
-    const { rows, skipped } = parseIrdbLines(refs.importPayload.value);
+  /* Pasted text goes through the same parser and plan as the find panel, and
+     the hub receives the transformed pipe payload, not the raw paste. */
+  function pastedImportPlan() {
+    const text = refs.importPayload.value;
+    const parsed = parseLibraryText(text);
     const device = inventory?.devices?.find((d) => d.id === refs.importDevice.value);
     const existing = device?.commands?.length ?? 0;
-    const shaped = rows.map((r) => ({
-      name: r.name,
-      mode: r.mode === "irdb" ? "keycode" : r.mode,
-      code: r.code,
-      supported: Boolean(r.name && r.code),
-    }));
-    const plan = planImport(shaped, existing);
+    const plan = planImport(parsed.rows, existing);
+    const payload = rowsToImportPayload(parsed.rows, { max: plan.willImport });
+    return { parsed, plan, payload };
+  }
+
+  function updateImportPreview() {
+    const { parsed, plan, payload } = pastedImportPlan();
+    const rawCount = parsed.rows.filter((r) => r.supported && r.mode === "raw").length;
+    const keycodeCount = parsed.rows.filter((r) => r.supported && r.mode === "keycode").length;
     setText(
       refs.importPreview,
-      rows.length || skipped
-        ? `${plan.summary} ${plan.notes.slice(1).join(" ")} Hub backs up DeviceList before writing.`
+      parsed.rows.length
+        ? `${plan.summary} ${plan.notes.slice(1).join(" ")} (${rawCount} raw, ${keycodeCount} keycode) Hub backs up DeviceList before writing.`
         : "Paste pipe rows (name|keycode) or IRDB CSV rows (name,protocol,device,subdevice,function). " +
           `Limits: ${LIMITS.storedCommands} commands per device, ${LIMITS.batchCommands} per import request. The hub backs up DeviceList before writing.`,
     );
+    if (refs.importBtn) refs.importBtn.disabled = plan.willImport <= 0 || !payload.trim();
   }
 
   async function doImport() {
     const deviceId = refs.importDevice.value;
-    const payload = refs.importPayload.value;
     if (!isSafeLabel(deviceId, LIMITS.deviceId)) {
       setNotice(refs.importStatus, "error", "Choose a device to import into.");
       return;
     }
-    if (!payload.trim()) {
+    const { plan, payload } = pastedImportPlan();
+    if (plan.found <= 0) {
       setNotice(refs.importStatus, "error", "Paste some codes to import first.");
       return;
     }
+    if (plan.willImport <= 0 || !payload.trim()) {
+      setNotice(
+        refs.importStatus,
+        "error",
+        plan.supported <= 0
+          ? `No supported commands to import (${plan.summary}).`
+          : "Transformed import payload is empty — nothing to send.",
+      );
+      return;
+    }
     refs.importBtn.disabled = true;
-    setNotice(refs.importStatus, "info", "Importing… the hub takes a DeviceList backup first.");
+    setNotice(
+      refs.importStatus,
+      "info",
+      `Importing ${plan.willImport} command${plan.willImport === 1 ? "" : "s"}… the hub takes a DeviceList backup first.`,
+    );
     try {
       const j = await postApiForm("/api/irdb-import", { deviceId, payload });
       setNotice(refs.importStatus, "ok", j.message || "Import complete.");
