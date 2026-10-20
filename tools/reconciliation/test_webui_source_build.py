@@ -113,12 +113,12 @@ TARGETS = {
         111796,
     ),
     "codex_bthid_keyboard": (
-        "c6a3c4cd0db3aab1bbdc92ae22e3ae2ffe11d442ac7fe0920b46a6da0b5cef13",
-        116452,
+        "099b8a1428c2f34fe0b3428d280f65402cc6a5fd1e8e5723c56b462cc8ec2a86",
+        119284,
     ),
     "codex_hal_ltcp": (
-        "7fa9a84b9ee270bdf6e47d40859d29b6c1c30e5a1766f0ab59e9143dd13ca26c",
-        76772,
+        "87ff7d140cb474d0bb97cf96d4c29f4ab3d71b9a0e006117362150653b0faef5",
+        81524,
     ),
     "codex_hbus": (
         "4be9e6ac2e09e7eb052f9c47e81480d1e32aee7190bedb6ef7f932cf07aab8f9",

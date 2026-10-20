@@ -9,6 +9,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#include <sys/file.h>
 #include <sys/select.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
@@ -267,6 +268,71 @@ static int run_self_test(void) {
     return failed;
 }
 
+/*
+ * Stock hal frees its global Bluetooth HID instance inside
+ * bt_hid_disconnect() and then sleeps ~1 s before clearing the pointer, so a
+ * second bthid.* call that lands in that window reads freed memory and
+ * crashes hal (seen 2026: two bthid.connect calls 0.8 s apart).  Every
+ * bthid.* call from our tools takes one shared lock, and calls that follow a
+ * connect/disconnect wait out a cool-down first.
+ */
+#define BTHID_LOCK_PATH "/var/run/codex-bthid.lock"
+#define BTHID_STAMP_PATH "/var/run/codex-bthid.last"
+#define BTHID_TEARDOWN_COOLDOWN_MS 1500
+
+static long long bthid_now_ms(void) {
+    struct timespec ts;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) return 0;
+    return (long long)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+}
+
+static int bthid_guard_begin(const char *cmd) {
+    int fd, stamp;
+    char text[32];
+    ssize_t n;
+    long long last = 0, wait_ms;
+    if (strncmp(cmd, "bthid.", 6) != 0) return -1;
+    fd = open(BTHID_LOCK_PATH, O_CREAT | O_RDWR | O_CLOEXEC, 0600);
+    if (fd < 0) return -1;
+    while (flock(fd, LOCK_EX) != 0) {
+        if (errno != EINTR) {
+            close(fd);
+            return -1;
+        }
+    }
+    stamp = open(BTHID_STAMP_PATH, O_RDONLY | O_CLOEXEC);
+    if (stamp >= 0) {
+        n = read(stamp, text, sizeof(text) - 1);
+        close(stamp);
+        if (n > 0) {
+            text[n] = 0;
+            last = strtoll(text, NULL, 10);
+        }
+    }
+    wait_ms = last > 0 ? last + BTHID_TEARDOWN_COOLDOWN_MS - bthid_now_ms() : 0;
+    if (wait_ms > BTHID_TEARDOWN_COOLDOWN_MS) wait_ms = BTHID_TEARDOWN_COOLDOWN_MS;
+    if (wait_ms > 0) usleep((useconds_t)wait_ms * 1000);
+    return fd;
+}
+
+static void bthid_guard_end(int fd, const char *cmd) {
+    int stamp, len;
+    char text[32];
+    if (fd < 0) return;
+    if (strcmp(cmd, "bthid.connect") == 0 || strcmp(cmd, "bthid.disconnect") == 0) {
+        stamp = open(BTHID_STAMP_PATH, O_CREAT | O_WRONLY | O_TRUNC | O_CLOEXEC, 0600);
+        if (stamp >= 0) {
+            len = snprintf(text, sizeof(text), "%lld\n", bthid_now_ms());
+            if (len > 0 && write(stamp, text, (size_t)len) < 0) {
+                /* best effort: a missing stamp only skips the cool-down */
+            }
+            close(stamp);
+        }
+    }
+    flock(fd, LOCK_UN);
+    close(fd);
+}
+
 static int connect_hal(void) {
     int fd = socket(AF_INET, SOCK_STREAM, 0);
     struct sockaddr_in addr;
@@ -333,14 +399,16 @@ static int send_ltcp_command(int fd, const unsigned char *payload, size_t len) {
 
 static int native_hid_ready(const char *type, const char *bdaddr) {
     char json[256], response[512], current_addr[32];
-    int fd, rc, code;
+    int fd, rc, code, guard;
     response[0] = 0;
     current_addr[0] = 0;
     snprintf(json, sizeof(json),
         "{\"id\":1,\"cmd\":\"bthid.status\",\"data\":{\"type\":\"%s\"},\"timeout\":4}",
         type);
+    guard = bthid_guard_begin("bthid.status");
     fd = connect_hal();
     if (fd < 0) {
+        bthid_guard_end(guard, "bthid.status");
         last_native_code = -1;
         return 0;
     }
@@ -349,6 +417,7 @@ static int native_hid_ready(const char *type, const char *bdaddr) {
         ? read_native_response(fd, response, sizeof(response))
         : -1;
     close(fd);
+    bthid_guard_end(guard, "bthid.status");
     last_native_code = code;
     return code == 200 &&
         json_native_connected(response) &&
@@ -383,7 +452,7 @@ static int safe_bt_type(const char *s) {
 static int send_report(const char *type, const char *bdaddr, const unsigned char *report, size_t report_len) {
     char json[256];
     unsigned char request[512];
-    int fd, rc;
+    int fd, rc, guard;
     size_t json_len;
     snprintf(json, sizeof(json),
         "{\"id\":1,\"cmd\":\"bthid.report\",\"data\":{\"type\":\"%s\",\"bdaddr\":\"%s\"},\"timeout\":8}",
@@ -396,8 +465,12 @@ static int send_report(const char *type, const char *bdaddr, const unsigned char
     if (json_len + report_len > sizeof(request)) return -1;
     memcpy(request, json, json_len);
     memcpy(request + json_len, report, report_len);
+    guard = bthid_guard_begin("bthid.report");
     fd = connect_hal();
-    if (fd < 0) return -1;
+    if (fd < 0) {
+        bthid_guard_end(guard, "bthid.report");
+        return -1;
+    }
     rc = send_ltcp_command(fd, request, json_len + report_len);
     if (rc == 0) {
         last_native_code = read_native_response(fd, NULL, 0);
@@ -406,6 +479,7 @@ static int send_report(const char *type, const char *bdaddr, const unsigned char
         last_native_code = -1;
     }
     close(fd);
+    bthid_guard_end(guard, "bthid.report");
     return rc;
 }
 
