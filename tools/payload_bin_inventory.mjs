@@ -149,23 +149,12 @@ export function checkDrift(inventory = buildInventory(fs.readFileSync(MANIFEST_P
     }
   }
 
-  /* Hardcoded upstream self-update must not be the default. */
-  if (/UPDATE_DEFAULT_RAW='https:\/\//.test(cSrc)) {
-    problems.push("embedded UPDATE_DEFAULT_RAW still points at a public URL");
-  }
-  if (/value='https:\/\/raw\.githubusercontent\.com\//.test(cSrc)) {
-    problems.push("legacy system page pre-fills a public updateRepo URL");
-  }
-  if (/"repo":"https:\/\/github\.com\//.test(cSrc) ||
-      /\\"repo\\":\\"https:\/\/github\.com\//.test(cSrc) ||
-      /"repo":"https:\/\/github\.com\/Ripthulhu/.test(cSrc) ||
-      /repo\\":\\"https:\/\/github\.com\/Ripthulhu/.test(cSrc)) {
-    problems.push("update-status JSON still advertises a public github repo URL");
-  }
-  /* Direct string form used by fputs in render_update_status_json */
-  if (/fputs\("\{\\"ok\\":true,\\"repo\\":\\"https:\/\//.test(cSrc) ||
-      /"repo":"https:\/\/github\.com\/Ripthulhu\/harmony-hub-control"/.test(cSrc)) {
-    problems.push("render_update_status_json still embeds a public repo URL");
+  /* Self-update may only default to this project's own repository. */
+  const OWN_REPO = "schlambos/harmony-hub-control";
+  const urls = cSrc.match(/https:\/\/(?:raw\.githubusercontent\.com|api\.github\.com\/repos|(?:cdn|fastly)\.jsdelivr\.net\/gh|github\.com)\/[A-Za-z0-9_.-]+\/harmony-hub-control/g) || [];
+  const foreign = [...new Set(urls.filter((u) => !u.endsWith(`/${OWN_REPO}`)))];
+  if (foreign.length) {
+    problems.push(`update URLs point outside ${OWN_REPO}: ${foreign.join(", ")}`);
   }
 
   const py = read("install_webui.py");

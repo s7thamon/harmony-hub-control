@@ -8,12 +8,12 @@
   <Shell>sh</Shell>
   <Privileged>false</Privileged>
   <Support/>
-  <Project>https://github.com/Ripthulhu/harmony-hub-control</Project>
+  <Project>https://github.com/schlambos/harmony-hub-control</Project>
   <Overview>Installs Harmony Hub Control onto an already-rooted Logitech Harmony Hub over SSH exactly once, then keeps a local reverse proxy running so the hub-hosted dashboard appears as this container's WebUI. The container does not root the hub. A valid owner SSH private key and the exact numeric Hub ID are required.</Overview>
   <Category>HomeAutomation: Tools:</Category>
   <WebUI>http://[IP]:[PORT:8080]/</WebUI>
   <TemplateURL/>
-  <Icon>https://github.com/Ripthulhu.png</Icon>
+  <Icon>https://github.com/schlambos.png</Icon>
   <ExtraParams/>
   <PostArgs/>
   <CPUset/>

@@ -545,7 +545,7 @@ async function handleApi(req, res, pathname, url) {
     case "GET /api/update-status":
       sendJson(res, 200, {
         ok: true,
-        repo: "https://github.com/Ripthulhu/harmony-hub-control",
+        repo: "https://github.com/schlambos/harmony-hub-control",
         rawBase: "",
         files: []
       });

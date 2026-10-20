@@ -35,32 +35,27 @@ STRIP=mips-buildroot-linux-uclibc-strip
 "$CC" -Os -static -s -o "$OUT/codex_portal" "$SRC/codex_portal.c"
 
 # ---------------------------------------------------------------------------
-# Zig-built binaries.  Two DISTINCT Zig distributions are required, each
-# fail-closed pinned by executable SHA-256, version, and clang/LLD
-# fingerprint.  They are NOT interchangeable: the deployed binaries were
-# built with different clang/LLD versions whose .comment sections differ.
+# Zig-built binaries.  Official Zig 0.16.0 (clang/LLD 21.1.0), fail-closed
+# pinned by executable SHA-256, version, and clang/LLD fingerprint, builds
+# all five: WEBUI_ZIG (codex_webui) and OFFICIAL_ZIG (pair-agent, bthid,
+# HAL, HBus) are separate variables but carry the same pin.
 #
-#   WEBUI_ZIG    Homebrew Zig 0.16.0_1 (clang/LLD 21.1.8) — builds codex_webui
-#                executable SHA-256
-#                0bfa8cb6f5f64c6d645e1d5dfb5c6f62c2b79d7249c3f38a279e118cb49b02ae
-#   OFFICIAL_ZIG Official Zig 0.16.0 (clang/LLD 21.1.0) — builds pair-agent,
-#                bthid, HAL, HBus
-#                executable SHA-256
-#                e6cd688d25664983833aae272f501d4bceeae304875b8f1741209d15fd13a4ec
+#   executable SHA-256
+#   e6cd688d25664983833aae272f501d4bceeae304875b8f1741209d15fd13a4ec
+#
+# Box binaries up to 2026-10-20 (webui sha256 6061b907...) were built with
+# Homebrew Zig 0.16.0_1 (clang/LLD 21.1.8), which Homebrew no longer serves.
+# Official Zig 0.16.0 rebuilds them with identical code and data; only the
+# .comment compiler stamp differs, so compare such builds after
+# `llvm-objcopy --remove-section=.comment`.
 #
 # No absolute private defaults are baked in: both are supplied via
 # environment variables (or the caller's PATH for WEBUI_ZIG).
-#
-# Homebrew no longer serves Zig 0.16.0_1. Official Zig 0.16.0 builds
-# codex_webui with byte-identical .text/.rodata/.data/.eh_frame/.pdr; only
-# the 20-byte .comment compiler stamp differs. To verify without the
-# Homebrew build, compare both files after
-# `llvm-objcopy --remove-section=.comment`.
 # ---------------------------------------------------------------------------
 
 #: expected output digests (fail closed on any mismatch)
-WEBUI_EXPECT_SHA256=6061b907bde87592dce5f7e4fd74233b8f97666d1509eb43ae7125a780f020a4
-WEBUI_EXPECT_SIZE=946744
+WEBUI_EXPECT_SHA256=d1984e4f17fc0d7562e179141744fbd93300b372c63f2f5f331c0ac1bf79637e
+WEBUI_EXPECT_SIZE=946724
 PAIR_EXPECT_SHA256=563c6c58a3629edfebd7ec30ebcf14e6384a2d84e89669b1d7c3d79c75b619c8
 PAIR_EXPECT_SIZE=111796
 BTHID_EXPECT_SHA256=c6a3c4cd0db3aab1bbdc92ae22e3ae2ffe11d442ac7fe0920b46a6da0b5cef13
@@ -71,11 +66,11 @@ HBUS_EXPECT_SHA256=4be9e6ac2e09e7eb052f9c47e81480d1e32aee7190bedb6ef7f932cf07aab
 HBUS_EXPECT_SIZE=74660
 
 #: pinned executable SHA-256 for each Zig distribution
-WEBUI_ZIG_SHA256=0bfa8cb6f5f64c6d645e1d5dfb5c6f62c2b79d7249c3f38a279e118cb49b02ae
+WEBUI_ZIG_SHA256=e6cd688d25664983833aae272f501d4bceeae304875b8f1741209d15fd13a4ec
 OFFICIAL_ZIG_SHA256=e6cd688d25664983833aae272f501d4bceeae304875b8f1741209d15fd13a4ec
 
 #: pinned clang/LLD fingerprint (first line of `zig cc --version`)
-WEBUI_ZIG_FINGERPRINT="Homebrew clang version 21.1.8"
+WEBUI_ZIG_FINGERPRINT="clang version 21.1.0"
 OFFICIAL_ZIG_FINGERPRINT="clang version 21.1.0"
 
 sha256_of() {
@@ -122,7 +117,7 @@ check_zig() {
 }
 
 # ---------------------------------------------------------------------------
-# codex_webui — Homebrew Zig 0.16.0_1 (clang/LLD 21.1.8), mips32r2.
+# codex_webui — Official Zig 0.16.0 (clang/LLD 21.1.0), mips32r2.
 # ---------------------------------------------------------------------------
 WEBUI_ZIG=${WEBUI_ZIG:-$(command -v zig || true)}
 check_zig "WEBUI_ZIG" "$WEBUI_ZIG" "$WEBUI_ZIG_SHA256" "$WEBUI_ZIG_FINGERPRINT"

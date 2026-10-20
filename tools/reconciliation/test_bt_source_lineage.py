@@ -116,7 +116,7 @@ HBUS_COMPILE_LINE = (
 HBUS_OUTPUT_LINE = "-o build/output/codex_hbus"
 #: dual-Zig non-interchangeability pins
 WEBUI_ZIG_SHA256 = (
-    "0bfa8cb6f5f64c6d645e1d5dfb5c6f62c2b79d7249c3f38a279e118cb49b02ae")
+    "e6cd688d25664983833aae272f501d4bceeae304875b8f1741209d15fd13a4ec")
 OFFICIAL_ZIG_SHA256 = (
     "e6cd688d25664983833aae272f501d4bceeae304875b8f1741209d15fd13a4ec")
 
@@ -225,15 +225,14 @@ class OfflineLineageTests(unittest.TestCase):
         self.assertIn(HBUS_OUTPUT_LINE, script)
         self.assertIn("payload/source/codex_hbus.c", script)
 
-    def test_build_script_dual_zig_non_interchangeable(self):
+    def test_build_script_pins_official_zig_for_webui_and_helpers(self):
         script = self.setUp_build_script()
         self.assertIn(WEBUI_ZIG_SHA256, script)
         self.assertIn(OFFICIAL_ZIG_SHA256, script)
         self.assertIn("WEBUI_ZIG", script)
         self.assertIn("OFFICIAL_ZIG", script)
-        # distinct fingerprints
-        self.assertIn("Homebrew clang version 21.1.8", script)
-        self.assertIn("clang version 21.1.0", script)
+        self.assertIn('WEBUI_ZIG_FINGERPRINT="clang version 21.1.0"', script)
+        self.assertIn('OFFICIAL_ZIG_FINGERPRINT="clang version 21.1.0"', script)
 
     def test_hbus_source_lineage_pinned(self):
         path = os.path.join(SOURCE_DIR, "codex_hbus.c")

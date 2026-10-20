@@ -7,7 +7,7 @@ ARG VCS_REF="d87cebafdee36ec33f1e4ea3055239dbfea6aa09"
 
 LABEL org.opencontainers.image.title="Harmony Hub Control for Unraid" \
       org.opencontainers.image.description="One-time Harmony Hub Control installer with a persistent LAN web proxy" \
-      org.opencontainers.image.source="https://github.com/Ripthulhu/harmony-hub-control" \
+      org.opencontainers.image.source="https://github.com/schlambos/harmony-hub-control" \
       org.opencontainers.image.revision="${VCS_REF}" \
       org.opencontainers.image.created="${BUILD_DATE}"
 
