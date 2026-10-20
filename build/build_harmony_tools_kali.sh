@@ -50,11 +50,17 @@ STRIP=mips-buildroot-linux-uclibc-strip
 #
 # No absolute private defaults are baked in: both are supplied via
 # environment variables (or the caller's PATH for WEBUI_ZIG).
+#
+# Homebrew no longer serves Zig 0.16.0_1. Official Zig 0.16.0 builds
+# codex_webui with byte-identical .text/.rodata/.data/.eh_frame/.pdr; only
+# the 20-byte .comment compiler stamp differs. To verify without the
+# Homebrew build, compare both files after
+# `llvm-objcopy --remove-section=.comment`.
 # ---------------------------------------------------------------------------
 
 #: expected output digests (fail closed on any mismatch)
-WEBUI_EXPECT_SHA256=c400173bb42f735734c522556c69f6c80f0604949413eb974c7b361b9e4ac11a
-WEBUI_EXPECT_SIZE=906872
+WEBUI_EXPECT_SHA256=6061b907bde87592dce5f7e4fd74233b8f97666d1509eb43ae7125a780f020a4
+WEBUI_EXPECT_SIZE=946744
 PAIR_EXPECT_SHA256=563c6c58a3629edfebd7ec30ebcf14e6384a2d84e89669b1d7c3d79c75b619c8
 PAIR_EXPECT_SIZE=111796
 BTHID_EXPECT_SHA256=c6a3c4cd0db3aab1bbdc92ae22e3ae2ffe11d442ac7fe0920b46a6da0b5cef13

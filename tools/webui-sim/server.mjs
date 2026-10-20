@@ -300,7 +300,6 @@ function handleActivitySync(res) {
     remoteRefreshed: true,
     syncQueued: false,
     synced: false,
-    activityEngineReady: true,
     revision: state.revision,
     message: "The local activity engine and paired-remote configuration revision were refreshed.",
     reply: JSON.stringify({ code: 200, msg: "OK", simulated: true })

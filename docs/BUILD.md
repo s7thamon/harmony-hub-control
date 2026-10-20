@@ -21,7 +21,7 @@ exact SHA-256 digests and sizes are:
 
 | Binary | Size | SHA-256 |
 | --- | --- | --- |
-| `codex_webui` | 906872 | `c400173bb42f735734c522556c69f6c80f0604949413eb974c7b361b9e4ac11a` |
+| `codex_webui` | 946744 | `6061b907bde87592dce5f7e4fd74233b8f97666d1509eb43ae7125a780f020a4` |
 | `codex_hbus` | 74660 | `4be9e6ac2e09e7eb052f9c47e81480d1e32aee7190bedb6ef7f932cf07aab8f9` |
 
 The remaining six binaries (`codex_bt_pair_agent`, `codex_bthid_keyboard`,
@@ -61,9 +61,18 @@ Pinned source blobs:
 ```
 
 Result must be `ELF 32-bit MSB executable, MIPS, MIPS32 rel2, statically
-linked, stripped`, size 906872, SHA-256
-`c400173bb42f735734c522556c69f6c80f0604949413eb974c7b361b9e4ac11a`.
-A 778408-byte or 541264-byte result is not the product.
+linked, stripped`, size 946744, SHA-256
+`6061b907bde87592dce5f7e4fd74233b8f97666d1509eb43ae7125a780f020a4`.
+A 906872-, 778408- or 541264-byte result is not the product.
+
+Homebrew no longer serves Zig 0.16.0_1. Official Zig 0.16.0 produces the same
+binary except for the 20-byte `.comment` compiler stamp, so verify with:
+
+```sh
+llvm-objcopy --remove-section=.comment build/output/codex_webui a.nc
+llvm-objcopy --remove-section=.comment payload/bin/codex_webui b.nc
+cmp a.nc b.nc
+```
 
 ### codex_hbus (Official Zig, `-mcpu=mips32`)
 
@@ -122,11 +131,11 @@ cd build
 
 It downloads the Bootlin MIPS uClibc toolchain and Dropbear source into
 `build/toolchains/` and `build/tmp/`, then writes fresh binaries to
-`build/output/`. Do **not** run `tools/embed_activity_ui.sh` or
-`tools/package_harmony_shell.sh` before a live-box webui rebuild: regenerating
-`activity_ui_assets.h` or `harmony_shell_assets.h` will not reproduce the
-906872-byte product binary. Use the pinned source blobs and the Homebrew Zig
-recipe above.
+`build/output/`. The committed `harmony_shell_assets.h` is the output of
+`tools/package_harmony_shell.sh` (bun 1.3.14) over `tools/webui-sim/public/`,
+so regenerating it is a no-op. Do **not** run `tools/embed_activity_ui.sh`
+before a live-box webui rebuild: regenerating `activity_ui_assets.h` will not
+reproduce the product binary.
 
 Deploy `codex_webui` and `codex_hbus` from the same build. Activity resource
 updates use the fail-closed `payload/activity/codexactivity.lua` plugin and a

@@ -16,9 +16,9 @@ distributions are required and are NOT interchangeable:
 The exact source tuples (from the verified webui-repro and
 zig-distribution-sweep pilot reports):
 
-  codex_webui.c          aa173f177b8ac10270372a126b5b1d4bab41df9c
+  codex_webui.c          170ce1168f26a82f1e6c29f3aeaa4106f072677e (box 2026-10-20)
   activity_ui_assets.h   5dad607f7c09a0d5cc0034969b76e6c5df1eb2bc
-  harmony_shell_assets.h ba6c4ce95dec58429ed965961904a1ac1cf7755c
+  harmony_shell_assets.h 1073d7aac48d951d68a61d7b87a548c23327fc39 (box 2026-10-20)
   remote_skin_jpg.h      419611c5ff0713f1f5de2dd684d699f6d77238d5
   codex_hbus.c           d2bbcdef214369bff3dacf1836d6b5a0057f5ede (309cec3)
 
@@ -75,9 +75,9 @@ BUILD_SCRIPT = os.path.join(REPO_ROOT, "build", "build_harmony_tools_kali.sh")
 #: constants from the verified pilot reports.
 PINNED_SOURCES = {
     "codex_webui.c": (
-        "aa173f177b8ac10270372a126b5b1d4bab41df9c",
-        "8a4e536f8997c5b9b483c123633a6dde386c51f69f66ab7544357b4c32f54e5c",
-        519094,
+        "170ce1168f26a82f1e6c29f3aeaa4106f072677e",
+        "e0125a72c9128770096ce5170dd8989c6faabcef0132b720da8f91c40a983928",
+        522925,
     ),
     "activity_ui_assets.h": (
         "5dad607f7c09a0d5cc0034969b76e6c5df1eb2bc",
@@ -85,9 +85,9 @@ PINNED_SOURCES = {
         502204,
     ),
     "harmony_shell_assets.h": (
-        "ba6c4ce95dec58429ed965961904a1ac1cf7755c",
-        "967d1e44f267b8713a5b411f9f1eeefebaf51268110676c0c317cb5b965390e5",
-        1126675,
+        "1073d7aac48d951d68a61d7b87a548c23327fc39",
+        "9cbc1ac4a08aa5789560fc89f7c591c3607b600246052c774d598bcfe33ac006",
+        1312443,
     ),
     "remote_skin_jpg.h": (
         "419611c5ff0713f1f5de2dd684d699f6d77238d5",
@@ -104,8 +104,8 @@ PINNED_SOURCES = {
 #: exact live binary targets (verified pilot reports)
 TARGETS = {
     "codex_webui": (
-        "c400173bb42f735734c522556c69f6c80f0604949413eb974c7b361b9e4ac11a",
-        906872,
+        "6061b907bde87592dce5f7e4fd74233b8f97666d1509eb43ae7125a780f020a4",
+        946744,
     ),
     "codex_bt_pair_agent": (
         "563c6c58a3629edfebd7ec30ebcf14e6384a2d84e89669b1d7c3d79c75b619c8",
