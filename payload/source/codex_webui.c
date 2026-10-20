@@ -27,6 +27,7 @@
 #define WPA_CONFIG "/etc/wpa_supplicant.conf"
 #define HUB_ID_FILE "/data/codex/hub_id"
 #define CLOUD_BLOCKER_CONFIG "/data/codex/cloud_blocker.conf"
+#define TIMEZONE_CONFIG "/data/codex/timezone.conf"
 #define WEBUI_AUTH_CONFIG "/data/codex/webui_auth.conf"
 #define UPDATE_STATE_CONFIG "/data/codex/update_state.conf"
 #define DEVICE_LIST "/data/resources/DeviceList.json"
@@ -951,6 +952,42 @@ static void send_file_download(int fd, const char *path, const char *filename, c
     send_all(fd, hdr, strlen(hdr));
     send_all(fd, data, len);
     free(data);
+}
+
+/* The IANA name and POSIX TZ rule come from the browser's tz table; accept
+   only the characters tzdata uses so they are safe to store and parse. */
+static int safe_tz_value(const char *s, const char *extra, size_t max) {
+    size_t n = strlen(s);
+    if (n == 0 || n > max) return 0;
+    for (; *s; s++) {
+        if (!isalnum((unsigned char)*s) && !strchr(extra, *s)) return 0;
+    }
+    return 1;
+}
+
+/* netservicestarter.lua reads this (zone, then rule) to answer the activity
+   engine's TimeServer requests offline. An empty zone clears it. */
+static int save_timezone(const char *zone, const char *posix) {
+    char data[192];
+    if (!zone[0]) {
+        if (unlink(TIMEZONE_CONFIG) != 0 && errno != ENOENT) return -1;
+        return 0;
+    }
+    snprintf(data, sizeof(data), "%s\n%s", zone, posix);
+    if (write_file_atomic(TIMEZONE_CONFIG, data, strlen(data)) != 0) return -1;
+    chmod(TIMEZONE_CONFIG, 0644);
+    return 0;
+}
+
+static void send_timezone_download(int fd) {
+    char hdr[512], body[192];
+    if (read_text(TIMEZONE_CONFIG, body, sizeof(body)) <= 0) body[0] = 0;
+    snprintf(hdr, sizeof(hdr),
+        "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: %lu\r\n"
+        "Cache-Control: no-store\r\nConnection: close\r\n\r\n",
+        (unsigned long)strlen(body));
+    send_all(fd, hdr, strlen(hdr));
+    send_all(fd, body, strlen(body));
 }
 
 static void send_cloud_download(int fd) {
@@ -6057,6 +6094,22 @@ static void handle_system(int fd, const struct request *req) {
             return;
         }
         render_page(fd, cfg.enabled ? "Web UI sign-in enabled. Your browser may ask you to sign in again on the next page load." : "Web UI sign-in disabled.");
+    } else if (strcmp(action, "timezone") == 0) {
+        char zone[72], posix[96];
+        form_value(req->body, "timezone", zone, sizeof(zone));
+        form_value(req->body, "tzPosix", posix, sizeof(posix));
+        chomp(zone);
+        chomp(posix);
+        if (zone[0] && (!safe_tz_value(zone, "_+-/", 64) ||
+                        !safe_tz_value(posix, "<>+-,.:/", 80))) {
+            render_page(fd, "That time zone is not valid.");
+            return;
+        }
+        if (save_timezone(zone, posix) != 0) {
+            render_page(fd, "Failed to save the time zone.");
+            return;
+        }
+        render_page(fd, zone[0] ? "Time zone saved. Schedules and sunrise/sunset use it within a minute." : "Time zone cleared.");
     } else if (strcmp(action, "rediscover") == 0) {
         trigger_mqtt_discover();
         render_page(fd, "MQTT discovery reload requested.");
@@ -8636,6 +8689,8 @@ static void handle_client(int client) {
         send_file_download(client, WPA_CONFIG, "wpa_supplicant.conf", "text/plain");
     } else if (strcmp(req.method, "GET") == 0 && strcmp(req.path, "/export/cloud") == 0) {
         send_cloud_download(client);
+    } else if (strcmp(req.method, "GET") == 0 && strcmp(req.path, "/export/timezone") == 0) {
+        send_timezone_download(client);
     } else if (strcmp(req.method, "GET") == 0 && strcmp(req.path, "/export/bluetooth") == 0) {
         send_bt_devices_download(client);
     } else if (strcmp(req.method, "POST") == 0 && strcmp(req.path, "/mqtt") == 0) {

@@ -31,7 +31,13 @@ import {
   formatBytes,
   updateCheckSummary,
   missingBinariesRemedy,
+  browserTimeZone,
+  parseTimezoneConf,
+  preferredTimeZone,
+  timezoneFormFields,
+  timezoneSummary,
 } from "./system-model.js";
+import { TZ_POSIX } from "../tz-posix.js";
 
 export function createSystemView(section) {
   /* ---- state ---------------------------------------------------------- */
@@ -44,6 +50,8 @@ export function createSystemView(section) {
   let updateStatusError = null;
   let checkState = null;
   let checkStateError = null;
+  let savedZone; // undefined = not read yet, null = unset, else { zone, posix }
+  let zoneError = null;
   const disarms = []; // guard teardowns run on onHide
 
   const els = {};
@@ -100,6 +108,17 @@ export function createSystemView(section) {
     renderCloud();
   }
 
+  async function loadTimezone() {
+    zoneError = null;
+    try {
+      savedZone = parseTimezoneConf(await getText("/export/timezone"));
+    } catch (error) {
+      savedZone = undefined;
+      zoneError = error;
+    }
+    renderTimezone();
+  }
+
   async function loadUpdate() {
     const [statusRes, checkRes] = await Promise.allSettled([
       getJson("/api/update-status"),
@@ -115,6 +134,7 @@ export function createSystemView(section) {
   function refreshAll() {
     loadProbe();
     loadCloud();
+    loadTimezone();
     loadUpdate();
   }
 
@@ -127,6 +147,21 @@ export function createSystemView(section) {
       await loadCloud(); // authoritative re-read of /export/cloud
     } catch (error) {
       setResult(els.cloudResult, "error", `Could not enable the cloud blocker: ${error.message}`);
+    }
+  }
+
+  async function saveTimezone() {
+    const fields = timezoneFormFields(els.zoneSelect.value);
+    if (!fields) {
+      setResult(els.zoneResult, "error", "Pick a time zone from the list.");
+      return;
+    }
+    try {
+      const res = await postHubForm("/system", fields);
+      setResult(els.zoneResult, "ok", res.msg || "Time zone saved.");
+      await loadTimezone();
+    } catch (error) {
+      setResult(els.zoneResult, "error", `Could not save the time zone: ${error.message}`);
     }
   }
 
@@ -313,6 +348,19 @@ export function createSystemView(section) {
     els.cloudState.appendChild(cloudPanelState(cloudOn).live ? els.cloudLive : els.cloudOff);
   }
 
+  function renderTimezone() {
+    if (zoneError) {
+      els.zoneState.textContent = `Could not read the hub's time zone: ${zoneError.message}`;
+      return;
+    }
+    if (savedZone === undefined) {
+      els.zoneState.textContent = "Reading the hub's time zone…";
+      return;
+    }
+    els.zoneState.textContent = timezoneSummary(savedZone);
+    els.zoneSelect.value = preferredTimeZone(savedZone, browserTimeZone());
+  }
+
   function renderUpdate() {
     clear(els.checkSummary);
     if (checkStateError) {
@@ -395,6 +443,34 @@ export function createSystemView(section) {
     ],
   });
   section.appendChild(panel("Cloud egress", null, [els.cloudState, els.cloudResult]));
+
+  /* Time zone (schedules, sunrise/sunset, the time shown on remotes) */
+  const thisBrowserZone = browserTimeZone();
+  els.zoneState = el("p", { className: "mini", text: "Reading the hub's time zone…" });
+  els.zoneResult = el("div", { className: "setup-status" });
+  els.zoneSelect = el("select", { attrs: { id: "systemTimeZone", "aria-label": "Time zone" } });
+  for (const zone of Object.keys(TZ_POSIX)) {
+    els.zoneSelect.appendChild(
+      el("option", { text: zone === thisBrowserZone ? `${zone} (this browser)` : zone, attrs: { value: zone } }),
+    );
+  }
+  els.zoneSelect.value = thisBrowserZone || "UTC";
+  els.zoneSaveBtn = el("button", { className: "btn btn-secondary", text: "Save time zone", attrs: { type: "button" } });
+  els.zoneSaveBtn.addEventListener("click", saveTimezone);
+  section.appendChild(
+    panel("Time zone", null, [
+      els.zoneState,
+      el("div", {
+        children: [el("label", { text: "Time zone", attrs: { for: "systemTimeZone" } }), els.zoneSelect],
+      }),
+      el("p", {
+        className: "setup-field-hint",
+        text: "Your browser's zone is preselected. The hub clock stays in UTC; this sets the local time used by schedules, sunrise/sunset triggers, and the time shown on remotes.",
+      }),
+      el("div", { className: "setup-actions", children: [els.zoneSaveBtn] }),
+      els.zoneResult,
+    ]),
+  );
 
   /* Sign-in */
   els.authModeLine = el("p", { className: "mini", text: "Current mode: reading…" });

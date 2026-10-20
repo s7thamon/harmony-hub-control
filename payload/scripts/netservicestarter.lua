@@ -81,6 +81,243 @@ local function isCloudHost(url)
   return false
 end
 
+-- Offline time zone. The activity engine takes its UTC offset (schedules,
+-- sunrise/sunset, the digest tz the remotes display) from Logitech's
+-- TimeServer/zone, and only counts the clock as set after TimeServer/current
+-- answers. With the blocker on, answer both locally: the zone comes from the
+-- web UI (TIMEZONE_CONF: IANA name, then its POSIX TZ rule). The hub's libc
+-- stays on UTC, which the stock schedule code assumes.
+local TIMEZONE_CONF = "/data/codex/timezone.conf"
+local MONTH_DAYS = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31}
+
+local function parseTzName(s, i)
+  if string.sub(s, i, i) == "<" then
+    local j = string.find(s, ">", i + 1, true)
+    if not j or j == i + 1 then
+      return nil
+    end
+    return string.sub(s, i + 1, j - 1), j + 1
+  end
+  local name = string.match(s, "^%a%a%a+", i)
+  if not name then
+    return nil
+  end
+  return name, i + #name
+end
+
+-- [+-]hh[:mm[:ss]] -> seconds
+local function parseTzTime(s, i)
+  local sign, hours, j = string.match(s, "^([+-]?)(%d+)()", i)
+  if not hours then
+    return nil
+  end
+  local seconds = tonumber(hours) * 3600
+  local minutes, k = string.match(s, "^:(%d+)()", j)
+  if minutes then
+    seconds = seconds + tonumber(minutes) * 60
+    j = k
+    local secs, l = string.match(s, "^:(%d+)()", j)
+    if secs then
+      seconds = seconds + tonumber(secs)
+      j = l
+    end
+  end
+  if sign == "-" then
+    seconds = -seconds
+  end
+  return seconds, j
+end
+
+-- Mm.w.d | Jn | n, then an optional /time (default 02:00)
+local function parseTzRule(s, i)
+  local rule = {time = 7200}
+  local m, w, d, j = string.match(s, "^M(%d+)%.(%d)%.(%d)()", i)
+  if m then
+    rule.kind, rule.m, rule.w, rule.d = "M", tonumber(m), tonumber(w), tonumber(d)
+    if rule.m < 1 or rule.m > 12 then
+      return nil
+    end
+  else
+    local n
+    n, j = string.match(s, "^J(%d+)()", i)
+    if n then
+      rule.kind, rule.n = "J", tonumber(n)
+    else
+      n, j = string.match(s, "^(%d+)()", i)
+      if not n then
+        return nil
+      end
+      rule.kind, rule.n = "n", tonumber(n)
+    end
+  end
+  if string.sub(s, j, j) == "/" then
+    local t
+    t, j = parseTzTime(s, j + 1)
+    if not t then
+      return nil
+    end
+    rule.time = t
+  end
+  return rule, j
+end
+
+-- Offsets are stored east-positive (POSIX writes them west-positive).
+local function parsePosixTz(s)
+  if type(s) ~= "string" or #s > 80 then
+    return nil
+  end
+  local tz, i, offset = {}
+  tz.std, i = parseTzName(s, 1)
+  if not tz.std then
+    return nil
+  end
+  offset, i = parseTzTime(s, i)
+  if not offset then
+    return nil
+  end
+  tz.stdOffset = -offset
+  if i > #s then
+    return tz
+  end
+  tz.dst, i = parseTzName(s, i)
+  if not tz.dst then
+    return nil
+  end
+  tz.dstOffset = tz.stdOffset + 3600
+  if string.sub(s, i, i) ~= "," then
+    offset, i = parseTzTime(s, i)
+    if not offset then
+      return nil
+    end
+    tz.dstOffset = -offset
+  end
+  -- tzdata always spells the rules out; no implied US defaults
+  if string.sub(s, i, i) ~= "," then
+    return nil
+  end
+  tz.start, i = parseTzRule(s, i + 1)
+  if not tz.start or string.sub(s, i, i) ~= "," then
+    return nil
+  end
+  tz.finish, i = parseTzRule(s, i + 1)
+  if not tz.finish or i <= #s then
+    return nil
+  end
+  return tz
+end
+
+local function daysFromCivil(y, m, d)
+  if m <= 2 then
+    y = y - 1
+  end
+  local era = math.floor(y / 400)
+  local yoe = y - era * 400
+  local doy = math.floor((153 * ((m + 9) % 12) + 2) / 5) + d - 1
+  return era * 146097 + yoe * 365 + math.floor(yoe / 4) - math.floor(yoe / 100) + doy - 719468
+end
+
+local function isLeapYear(y)
+  return (y % 4 == 0 and y % 100 ~= 0) or y % 400 == 0
+end
+
+-- day number (since 1970-01-01) the rule falls on in year y
+local function ruleDay(rule, y)
+  if rule.kind == "M" then
+    local first = daysFromCivil(y, rule.m, 1)
+    local day = 1 + (rule.d - (first + 4) % 7) % 7 + (rule.w - 1) * 7
+    local monthDays = MONTH_DAYS[rule.m] + ((rule.m == 2 and isLeapYear(y)) and 1 or 0)
+    while day > monthDays do
+      day = day - 7
+    end
+    return first + day - 1
+  elseif rule.kind == "J" then
+    local n = rule.n
+    if isLeapYear(y) and n >= 60 then
+      n = n + 1
+    end
+    return daysFromCivil(y, 1, 1) + n - 1
+  end
+  return daysFromCivil(y, 1, 1) + rule.n
+end
+
+-- abbreviation and offset in force at UTC time t, and the next change
+local function tzStateAt(tz, t)
+  if not tz.dst then
+    return tz.std, tz.stdOffset, nil
+  end
+  local year = tonumber(os.date("!%Y", t))
+  local changes = {}
+  for y = year - 1, year + 1 do
+    changes[#changes + 1] = {
+      at = ruleDay(tz.start, y) * 86400 + tz.start.time - tz.stdOffset,
+      name = tz.dst,
+      offset = tz.dstOffset
+    }
+    changes[#changes + 1] = {
+      at = ruleDay(tz.finish, y) * 86400 + tz.finish.time - tz.dstOffset,
+      name = tz.std,
+      offset = tz.stdOffset
+    }
+  end
+  table.sort(changes, function(a, b)
+    return a.at < b.at
+  end)
+  local current, nextChange
+  for _, change in ipairs(changes) do
+    if change.at <= t then
+      current = change
+    elseif not nextChange then
+      nextChange = change
+    end
+  end
+  return current.name, current.offset, nextChange
+end
+
+local function readTimezoneConf()
+  local f = io.open(TIMEZONE_CONF, "r")
+  if not f then
+    return nil
+  end
+  local zone = f:read("*l")
+  local posix = f:read("*l")
+  f:close()
+  if not zone or zone == "" or not parsePosixTz(posix) then
+    return nil
+  end
+  return {zone = zone, posix = posix}
+end
+
+-- TimeServer/zone reply shape, as stored in activityengine context.timezone
+local function timezoneReply(conf)
+  local name, offset, nextChange = tzStateAt(parsePosixTz(conf.posix), os.time())
+  local zone = {
+    tz = conf.posix,
+    current = {[name] = {offset = offset}}
+  }
+  if nextChange then
+    zone.next = {[nextChange.name] = {nextStart = nextChange.at, offset = nextChange.offset}}
+  end
+  return {timezone = zone}
+end
+
+local function localTimeServerReply(url)
+  local path = string.match(url, "^%a+://[^/]+(/[^?#]*)")
+  if path == "/time/current" then
+    -- only once NTP has set the clock; before that, keep failing
+    if os.time() < NTP_MIN_VALID then
+      return nil
+    end
+    return {utc = os.date("!%Y-%m-%d %H:%M:%S")}
+  end
+  if path and string.find(path, "^/time/zone/") then
+    local conf = readTimezoneConf()
+    if conf then
+      return timezoneReply(conf)
+    end
+  end
+  return nil
+end
+
 local function installCloudHttpGuard()
   if http.__codexCloudGuard then
     return
@@ -89,6 +326,18 @@ local function installCloudHttpGuard()
   http.request = function(req, body)
     local url = type(req) == "table" and req.url or req
     if isCloudHost(url) and cloudBlockerEnabled() then
+      local reply = localTimeServerReply(url)
+      if reply then
+        local encoded = json.encode(reply)
+        if type(req) ~= "table" then
+          return encoded, 200, {}
+        end
+        if req.sink then
+          req.sink(encoded)
+          req.sink(nil)
+        end
+        return 1, 200, {}
+      end
       log.notice("codex cloud blocker refused", url)
       return nil, "host not found"
     end
@@ -208,6 +457,40 @@ local function syncClockOnce()
     end
   end
   return false
+end
+
+-- Apply a time zone saved from the web UI without waiting for the activity
+-- engine's own refresh (it only refetches when the previous zone's next
+-- change has passed). All luaworks tasks share one Lua state, so the
+-- activity engine's context and timemanager are the same module tables.
+local timezoneWatchTask
+
+local function startTimezoneWatch()
+  if timezoneWatchTask and system.taskStatus(timezoneWatchTask) ~= "dead" then
+    return
+  end
+  timezoneWatchTask = system.addTask("codex timezone watch", function()
+    local applied
+    while true do
+      system.sleep(30000)
+      local conf = readTimezoneConf()
+      local key = conf and (conf.zone .. "\n" .. conf.posix)
+      if key and key ~= applied and system.isMessageRegistered("process_activity") then
+        local context = require("tasks.activityengine.core.contextmanager").getContext()
+        if context and context.clockinitialized then
+          applied = key
+          -- one-off task: an error here must not stop the watcher
+          system.addTask("codex timezone apply", function()
+            local timeMgr = require("tasks.activityengine.core.timemanager")
+            context.timezoneid = context.timezoneid or conf.zone
+            timeMgr.updateTimezone(context, true)
+            timeMgr.updateSunTimes(context)
+            log.notice("codex timezone applied:", conf.zone, conf.posix)
+          end)
+        end
+      end
+    end
+  end)
 end
 
 local function startTimeSync()
@@ -551,6 +834,7 @@ local function handleEvent(event)
 
     if event.label ~= "lo" then
       startTimeSync()
+      startTimezoneWatch()
       maybeStartCloudTasks()
       system.broadcastMessageExceptMeNoWarning(MSG_NETSERVICE_NEW_ADDRESS, {
         label = event.label,

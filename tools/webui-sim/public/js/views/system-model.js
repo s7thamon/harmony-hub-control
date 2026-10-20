@@ -14,6 +14,8 @@
      password value itself is never returned, formatted, or described by
      anything in this module. */
 
+import { TZ_POSIX, TZ_ALIASES } from "../tz-posix.js";
+
 /** R2 as data. blockerOn=true → live/safe, nothing to do. blockerOn=false →
     warn, and the single offered action is to turn the block back on. */
 export function cloudPanelState(blockerOn) {
@@ -195,4 +197,53 @@ export function missingBinariesRemedy(files) {
     "Re-run the host installer (install_webui.py / install_webui.ps1) so every MANIFEST.txt binary is uploaded — " +
     "browser self-update is disabled and will not restore a missing install."
   );
+}
+
+/* ---- time zone ---------------------------------------------------------
+   The hub has no zoneinfo, so the page sends the chosen zone's POSIX rule
+   with its name (action=timezone). codex_webui stores both in
+   /data/codex/timezone.conf; netservicestarter.lua turns the rule into the
+   offsets the stock activity engine uses for schedules and sunrise/sunset. */
+
+/** Canonical zone for a name, following legacy aliases; null if unknown. */
+export function canonicalTimeZone(zone, table = TZ_POSIX, aliases = TZ_ALIASES) {
+  if (typeof zone !== "string" || !zone) return null;
+  if (Object.prototype.hasOwnProperty.call(table, zone)) return zone;
+  const target = aliases[zone];
+  return target && Object.prototype.hasOwnProperty.call(table, target) ? target : null;
+}
+
+/** The browser's own zone, canonicalised; null when unknown or unsupported. */
+export function browserTimeZone(intl = globalThis.Intl, table = TZ_POSIX, aliases = TZ_ALIASES) {
+  let zone = null;
+  try {
+    zone = intl.DateTimeFormat().resolvedOptions().timeZone;
+  } catch {
+    return null;
+  }
+  return canonicalTimeZone(zone, table, aliases);
+}
+
+/** Parse GET /export/timezone ("zone\nrule\n"); null when unset. */
+export function parseTimezoneConf(text) {
+  const [zone = "", posix = ""] = String(text ?? "").replace(/\r/g, "").split("\n").map((s) => s.trim());
+  return zone && posix ? { zone, posix } : null;
+}
+
+/** Zone to preselect: the saved one, else this browser's, else UTC. */
+export function preferredTimeZone(saved, browserZone, table = TZ_POSIX, aliases = TZ_ALIASES) {
+  return canonicalTimeZone(saved?.zone, table, aliases) || browserZone || "UTC";
+}
+
+/** Form fields for POST /system; null when the zone is not in the table. */
+export function timezoneFormFields(zone, table = TZ_POSIX) {
+  if (!Object.prototype.hasOwnProperty.call(table, zone)) return null;
+  return { action: "timezone", timezone: zone, tzPosix: table[zone] };
+}
+
+/** One-line description of the saved setting. */
+export function timezoneSummary(saved) {
+  return saved
+    ? `Hub time zone: ${saved.zone}`
+    : "No time zone set: schedules and sunrise/sunset triggers cannot run until one is saved.";
 }

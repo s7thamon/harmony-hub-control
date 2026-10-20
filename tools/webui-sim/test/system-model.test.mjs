@@ -266,3 +266,111 @@ describe("updateCheckSummary", () => {
     assert.ok(s.includes("via manual"));
   });
 });
+import {
+  canonicalTimeZone,
+  browserTimeZone,
+  parseTimezoneConf,
+  preferredTimeZone,
+  timezoneFormFields,
+  timezoneSummary,
+} from "../public/js/views/system-model.js";
+import { TZ_POSIX, TZ_ALIASES } from "../public/js/tz-posix.js";
+
+describe("time zone table", () => {
+  it("carries POSIX rules for well-known zones", () => {
+    assert.equal(TZ_POSIX["America/New_York"], "EST5EDT,M3.2.0,M11.1.0");
+    assert.equal(TZ_POSIX["Europe/London"], "GMT0BST,M3.5.0/1,M10.5.0");
+    assert.equal(TZ_POSIX["Asia/Kolkata"], "IST-5:30");
+    assert.equal(TZ_POSIX.UTC, "UTC0");
+  });
+
+  it("only holds names and rules the hub accepts (codex_webui safe_tz_value)", () => {
+    for (const [zone, rule] of Object.entries(TZ_POSIX)) {
+      assert.match(zone, /^[A-Za-z0-9_+\/-]{1,64}$/, zone);
+      assert.match(rule, /^[A-Za-z0-9<>+,.:\/-]{1,80}$/, `${zone}: ${rule}`);
+    }
+  });
+
+  it("maps every alias to a zone in the table", () => {
+    for (const [alias, zone] of Object.entries(TZ_ALIASES)) {
+      assert.ok(Object.hasOwn(TZ_POSIX, zone), `${alias} -> ${zone}`);
+    }
+  });
+});
+
+describe("canonicalTimeZone", () => {
+  it("keeps canonical names and follows aliases", () => {
+    assert.equal(canonicalTimeZone("America/New_York"), "America/New_York");
+    assert.equal(canonicalTimeZone("Asia/Calcutta"), "Asia/Kolkata");
+    assert.equal(canonicalTimeZone("US/Eastern"), "America/New_York");
+  });
+
+  it("rejects unknown or empty names", () => {
+    assert.equal(canonicalTimeZone("Mars/Olympus_Mons"), null);
+    assert.equal(canonicalTimeZone(""), null);
+    assert.equal(canonicalTimeZone(undefined), null);
+    assert.equal(canonicalTimeZone("toString"), null);
+  });
+});
+
+describe("browserTimeZone", () => {
+  const fakeIntl = (timeZone) => ({ DateTimeFormat: () => ({ resolvedOptions: () => ({ timeZone }) }) });
+
+  it("returns the browser zone, canonicalised", () => {
+    assert.equal(browserTimeZone(fakeIntl("Europe/Kiev")), "Europe/Kyiv");
+    assert.equal(browserTimeZone(fakeIntl("America/Chicago")), "America/Chicago");
+  });
+
+  it("returns null when Intl is missing or the zone is unknown", () => {
+    assert.equal(browserTimeZone(null), null);
+    assert.equal(browserTimeZone({ DateTimeFormat: () => { throw new Error("no Intl"); } }), null);
+    assert.equal(browserTimeZone(fakeIntl("Nowhere/Land")), null);
+  });
+});
+
+describe("parseTimezoneConf", () => {
+  it("reads zone and rule lines", () => {
+    assert.deepEqual(parseTimezoneConf("America/New_York\nEST5EDT,M3.2.0,M11.1.0\n"), {
+      zone: "America/New_York",
+      posix: "EST5EDT,M3.2.0,M11.1.0",
+    });
+    assert.deepEqual(parseTimezoneConf("UTC\r\nUTC0\r\n"), { zone: "UTC", posix: "UTC0" });
+  });
+
+  it("treats an empty or partial file as unset", () => {
+    assert.equal(parseTimezoneConf(""), null);
+    assert.equal(parseTimezoneConf("America/New_York\n"), null);
+    assert.equal(parseTimezoneConf(null), null);
+  });
+});
+
+describe("preferredTimeZone", () => {
+  it("prefers the saved zone, then the browser's, then UTC", () => {
+    assert.equal(preferredTimeZone({ zone: "Europe/Paris", posix: "x" }, "America/Chicago"), "Europe/Paris");
+    assert.equal(preferredTimeZone(null, "America/Chicago"), "America/Chicago");
+    assert.equal(preferredTimeZone(null, null), "UTC");
+    assert.equal(preferredTimeZone({ zone: "Gone/Zone", posix: "x" }, null), "UTC");
+  });
+});
+
+describe("timezoneFormFields", () => {
+  it("sends the zone with its rule from the table", () => {
+    assert.deepEqual(timezoneFormFields("Australia/Sydney"), {
+      action: "timezone",
+      timezone: "Australia/Sydney",
+      tzPosix: "AEST-10AEDT,M10.1.0,M4.1.0/3",
+    });
+  });
+
+  it("refuses zones outside the table", () => {
+    assert.equal(timezoneFormFields("Nowhere/Land"), null);
+    assert.equal(timezoneFormFields("constructor"), null);
+  });
+});
+
+describe("timezoneSummary", () => {
+  it("names the saved zone or explains what is missing", () => {
+    assert.equal(timezoneSummary({ zone: "UTC", posix: "UTC0" }), "Hub time zone: UTC");
+    assert.match(timezoneSummary(null), /schedules and sunrise\/sunset/);
+  });
+});

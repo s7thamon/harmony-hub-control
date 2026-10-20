@@ -43,7 +43,7 @@ EXACT_PAYLOADS = {
         "72f3ba67f492f51284509b029a5c38c2edccd21e334581438acd4c14708ceb42",
         0o755),
     "payload/scripts/netservicestarter.lua": (
-        "fa7bf9ff1c37c9051e50615d18eee7d19e546d2259b14c761b48ba6d65c93919",
+        "4408036592ff61208936412fa2387915dd481e84191b39ce802ef08a9a6daf4d",
         0o644),
     "payload/activity/codexactivity.lua": (
         "a8d273982e666e2e0af824e491d8c0c4e4a6e169c1f597af4197914bb574d764",
@@ -139,7 +139,7 @@ class TestExactReconstruction(unittest.TestCase):
             "payload/scripts/dropbear": 52,
             "payload/scripts/init.sh": 3569,
             "payload/scripts/offline_egress_guard.sh": 1753,
-            "payload/scripts/netservicestarter.lua": 18698,
+            "payload/scripts/netservicestarter.lua": 26843,
             "payload/activity/codexactivity.lua": 20886,
             "payload/mqtt/codexmqtt.lua": 24405,
         }
@@ -155,7 +155,7 @@ class TestExactReconstruction(unittest.TestCase):
         data = Path(REPO_ROOT, "payload/scripts/netservicestarter.lua").read_bytes()
         # the DIAG instrumentation marker documented in SESSION_HANDOFF
         self.assertIn(b"CODEX DIAG", data)
-        self.assertEqual(len(data), 18698)
+        self.assertEqual(len(data), 26843)
 
     def test_offline_guard_is_committed_lineage(self):
         """Guard bytes equal the committed blob (not a hand-edit)."""

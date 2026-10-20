@@ -443,6 +443,16 @@ function handleExport(res, pathname) {
     res.end(body);
     return;
   }
+  if (pathname === "/export/timezone") {
+    const body = "America/New_York\nEST5EDT,M3.2.0,M11.1.0\n";
+    res.writeHead(200, {
+      "Content-Type": "text/plain; charset=utf-8",
+      "Content-Length": Buffer.byteLength(body),
+      "Cache-Control": "no-store"
+    });
+    res.end(body);
+    return;
+  }
   if (pathname === "/export/bundle") {
     sendJson(res, 200, {
       format: "harmony-owner-bundle-v2",
