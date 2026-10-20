@@ -1137,8 +1137,9 @@ check("harmony_shell_assets.h: generated arrays present and non-empty",
   const decoded = Object.entries(arrays).map(
     ([name, bytes]) => [name, Buffer.from(bytes.filter((b) => b !== 0)).toString("utf8")]
   );
-  const jinaArrays = decoded.filter(([, text]) => /jina/i.test(text)).map(([name]) => name);
-  const jinaInShellJs = /jina/i.test(shellJs);
+  // match the host, not bare "jina" (the tz table has America/Ojinaga)
+  const jinaArrays = decoded.filter(([, text]) => /jina\.ai/i.test(text)).map(([name]) => name);
+  const jinaInShellJs = /jina\.ai/i.test(shellJs);
   check(
     "no r.jina.ai reader fallback in the redesigned shell (shell.js + decoded header arrays)",
     !jinaInShellJs && jinaArrays.length === 0,
