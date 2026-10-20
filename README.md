@@ -234,22 +234,27 @@ Non-interactive, with MQTT disabled:
 python3 install_webui.py --hub-host <hub-ip> --key-path ~/.ssh/harmony_owner_<key-name> --mqtt-disabled --no-prompt
 ```
 
-The installer creates a backup on the hub, then uploads every candidate into
-one private volatile staging tree. Each destination is probed through the
-staged binary's read-only `codex_webui --file-status` maintenance command —
-the hub's BusyBox build has no usable `stat`/`readlink`, so existence, type,
-size, MD5, and mode all come from C syscalls with no-follow path handling.
-The staged C engine then performs capacity-gated, same-directory atomic
-installs: an existing file is a no-op only when both its bytes and the
-canonical requested mode already match, and a mode-only difference is fixed
-through the same temporary-file-plus-rename path, never an in-place `chmod`.
-It runs the new binary's `codex_webui --prune-backups` maintenance mode to
-keep hub backups budget-bounded before any service starts, starts the web UI,
-and writes MQTT config if provided. By default it enables strict offline
-ownership (cloud tasks blocked, WAN route removed, local-only remote sync)
-and reboots the hub once so the guarded handlers load. To stage the cloud
-setting without the install-time reboot, add `-NoApplyCloudRestart`
-(PowerShell) or `--no-apply-cloud-restart` (Python).
+The installer uploads every candidate into one private staging folder in
+RAM (`/var/volatile/codex-install-*`), checks each MD5, and compares it with
+what is already on the hub, so unchanged files are never rewritten. It uses
+only commands the hub's BusyBox actually has (`cat`, `cp`, `mv`, `rm`,
+`chmod`, `mkdir`, `ls -l`, `md5sum`); there is no `mktemp`, `stat`, or `df`.
+
+Because flash free space can't be measured, changed files install in two
+phases. First each is written beside its destination as `<file>.codex-new`
+and verified; if flash fills up, every new copy is removed and nothing live
+has changed. Then each copy is renamed into place, `codex_webui` last.
+Before that, the installer copies the originals into RAM and writes a small
+handoff backup to `/data/codex-backups/webui-handoff-*`, so any later failure
+restores the originals with their previous modes.
+
+It then starts the web UI and writes MQTT config if provided. By default it
+enables strict offline ownership (cloud tasks blocked, WAN route removed,
+local-only remote sync) and reboots the hub once when the cloud-blocker files
+change, so the guarded handlers load. To skip that reboot, add
+`-NoApplyCloudRestart` (PowerShell) or `--no-apply-cloud-restart` (Python).
+`--preflight-only` / `-PreflightOnly` stages, compares, and reports without
+writing anything outside the RAM staging folder.
 
 Then open:
 
@@ -269,56 +274,16 @@ proxy, with a Compose example and an Unraid XML template. See
 
 ### Backup retention on the hub
 
-Hub backups are bounded by byte budgets, not by time or count. The C binary is
-the only component that decides retention: `codex_webui --prune-backups` walks
-the backup roots without following symlinks, accounts each generation by its
-apparent bytes, and deletes eligible generations oldest-first until the
-budgets hold. The normal production startup path runs the same engine before
-the Bluetooth helper and socket bind.
+Backups are kept by count:
 
-Recognized families and strict generation names:
-
-| Family | Directory | Strict name pattern | Family budget |
+| Backups | Directory | Kept | Pruned by |
 | --- | --- | --- | --- |
-| Resource backups | `/data/codex/resource-backups` | bare `YYYYMMDD_HHMMSS` | 768 KiB |
-| Settings backups | `/data/codex/resource-backups` | `settings_YYYYMMDD_HHMMSS` | 64 KiB |
-| Installer handoff | `/data/codex-backups` | `webui-handoff-YYYYMMDD-HHMMSS` | 256 KiB |
-| Update backups | `/data/codex/update-backups` | canonical decimal epoch seconds | 1536 KiB |
+| Resource backups (`YYYYMMDD_HHMMSS`) | `/data/codex/resource-backups` | newest 5 | web UI, each time it writes one |
+| Update backups (decimal epoch seconds) | `/data/codex/update-backups` | newest 3 | web UI, during a software update |
+| Installer handoffs (`webui-handoff-YYYYMMDD-HHMMSS`) | `/data/codex-backups` | newest 3 | installer, after writing a new one |
 
-The combined budget across all families is 2 MiB. Only entries with the exact
-strict names above are generations. Strict-name directories that scan safely
-but hold no regular file are removed as empty/incomplete; unrecognized names
-and recognized-looking non-directories are ignored and never touched. If any
-scan or sizing step is ambiguous, enforcement fails before anything is
-deleted.
-
-The newest valid generation of every non-empty family is protected and is
-never deleted, even when it alone exceeds its budget. If the protected minima
-already exceed a family or the combined budget, all older eligible generations
-are removed and the run reports `over_budget=1`.
-
-Maintenance runs print one stable summary line:
-
-```text
-bytes_before=<N> bytes_after=<N> generations_deleted=<N> protected_generations=<N> over_budget=<0|1> errors=<N>
-```
-
-Exit status is `0` only when `errors=0` and `over_budget=0`; a protected-minimum
-over-budget result or any error exits nonzero. Both installers invoke
-`--prune-backups` right after uploading the new binary and before starting
-services. They surface the summary, continue only for the safe
-`over_budget=1 errors=0` result, and stop on scan or deletion errors. New
-timestamped resource, settings, and handoff generation names are emitted in
-UTC so chronology remains stable across timezone changes.
-
-This is bounded retention, **not** exact JFFS2 free-space enforcement. The
-temporary first-install window and direct-to-`/data` staging exposure are
-resolved by the Step 4A capacity-gated, staged, atomic install path described
-above. A physical-hub run of that path remains **unauthorized**; if it is ever
-explicitly authorized, it must pass `-NoApplyCloudRestart` /
-`--no-apply-cloud-restart` so the run exits before any reboot logic
-(`--preflight-only` / `-PreflightOnly` likewise exits before restart logic,
-without persisting anything).
+Only directories with those exact names are ever removed. Anything else in
+those folders, including hand-made backups, is left alone.
 
 ## How it works
 
