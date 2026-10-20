@@ -588,6 +588,71 @@ local function offlineResourceGet(cmd, verb, params)
   })
 end
 
+-- The remote records "Did the activity start correctly? -> Yes" by dropping
+-- that activity's Alternatives key and PUTting the whole ActivityList. Keep
+-- just that change locally, or the remote asks again on every start; the
+-- rest of the PUT is still discarded. Returns the names of changed activities.
+local function dropConfirmedAlternatives(putList, localList)
+  local confirmed, changed = {}, {}
+  if type(putList) ~= "table" or type(putList.Activities) ~= "table" or
+      type(localList) ~= "table" or type(localList.Activities) ~= "table" then
+    return changed
+  end
+  for _, activity in ipairs(putList.Activities) do
+    if type(activity) == "table" and activity["Id-"] ~= nil and
+        (activity.Alternatives == nil or activity.Alternatives == json.null) then
+      confirmed[tostring(activity["Id-"])] = true
+    end
+  end
+  for _, activity in ipairs(localList.Activities) do
+    if type(activity) == "table" and confirmed[tostring(activity["Id-"])] and
+        activity.Alternatives ~= nil then
+      activity.Alternatives = nil
+      changed[#changed + 1] = tostring(activity.Name or activity["Id-"])
+    end
+  end
+  return changed
+end
+
+local function newResourceEtag()
+  local ok, uuid = pcall(system.uuid)
+  if ok and type(uuid) == "string" and string.match(uuid, "^[%x%-]+$") then
+    return '"' .. uuid .. '"'
+  end
+  return string.format('"%08x-%04x-4%03x-a%03x-%06x%06x"',
+    math.random(0, 0x7fffffff), math.random(0, 0xffff), math.random(0, 0xfff),
+    math.random(0, 0xfff), math.random(0, 0xffffff), math.random(0, 0xffffff))
+end
+
+-- Returns the new etag and hetag when the local ActivityList changed.
+local function keepActivityConfirmations(params)
+  if resMgr.isAnySyncInProgress() then
+    return nil
+  end
+  local body = params.resource
+  if type(body) == "string" then
+    local ok, decoded = pcall(json.decode, body)
+    body = ok and decoded or nil
+  end
+  local status, _, current = resMgr.getResource("ActivityList")
+  if tostring(status or "") ~= "200" then
+    return nil
+  end
+  local changed = dropConfirmedAlternatives(body, current)
+  if #changed == 0 then
+    return nil
+  end
+  local etag = newResourceEtag()
+  local hetag = tostring((tonumber(resMgr.getHubEtag("ActivityList")) or 0) + 1)
+  local ok, detail = resMgr.saveResource("application/json", etag, current, "ActivityList", nil, hetag)
+  if not ok then
+    log.notice("codex could not keep activity confirmation:", tostring(detail))
+    return nil
+  end
+  log.notice("codex kept activity confirmation for", table.concat(changed, ", "))
+  return etag, hetag
+end
+
 local function offlineResourcePut(cmd, verb, params)
   if not cloudBlockerEnabled() then
     return nativeResourceHandler.processPutResource(cmd, verb, params)
@@ -637,8 +702,14 @@ local function offlineResourcePut(cmd, verb, params)
   if not diagOk then
     log.notice("codex put diagnostics failed:", tostring(diagError))
   end
+  if resourceName == "ActivityList" then
+    local keptEtag, keptHetag = keepActivityConfirmations(params)
+    if keptEtag then
+      etag, hetag = keptEtag, keptHetag
+    end
+  end
   log.notice(
-    "codex offline guard acknowledged resource put without cloud or mutation",
+    "codex offline guard acknowledged resource put without cloud",
     uri
   )
   return connectUtils.createResponse(cmd, "200", "OK", {
