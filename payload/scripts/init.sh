@@ -39,20 +39,32 @@ if [ -x /data/codex/bin/dropbear ]; then
 fi
 
 if [ -x /data/codex/bin/codex_bt_pair_agent ]; then
-  BT_HID_PID=$(cat /var/run/codex-bt-hid-control.pid 2>/dev/null)
-  BT_HID_RUNNING=0
-  if [ -n "$BT_HID_PID" ] && kill -0 "$BT_HID_PID" 2>/dev/null; then
-    if tr '\000' ' ' < "/proc/$BT_HID_PID/cmdline" 2>/dev/null |
-      grep 'hid-control-daemon' >/dev/null 2>&1; then
-      BT_HID_RUNNING=1
-    fi
-  fi
-  if [ "$BT_HID_RUNNING" != 1 ]; then
-    rm -f /var/run/codex-bt-hid-control.pid
-    /data/codex/bin/codex_bt_pair_agent btkeyboard 600 --hid-control-daemon \
-      > /cache/codex-bt-hid-control.log 2>&1 &
-    echo $! > /var/run/codex-bt-hid-control.pid
-  fi
+  bt_hid_running() {
+    BT_HID_PID=$(cat /var/run/codex-bt-hid-control.pid 2>/dev/null)
+    [ -n "$BT_HID_PID" ] && kill -0 "$BT_HID_PID" 2>/dev/null &&
+      tr '\000' ' ' < "/proc/$BT_HID_PID/cmdline" 2>/dev/null |
+      grep 'hid-control-daemon' >/dev/null 2>&1
+  }
+  # The agent exits at once ("HCI bind failed: No such device") if hci0 is
+  # not up yet, which it often isn't this early in boot. Wait for the
+  # controller in the background, start the agent, and retry until it stays.
+  (
+    TRIES=0
+    while [ "$TRIES" -lt 40 ]; do
+      if bt_hid_running; then
+        exit 0
+      fi
+      if hciconfig hci0 2>/dev/null | grep 'UP RUNNING' >/dev/null 2>&1; then
+        rm -f /var/run/codex-bt-hid-control.pid
+        /data/codex/bin/codex_bt_pair_agent btkeyboard 600 --hid-control-daemon \
+          > /cache/codex-bt-hid-control.log 2>&1 &
+        echo $! > /var/run/codex-bt-hid-control.pid
+      fi
+      TRIES=$((TRIES + 1))
+      sleep 3
+    done
+    echo "$(date) codex_bt_pair_agent did not stay up; Bluetooth HID control unavailable" >> "$LOG"
+  ) &
 fi
 
 if [ -x /data/codex/bin/codex_webui ]; then
