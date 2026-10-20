@@ -12,6 +12,11 @@ local resMgr = require("tasks.harmonywebservices.core.resourcemanager")
 local session = require("tasks.harmonywebservices.core.session")
 local string = require("string")
 local system = require("system")
+local table = require("table")
+
+-- luaworks tasks run sandboxed without the io global; stock code opens files
+-- through system.io (the real io, reached via package.seeall).
+local io = system.io
 
 MSG_NETSERVICE_NEW_ADDRESS = "cs.netservicestarter_new_address"
 
@@ -130,7 +135,7 @@ local function offlineResourcePut(cmd, verb, params)
     hetag = resMgr.getHubEtag(resourceName)
   end
   -- CODEX DIAG (removable, behaviour-neutral): capture the paired remote's put payload
-  do
+  local diagOk, diagError = pcall(function()
     local body = params.resource
     local encoded
     if type(body) == "string" then
@@ -160,6 +165,9 @@ local function offlineResourcePut(cmd, verb, params)
       end
       log.notice("codex put param keys", uri, table.concat(names, ","))
     end
+  end)
+  if not diagOk then
+    log.notice("codex put diagnostics failed:", tostring(diagError))
   end
   log.notice(
     "codex offline guard acknowledged resource put without cloud or mutation",
