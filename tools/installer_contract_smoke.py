@@ -5,8 +5,8 @@ Subjects under test (repo root):
 
 * ``install_webui.py``  -- Python installer.
   [PYTHON BEHAVIORAL] coverage: the real installer code is executed through a
-  fake SSH/transport harness (a simulated BusyBox hub with a fake staged C
-  engine that answers key=value). No network, no real ssh, no subprocesses.
+  fake SSH/transport harness (a simulated BusyBox hub that answers the
+  installer's shell commands). No network, no real ssh, no subprocesses.
 
 * ``install_webui.ps1`` -- PowerShell installer.
   [PS1 STATIC] coverage: structured assertions on flags, constants, path
@@ -16,17 +16,18 @@ Subjects under test (repo root):
 
 Contract proven (Python behavioral):
   preflight-only stages candidates in a private /var/volatile/codex-install-*
-  0700 tree, strict-MD5 verifies them, invokes the staged C storage status
-  and install planner, performs no persistent writes/prune/handoff/install/
-  restart, reports ALLOWED/BLOCKED_*, and removes only its staging tree;
-  capacity refusal; rollback-capacity refusal; strict checksum failure;
-  later-file failure restoring earlier files' bytes and original modes;
-  created-file removal on rollback; post-write verification failure;
-  simulated service validation failure; incomplete rollback is fatal and
-  preserves staging; upgrade omits protected config candidates and preserves
-  existing configuration; codex_webui is installed last; no service action
-  before post-install verification; rollback is prepared before replacement;
-  required_total == 1048576 floor + handoff + forward + rollback.
+  0700 tree (no mktemp), strict-MD5 verifies them, probes destinations with
+  one BusyBox ls/md5sum probe, checks RAM for rollback copies, performs no
+  persistent writes/prune/handoff/install/restart, reports ALLOWED/BLOCKED_*,
+  and removes only its staging tree; unchanged files are not rewritten; a
+  flash-full phase 1 removes every new copy and changes nothing live; strict
+  checksum failure; later-rename failure restoring earlier files' bytes and
+  original modes; created-file removal on rollback; post-write verification
+  failure; simulated service validation failure; incomplete rollback is fatal
+  and preserves staging; upgrade preserves existing configuration;
+  codex_webui is installed last; no service action before post-install
+  verification; only installer handoffs are pruned; reboot only when the
+  cloud-blocker files change.
 
 Determinism: no randomness, no clock reads, fixed fake staging suffix,
 fixed fake timestamps. All hosts/IDs/credentials are obviously fake
@@ -90,52 +91,41 @@ def flip_digest(digest: str) -> str:
     return digest[:-1] + ("0" if digest[-1] != "0" else "1")
 
 
-def ceil_fragment(size: int, fragment: int) -> int:
-    if size <= 0:
-        return 0
-    return ((size + fragment - 1) // fragment) * fragment
-
-
 class FakeHub:
-    """Simulated BusyBox hub: fake filesystem + fake staged C engine.
+    """Simulated BusyBox hub: a fake filesystem answering the installer's shell.
 
     Every remote command the installer issues over ssh lands in dispatch().
     The fake records an ordered event log used for sequencing assertions and
     tracks file-level persistent writes (any mutation outside the staging
-    prefix). Directory-level side effects of compound wiring commands are
-    intentionally not modeled at file level.
+    prefix). Like the real hub it has no mktemp, stat, readlink, or df.
     """
 
     def __init__(self, available_bytes: int = 100_000_000) -> None:
         self.fs: dict[str, dict[str, object]] = {}
+        self.symlinks: set[str] = set()
         self.events: list[tuple] = []
         self.stage = FAKE_STAGE
+        # Flash bytes left for phase-1 copies; there is no way to query it.
         self.available_bytes = available_bytes
-        self.fragment = 4096
-        self.storage_path = "/mnt/data"
-        self.fail_install_dest: str | None = None
+        self.ram_free_kb = 26_000
+        self.backup_listing = [FAKE_EXISTING_GENERATION]
+        self.handoff_stamp = FAKE_HANDOFF_STAMP
+        self.fail_rename_dest: str | None = None
         self.fail_rollback_restore_dest: str | None = None
         self.corrupt_staged_md5: str | None = None
-        # --file-status post-install corruption: flip the reported md5 for any
-        # destination after N successful installs.
+        # Post-install probe corruption: flip the reported md5 after N renames.
         self.file_status_corrupt_md5_after: int | None = None
+        self.file_status_wrong_mode: dict[str, str] = {}
+        self.file_status_garbage: set[str] = set()
         self.installs_done = 0
         self.smoke_fail = False
-        self.stage_created = False
         # Transport-level failures (must NOT be RuntimeError subclasses).
-        self.timeout_install_dest: str | None = None
+        self.timeout_rename_dest: str | None = None
         # Wiring/service exceptions after destinations were replaced.
         self.fail_wiring = False
         self.fail_service_start_times = 0
-        # C nonzero AFTER rename_completed=1 (post-write measurement failure).
-        self.fail_post_write_dest: str | None = None
         # Short md5sum responses: these paths emit no output line.
-        # Planner exit 1 with ok=1 is a capacity refusal, not validation.
-        self.planner_exit1_ok1 = False
         self.md5sum_drop_paths: set[str] = set()
-        # --file-status emulation knobs.
-        self.file_status_wrong_mode: dict[str, str] = {}
-        self.file_status_refuse: dict[str, str] = {}
 
     # ------------------------------------------------------------- fs model
 
@@ -150,18 +140,19 @@ class FakeHub:
     def paths_under_stage(self) -> list[str]:
         return sorted(p for p in self.fs if p.startswith(self.stage + "/") or p == self.stage)
 
+    def leftovers(self) -> list[str]:
+        return sorted(p for p in self.fs if p.endswith((INST.NEW_SUFFIX, INST.RESTORE_SUFFIX)))
+
     # ------------------------------------------------------------ dispatch
 
     def dispatch(self, command: str, input_bytes: bytes | None = None) -> tuple[int, str, str]:
         self.events.append(("cmd", command))
         c = command.strip()
 
-        # Reintroduction tripwire: destination discovery, post-install
-        # verification, and handoff sizing must use staged C --file-status,
-        # never remote shell stat/readlink. md5sum stays only for staged
-        # candidate/engine/rollback-copy verification under the stage tree.
-        if "stat -c" in c or "stat -c " in c or "readlink" in c or "$(stat" in c:
-            raise AssertionError(f"fake hub rejected remote shell stat/readlink: {c!r}")
+        # The real hub's BusyBox has none of these applets.
+        for missing in ("mktemp", "stat ", "readlink", "df ", "statvfs"):
+            if missing in c:
+                raise AssertionError(f"fake hub has no {missing.strip()!r}: {c!r}")
 
         if c == "id; uname -a":
             return 0, "uid=0(root) gid=0(root)\nLinux harmony-fake 3.10.14-codex #1 MIPS\n", ""
@@ -170,10 +161,16 @@ class FakeHub:
             entry = self.fs.get("/data/codex/hub_id")
             return 0, entry["data"].decode("utf-8") if entry else "", ""
 
-        if c.startswith("D=$(mktemp -d " + INST.STAGE_PREFIX):
-            self.stage_created = True
-            self.events.append(("staging_create", self.stage, "700"))
-            return 0, self.stage + "\n", ""
+        if c == "cat /proc/meminfo":
+            self.events.append(("meminfo",))
+            return 0, f"MemTotal:          62524 kB\nMemFree:           {self.ram_free_kb} kB\n", ""
+
+        if c.startswith("mkdir " + INST.STAGE_PREFIX):
+            path = shlex.split(c)[1]
+            if path != self.stage:
+                raise AssertionError(f"unexpected staging path {path!r}")
+            self.events.append(("staging_create", path, "700"))
+            return 0, path + "\n", ""
 
         if c.startswith("cat > "):
             segments = c.split(" && ")
@@ -183,11 +180,21 @@ class FakeHub:
             self.events.append(("staged_upload", path, mode))
             return 0, "", ""
 
+        if c.startswith("for p in "):
+            return self.do_probe(shlex.split(c[len("for p in "):c.index("; do ")]))
+
         if c.startswith("md5sum "):
             return self.do_md5sum(shlex.split(c)[1:])
 
         if c.startswith("cp -p "):
+            return self.do_rollback_copy(c)
+
+        if c.startswith("cp "):
             return self.do_copy(c)
+
+        if c.startswith("mv -f "):
+            src, dst = shlex.split(c)[2:4]
+            return self.do_rename(src, dst)
 
         if c.startswith("rm -rf "):
             target = shlex.split(c)[2]
@@ -195,6 +202,8 @@ class FakeHub:
             for path in list(self.fs):
                 if path == target or path.startswith(target + "/"):
                     self.fs.pop(path, None)
+            if target in self.backup_listing:
+                self.backup_listing.remove(target)
             return 0, "", ""
 
         if c.startswith("rm -f "):
@@ -207,15 +216,6 @@ class FakeHub:
             target = shlex.split(c)[3]
             return (1, "", "") if target in self.fs else (0, "", "")
 
-        if c.startswith("chmod ") and "&&" not in c:
-            tokens = shlex.split(c)
-            mode, path = tokens[1], tokens[2]
-            if path in self.fs:
-                self.fs[path]["mode"] = mode
-                self.events.append(("chmod", path, mode))
-                return 0, "", ""
-            return 1, "", f"chmod: {path}: No such file or directory"
-
         if c.startswith("mkdir -p") and "ln -sf dropbearmulti" in c:
             if self.fail_wiring:
                 return 1, "", "simulated wiring failure"
@@ -227,19 +227,12 @@ class FakeHub:
             return 0, "", ""
 
         if c.startswith("for d in /data/codex-backups"):
-            return 0, FAKE_EXISTING_GENERATION + "\n", ""
+            return 0, "".join(p + "\n" for p in self.backup_listing), ""
 
         if c.startswith("S=$(date"):
-            # Handoff physically consumes the handoff-reserved bytes on the
-            # same authoritative backing the C engine measures.
-            consumed = 0
-            for path in INST.HANDOFF_REQUIRED_PATHS:
-                entry = self.fs.get(path)
-                if entry is not None:
-                    consumed += ceil_fragment(len(entry["data"]), self.fragment) + self.fragment
-            self.available_bytes -= consumed
-            handoff = f"{INST.HANDOFF_ROOT}/webui-handoff-{FAKE_HANDOFF_STAMP}"
-            self.events.append(("handoff", handoff, consumed))
+            handoff = f"{INST.HANDOFF_ROOT}/webui-handoff-{self.handoff_stamp}"
+            self.events.append(("handoff", handoff))
+            self.backup_listing.append(handoff)
             return 0, f"handoff={handoff}\n", ""
 
         if c.startswith("killall codex_webui"):
@@ -253,23 +246,40 @@ class FakeHub:
             self.events.append(("service", "reboot"))
             return 0, "rebooting\n", ""
 
-        tokens = shlex.split(c)
-        if tokens and tokens[0].startswith(self.stage + "/engine-"):
-            return self.do_engine(tokens)
-
         raise AssertionError(f"fake hub received unexpected command: {c!r}")
 
     # --------------------------------------------------------- sub-handlers
 
-    def do_md5sum(self, paths: list[str]) -> tuple[int, str, str]:
-        if all(p.startswith(self.stage + "/") for p in paths):
-            phase = "stage-verify"
-        elif len(paths) >= 2:
-            phase = "post-install-verify"
-        else:
-            phase = "rollback-verify"
-        if phase == "post-install-verify":
+    def do_probe(self, paths: list[str]) -> tuple[int, str, str]:
+        if self.installs_done > 0:
             self.events.append(("verify_installed",))
+        self.events.append(("probe", tuple(paths)))
+        lines = []
+        for path in paths:
+            if path in self.file_status_garbage:
+                lines.append(f"file_status type=regular perm=?????????? bytes=x md5=none path={path}")
+            elif path in self.symlinks:
+                lines.append(f"file_status type=symlink path={path}")
+            elif path not in self.fs:
+                lines.append(f"file_status type=absent path={path}")
+            else:
+                entry = self.fs[path]
+                mode = entry["mode"]
+                if self.installs_done > 0:
+                    mode = self.file_status_wrong_mode.get(path, mode)
+                digest = md5_bytes(entry["data"])
+                if (
+                    self.file_status_corrupt_md5_after is not None
+                    and self.installs_done >= self.file_status_corrupt_md5_after
+                ):
+                    digest = flip_digest(digest)
+                lines.append(
+                    f"file_status type=regular perm={mode_to_perm(mode)} "
+                    f"bytes={len(entry['data'])} md5={digest} path={path}"
+                )
+        return 0, "\n".join(lines) + "\n", ""
+
+    def do_md5sum(self, paths: list[str]) -> tuple[int, str, str]:
         lines = []
         for path in paths:
             if path in self.md5sum_drop_paths:
@@ -278,12 +288,12 @@ class FakeHub:
             if entry is None:
                 return 1, "", f"md5sum: {path}: No such file or directory"
             digest = md5_bytes(entry["data"])
-            if phase == "stage-verify" and self.corrupt_staged_md5 == path:
+            if self.corrupt_staged_md5 == path:
                 digest = flip_digest(digest)
             lines.append(f"{digest}  {path}")
         return 0, "\n".join(lines) + "\n", ""
 
-    def do_copy(self, command: str) -> tuple[int, str, str]:
+    def do_rollback_copy(self, command: str) -> tuple[int, str, str]:
         segments = command.split(" && ")
         src, dst = shlex.split(segments[0])[2], shlex.split(segments[0])[3]
         entry = self.fs.get(src)
@@ -291,133 +301,44 @@ class FakeHub:
             return 1, "", f"cp: {src}: No such file or directory"
         mode = shlex.split(segments[1])[1]
         self.set_file(dst, entry["data"], mode)
-        basename = dst.rsplit("/", 1)[-1]
-        if basename.startswith("rb-"):
-            self.events.append(("rollback_copy", src, dst))
-        elif basename.startswith("engine-"):
-            self.events.append(("engine_copy", dst))
+        self.events.append(("rollback_copy", src, dst))
         return 0, f"{md5_bytes(entry['data'])}  {dst}\n", ""
 
-    def do_engine(self, tokens: list[str]) -> tuple[int, str, str]:
-        args = tokens[1:]
-        self.events.append(("engine", tuple(args)))
-        mode = args[0]
-        if mode == "--storage-status":
-            floor = int(args[1])
-            body = (
-                f"mode=storage-status\nok=1\nstorage_path={self.storage_path}\n"
-                f"available_bytes={self.available_bytes}\n"
-                f"fragment_bytes={self.fragment}\nrequired_bytes={floor}\n"
-                f"sufficient={1 if self.available_bytes >= floor else 0}\n"
-            )
-            return (0 if self.available_bytes >= floor else 1), body, ""
+    def do_copy(self, command: str) -> tuple[int, str, str]:
+        segments = command.split(" && ")
+        src, dst = shlex.split(segments[0])[1:3]
+        mode = shlex.split(segments[1])[1]
+        data = self.fs[src]["data"]
+        if dst.endswith(INST.NEW_SUFFIX):
+            if len(data) > self.available_bytes:
+                # Real cp leaves a truncated file behind on ENOSPC.
+                self.set_file(dst, data[: self.available_bytes], "644")
+                self.available_bytes = 0
+                return 1, "", "cp: write error: No space left on device"
+            self.available_bytes -= len(data)
+            self.set_file(dst, data, mode)
+            self.events.append(("new_copy", dst[: -len(INST.NEW_SUFFIX)]))
+            return 0, f"{md5_bytes(data)}  {dst}\n", ""
+        if dst.endswith(INST.RESTORE_SUFFIX):
+            dest = dst[: -len(INST.RESTORE_SUFFIX)]
+            if self.fail_rollback_restore_dest == dest:
+                return 1, "", "simulated rollback restore failure"
+            final = shlex.split(segments[2])[3]
+            self.set_file(final, data, mode)
+            self.events.append(("install_file", dest, True))
+            return 0, "", ""
+        raise AssertionError(f"unexpected copy destination {dst!r}")
 
-        if mode == "--install-plan":
-            src, dest, _mode_arg, floor_arg = args[1], args[2], args[3], int(args[4])
-            size = len(self.fs[src]["data"])
-            forward = ceil_fragment(size, self.fragment) + self.fragment
-            existing = self.fs.get(dest)
-            rollback = (
-                ceil_fragment(len(existing["data"]), self.fragment) + self.fragment
-                if existing
-                else 0
-            )
-            required = floor_arg + forward + rollback
-            sufficient = self.available_bytes >= required
-            body = (
-                f"mode=install-plan\nok=1\nsource={src}\ndestination={dest}\nallowed=1\n"
-                f"candidate_reservation_bytes={forward}\n"
-                f"rollback_reservation_bytes={rollback}\n"
-                f"available_bytes={self.available_bytes}\n"
-                f"required_bytes={required}\n"
-                f"sufficient={1 if sufficient else 0}\n"
-            )
-            if self.planner_exit1_ok1:
-                # The C planner contract deliberately returns exit 1 with a
-                # complete reservation record and sufficient=0.
-                return 1, body.replace("sufficient=1", "sufficient=0"), ""
-            # Real C: exit 1 with ok=1 when capacity is insufficient.
-            return (0 if sufficient else 1), body, ""
-
-        if mode == "--install-file":
-            src, dest, mode_arg, floor = args[1], args[2], args[3], int(args[4])
-            is_rollback = "--rollback-restore" in args
-            if not is_rollback and self.timeout_install_dest == dest:
-                raise subprocess.TimeoutExpired(
-                    cmd=f"ssh {dest}", timeout=180,
-                    output=None, stderr=None,
-                )
-            if is_rollback and self.fail_rollback_restore_dest == dest:
-                return 1, f"error=simulated_rollback_restore_failure\ndest={dest}\n", ""
-            if not is_rollback and self.fail_install_dest == dest:
-                return 1, f"error=simulated_install_failure\ndest={dest}\n", ""
-            size = len(self.fs[src]["data"])
-            reservation = ceil_fragment(size, self.fragment) + self.fragment
-            if self.available_bytes < floor + reservation:
-                return 1, "error=insufficient_space\n", ""
-            self.set_file(dest, self.fs[src]["data"], mode_arg)
-            self.available_bytes -= reservation
-            if not is_rollback:
-                self.installs_done += 1
-            self.events.append(("install_file", dest, is_rollback))
-            if not is_rollback and self.fail_post_write_dest == dest:
-                # Real C: rename completes, then the post-write measurement
-                # fails -> nonzero exit with rename_completed=1.
-                return 1, (
-                    f"rename_completed=1\nresult=installed\n"
-                    f"errors=1\nreason=post_write_measurement_failed\ndest={dest}\n"
-                ), ""
-            return 0, (
-                f"rename_completed={0 if is_rollback else 1}\nresult=installed\n"
-                f"errors=0\ndest={dest}\nbytes={size}\n"
-            ), ""
-
-        if mode == "--prune-backups":
-            self.events.append(("prune",))
-            return 0, "scanned=3 deleted=0 pruned_bytes=0 over_budget=0 errors=0\n", ""
-
-        if mode == "--file-status":
-            return self.do_file_status(args[1])
-
-        raise AssertionError(f"fake engine received unexpected mode: {mode!r}")
-
-    def do_file_status(self, dest: str) -> tuple[int, str, str]:
-        if dest in self.file_status_refuse:
-            reason = self.file_status_refuse[dest]
-            body = (
-                f"operation=file-status\nok=0\ndestination={dest}\nallowed=0\n"
-                f"exists=0\ntype=absent\nbytes=0\nallocated_bytes=0\n"
-                f"md5=none\nmode_decimal=0\nerrors=1\nreason={reason}\n"
-            )
-            return 1, body, ""
-        entry = self.fs.get(dest)
-        if entry is None:
-            body = (
-                f"operation=file-status\nok=1\ndestination={dest}\nallowed=1\n"
-                f"exists=0\ntype=absent\nbytes=0\nallocated_bytes=0\n"
-                f"md5=none\nmode_decimal=0\nerrors=0\n"
-            )
-            return 0, body, ""
-        mode = self.file_status_wrong_mode.get(dest, entry["mode"])
-        mode_decimal = int(mode, 8)
-        data = entry["data"]
-        digest = md5_bytes(data)
-        if (
-            self.file_status_corrupt_md5_after is not None
-            and self.installs_done >= self.file_status_corrupt_md5_after
-        ):
-            digest = flip_digest(digest)
-        # Post-install verification marker: at least one install completed and
-        # the destination is outside the staging tree.
-        if self.installs_done > 0 and not dest.startswith(self.stage + "/"):
-            self.events.append(("verify_installed",))
-        allocated = ceil_fragment(len(data), self.fragment)
-        body = (
-            f"operation=file-status\nok=1\ndestination={dest}\nallowed=1\n"
-            f"exists=1\ntype=regular\nbytes={len(data)}\nallocated_bytes={allocated}\n"
-            f"md5={digest}\nmode_decimal={mode_decimal}\nerrors=0\n"
-        )
-        return 0, body, ""
+    def do_rename(self, src: str, dst: str) -> tuple[int, str, str]:
+        if self.timeout_rename_dest == dst:
+            raise subprocess.TimeoutExpired(cmd=f"ssh mv {dst}", timeout=60, output=None, stderr=None)
+        if self.fail_rename_dest == dst:
+            return 1, "", f"mv: can't rename '{src}': simulated failure"
+        entry = self.fs.pop(src)
+        self.set_file(dst, entry["data"], entry["mode"])
+        self.installs_done += 1
+        self.events.append(("install_file", dst, False))
+        return 0, "", ""
 
     # ------------------------------------------------------------- queries
 
@@ -428,6 +349,16 @@ class FakeHub:
         found = self.indices(predicate)
         assert found, f"no event matched {predicate!r} in {self.events!r}"
         return found[0]
+
+
+def mode_to_perm(mode: str) -> str:
+    """`ls -l` permission string for an octal mode (inverse of perm_to_mode)."""
+    value = int(mode, 8)
+    out = "-"
+    for shift in (6, 3, 0):
+        bits = (value >> shift) & 7
+        out += ("r" if bits & 4 else "-") + ("w" if bits & 2 else "-") + ("x" if bits & 1 else "-")
+    return out
 
 
 def prime_upgrade_hub(hub: FakeHub, pre_modes: dict[str, str] | None = None) -> dict[str, bytes]:
@@ -470,12 +401,23 @@ def prime_upgrade_hub(hub: FakeHub, pre_modes: dict[str, str] | None = None) -> 
     return originals
 
 
+def prime_current_hub(hub: FakeHub) -> None:
+    """A hub that already runs exactly this payload (nothing to install)."""
+    prime_upgrade_hub(hub)
+    installer = INST.Installer.__new__(INST.Installer)
+    installer.args = INST.parse_args(["--hub-host", FAKE_HUB_HOST])
+    installer.hub_id = FAKE_HUB_ID
+    installer.build_inventory()
+    for cand in installer.candidates:
+        hub.fs[cand.dest] = {"data": cand.data(), "mode": cand.mode}
+
+
 class InstallerHarness:
     """Runs the real installer main() against a FakeHub.
 
-    Patches exactly three seams on the imported module: the ssh transport
-    (Installer.run_remote_rc), wait_for_port, and time.sleep. Everything
-    else is real installer code.
+    Patches exactly four seams on the imported module: the ssh transport
+    (Installer.run_remote_rc), wait_for_port, time.sleep, and the random
+    staging suffix. Everything else is real installer code.
     """
 
     def __init__(self, hub: FakeHub) -> None:
@@ -511,9 +453,11 @@ class InstallerHarness:
         old_rrc = INST.Installer.run_remote_rc
         old_wait = INST.wait_for_port
         old_sleep = INST.time.sleep
+        old_suffix = INST.stage_suffix
         INST.Installer.run_remote_rc = fake_run_remote_rc
         INST.wait_for_port = fake_wait_for_port
         INST.time.sleep = lambda _seconds: None
+        INST.stage_suffix = lambda: FAKE_STAGE[len(INST.STAGE_PREFIX):]
         stdout_buf, stderr_buf = io.StringIO(), io.StringIO()
         try:
             with contextlib.redirect_stdout(stdout_buf), contextlib.redirect_stderr(stderr_buf):
@@ -525,6 +469,7 @@ class InstallerHarness:
             INST.Installer.run_remote_rc = old_rrc
             INST.wait_for_port = old_wait
             INST.time.sleep = old_sleep
+            INST.stage_suffix = old_suffix
         return code, stdout_buf.getvalue(), stderr_buf.getvalue()
 
 
@@ -539,14 +484,6 @@ def kv_value(stdout: str, key: str) -> str | None:
 def kv_multi(stdout: str, key: str) -> list[str]:
     prefix = key + "="
     return [line[len(prefix):] for line in stdout.splitlines() if line.startswith(prefix)]
-
-
-def engine_calls(hub: FakeHub, mode: str) -> list[tuple]:
-    return [
-        event[1]
-        for event in hub.events
-        if event[0] == "engine" and event[1] and event[1][0] == mode
-    ]
 
 
 def install_file_dests(hub: FakeHub, rollback: bool | None = None) -> list[str]:
@@ -569,9 +506,7 @@ class PythonInstallerPreflight(unittest.TestCase):
     def assert_no_persistent_mutation(self):
         writes = [e[1] for e in self.hub.events if e[0] == "persistent_write"]
         self.assertEqual(writes, [], f"unexpected persistent writes: {writes}")
-        self.assertEqual(engine_calls(self.hub, "--install-file"), [])
-        self.assertEqual(engine_calls(self.hub, "--prune-backups"), [])
-        self.assertFalse(any(e[0] == "handoff" for e in self.hub.events))
+        self.assertFalse(any(e[0] in ("install_file", "new_copy", "handoff") for e in self.hub.events))
         self.assertFalse(any(e[0] == "service" for e in self.hub.events))
         self.assertFalse(any(e[0] == "rm" for e in self.hub.events))
         self.assertEqual(self.hub.fs, {k: v for k, v in self.hub.fs.items()
@@ -585,9 +520,9 @@ class PythonInstallerPreflight(unittest.TestCase):
         self.assertEqual(kv_value(self._stdout, "staging_removed"), self.hub.stage)
 
     def test_preflight_only_allowed_no_mutation(self):
-        """[PYTHON BEHAVIORAL] preflight stages in 0700 volatile tree, verifies
-        MD5 strictly, runs staged C storage-status + install-plan, reports
-        ALLOWED, removes only its staging tree, and mutates nothing else."""
+        """[PYTHON BEHAVIORAL] preflight stages in a 0700 volatile tree without
+        mktemp, verifies MD5 strictly, probes destinations with one BusyBox
+        probe, checks RAM, reports ALLOWED, and mutates nothing else."""
         argv = self.harness.base_argv(
             "--preflight-only",
             "--mqtt-broker", FAKE_BROKER,
@@ -606,14 +541,9 @@ class PythonInstallerPreflight(unittest.TestCase):
         for _kind, path, mode in uploads:
             self.assertTrue(path.startswith(self.hub.stage + "/"))
             self.assertEqual(mode, "600", f"staged {path} must be 0600")
-        # Staged C engine invoked: storage status with the exact 1 MiB floor,
-        # then one install-plan per active candidate, always floor 1048576.
-        status_calls = engine_calls(self.hub, "--storage-status")
-        self.assertIn(("1048576",), [(c[1],) for c in status_calls])
-        plan_calls = engine_calls(self.hub, "--install-plan")
-        self.assertTrue(plan_calls)
-        for call in plan_calls:
-            self.assertEqual(call[4], "1048576")
+        self.assertEqual(len([e for e in self.hub.events if e[0] == "probe"]), 1)
+        self.assertIn(("meminfo",), self.hub.events)
+        self.assertEqual(kv_value(stdout, "flash_capacity_check"), "two-phase-commit")
         # Sensitive MQTT config redaction in staged + report lines.
         sensitive_lines = [
             line for line in stdout.splitlines()
@@ -626,118 +556,51 @@ class PythonInstallerPreflight(unittest.TestCase):
         self.assert_no_persistent_mutation()
         self.assert_stage_removed_only()
 
-    def _run_preflight_verdict(self, available: int) -> tuple[int, str]:
-        self.hub.available_bytes = available
-        code, stdout, _stderr = self.harness.run(self.harness.base_argv("--preflight-only"))
+    def test_preflight_totals_cover_changed_files_only(self):
+        """[PYTHON BEHAVIORAL] forward bytes are the changed candidates' sizes,
+        rollback bytes the replaced originals' sizes, and RAM required is
+        rollback plus the fixed margin."""
+        code, stdout, _ = self.harness.run(self.harness.base_argv("--preflight-only"))
         self._stdout = stdout
-        return code, stdout
-
-    def _totals(self, stdout: str) -> dict[str, int]:
-        return {
-            key: int(kv_value(stdout, key))
-            for key in (
-                "floor_bytes",
-                "handoff_reservation_bytes",
-                "forward_total_bytes",
-                "rollback_total_bytes",
-                "required_total_bytes",
-            )
-        }
-
-    def _generous_totals(self) -> dict[str, int]:
-        hub = FakeHub()
-        prime_upgrade_hub(hub)
-        harness = InstallerHarness(hub)
-        self.addCleanup(harness.close)
-        code, stdout, _ = harness.run(harness.base_argv("--preflight-only"))
         self.assertEqual(code, 0, stdout)
-        return self._totals(stdout)
-
-    def test_preflight_blocked_capacity(self):
-        """[PYTHON BEHAVIORAL] available below floor+handoff+forward refuses
-        with BLOCKED_CAPACITY and no persistent mutation."""
-        totals = self._generous_totals()
-        below = (
-            totals["floor_bytes"]
-            + totals["handoff_reservation_bytes"]
-            + totals["forward_total_bytes"]
-            - 1
+        lines = [l for l in stdout.splitlines() if l.startswith("candidate ")]
+        forward = sum(
+            int(re.search(r" bytes=(\d+)", l).group(1))
+            for l in lines if re.search(r"action=(replace|create)\b", l)
         )
-        code, stdout = self._run_preflight_verdict(below)
-        self.assertEqual(code, 2)
-        self.assertEqual(kv_value(stdout, "verdict"), INST.VERDICT_CAPACITY)
-        self.assert_no_persistent_mutation()
-        self.assert_stage_removed_only()
-
-    def test_preflight_blocked_rollback_capacity(self):
-        """[PYTHON BEHAVIORAL] forward fits but rollback reservation does not:
-        BLOCKED_ROLLBACK_CAPACITY, both at the forward boundary and one byte
-        under the total."""
-        totals = self._generous_totals()
-        forward_edge = (
-            totals["floor_bytes"]
-            + totals["handoff_reservation_bytes"]
-            + totals["forward_total_bytes"]
+        rollback = sum(
+            len(self.originals[re.search(r" dest=(\S+)", l).group(1)])
+            for l in lines if "action=replace" in l
         )
-        self.assertGreater(totals["rollback_total_bytes"], 0)
-        for available in (forward_edge, totals["required_total_bytes"] - 1):
-            hub = FakeHub()
-            prime_upgrade_hub(hub)
-            harness = InstallerHarness(hub)
-            self.addCleanup(harness.close)
-            hub.available_bytes = available
-            code, stdout, _ = harness.run(harness.base_argv("--preflight-only"))
-            self._stdout = stdout
-            self.hub = hub  # assertion helpers inspect the hub under test
-            self.assertEqual(code, 2, stdout)
-            self.assertEqual(kv_value(stdout, "verdict"), INST.VERDICT_ROLLBACK_CAPACITY)
-            self.assert_no_persistent_mutation()
-            self.assert_stage_removed_only()
+        self.assertEqual(int(kv_value(stdout, "forward_total_bytes")), forward)
+        self.assertEqual(int(kv_value(stdout, "rollback_total_bytes")), rollback)
+        self.assertEqual(int(kv_value(stdout, "ram_required_bytes")), rollback + INST.RAM_MARGIN_BYTES)
 
-    def test_preflight_allowed_at_exact_required_total(self):
-        """[PYTHON BEHAVIORAL] exactly required_total bytes is ALLOWED; the
-        aggregation identity required == floor+handoff+forward+rollback holds
-        with the exact 1048576 floor."""
-        totals = self._generous_totals()
-        self.assertEqual(totals["floor_bytes"], 1048576)
-        self.assertEqual(
-            totals["required_total_bytes"],
-            totals["floor_bytes"]
-            + totals["handoff_reservation_bytes"]
-            + totals["forward_total_bytes"]
-            + totals["rollback_total_bytes"],
-        )
-        code, stdout = self._run_preflight_verdict(totals["required_total_bytes"])
-        self.assertEqual(code, 0, stdout)
-        self.assertEqual(kv_value(stdout, "verdict"), INST.VERDICT_ALLOWED)
-        self.assert_no_persistent_mutation()
-        self.assert_stage_removed_only()
-
-    def test_preflight_planner_exit1_ok1_is_capacity(self):
-        """[PYTHON BEHAVIORAL] planner exit 1 with ok=1 is classified as
-        BLOCKED_CAPACITY and still performs no persistent mutation."""
-        self.hub.planner_exit1_ok1 = True
-        code, stdout = self._run_preflight_verdict(100_000_000)
+    def test_preflight_blocked_rollback_ram(self):
+        """[PYTHON BEHAVIORAL] too little free RAM for rollback copies refuses
+        with BLOCKED_ROLLBACK_CAPACITY and no persistent mutation."""
+        self.hub.ram_free_kb = 1024
+        code, stdout, _ = self.harness.run(self.harness.base_argv("--preflight-only"))
+        self._stdout = stdout
         self.assertEqual(code, 2, stdout)
-        self.assertEqual(kv_value(stdout, "verdict"), INST.VERDICT_CAPACITY)
+        self.assertEqual(kv_value(stdout, "verdict"), INST.VERDICT_ROLLBACK_CAPACITY)
         self.assert_no_persistent_mutation()
         self.assert_stage_removed_only()
 
-    def test_handoff_consumption_exact_post_gate(self):
-        """[PYTHON BEHAVIORAL] handoff consumption is charged once; the
-        post-handoff gate accepts the exact remaining reservation."""
-        totals = self._generous_totals()
-        self.hub.available_bytes = totals["required_total_bytes"]
-        code, stdout, stderr = self.harness.run(self.harness.base_argv())
-        self.assertEqual(code, 0, stderr or stdout)
-        self.assertEqual(kv_value(stdout, "verdict"), INST.VERDICT_ALLOWED)
-        handoffs = [e for e in self.hub.events if e[0] == "handoff"]
-        self.assertEqual(len(handoffs), 1)
-        self.assertEqual(handoffs[0][2], totals["handoff_reservation_bytes"])
-        # Initial exact required_total is accepted; handoff consumption is
-        # recorded once and subsequent replacement reservations may reclaim
-        # more space than the conservative plan charged.
-        self.assertGreaterEqual(self.hub.available_bytes, INST.FLOOR_BYTES)
+    def test_unchanged_destinations_are_not_rewritten(self):
+        """[PYTHON BEHAVIORAL] a destination whose md5 and mode already match
+        is reported unchanged and excluded from the forward total."""
+        webui = (INST.PAYLOAD / "bin" / "codex_webui").read_bytes()
+        self.hub.fs[INST.WEBUI_DEST] = {"data": webui, "mode": "755"}
+        code, stdout, _ = self.harness.run(self.harness.base_argv("--preflight-only"))
+        self._stdout = stdout
+        self.assertEqual(code, 0, stdout)
+        line = next(l for l in stdout.splitlines()
+                    if l.startswith("candidate ") and f"dest={INST.WEBUI_DEST} " in l)
+        self.assertIn("action=unchanged", line)
+        self.assertLess(int(kv_value(stdout, "forward_total_bytes")), sum(
+            int(re.search(r" bytes=(\d+)", l).group(1))
+            for l in stdout.splitlines() if l.startswith("candidate ")))
 
     def test_strict_staged_md5_failure(self):
         """[PYTHON BEHAVIORAL] a corrupted staged digest is rejected by the
@@ -749,8 +612,6 @@ class PythonInstallerPreflight(unittest.TestCase):
         self._stdout = stdout
         self.assertEqual(code, 1, stderr)
         self.assertIn("staged md5 mismatch", stderr)
-        self.assertEqual(engine_calls(self.hub, "--install-file"), [])
-        self.assertFalse(any(e[0] == "service" for e in self.hub.events))
         self.assert_no_persistent_mutation()
         self.assert_stage_removed_only()
 
@@ -811,6 +672,7 @@ class PythonInstallerMutating(unittest.TestCase):
         for path, mode in restored_modes.items():
             self.assertEqual(self.hub.fs[path]["mode"], mode,
                              f"{path} mode not restored to observed {mode}")
+        self.assertEqual(self.hub.leftovers(), [])
 
     def assert_no_service_before(self, index: int):
         service = self.hub.indices(lambda e: e[0] == "service")
@@ -818,45 +680,22 @@ class PythonInstallerMutating(unittest.TestCase):
             self.assertGreater(i, index, f"service action at {i} before index {index}")
 
     def test_full_install_ordering_config_preservation_webui_last(self):
-        """[PYTHON BEHAVIORAL] happy path: rollback copies precede the first
-        replacement, aggregation identity holds, codex_webui installs last,
-        upgrade configuration is omitted/preserved, and no service action
+        """[PYTHON BEHAVIORAL] happy path: rollback copies and handoff precede
+        phase 1, every new copy lands before the first rename, codex_webui is
+        renamed last, upgrade configuration is preserved, and no service action
         happens before post-write verification."""
         code, stdout, stderr = self.harness.run(self.harness.base_argv())
         self.assertEqual(code, 0, stderr or stdout)
         self.assertEqual(kv_value(stdout, "verdict"), INST.VERDICT_ALLOWED)
 
-        totals = {
-            key: int(kv_value(stdout, key))
-            for key in (
-                "floor_bytes",
-                "handoff_reservation_bytes",
-                "forward_total_bytes",
-                "rollback_total_bytes",
-                "required_total_bytes",
-            )
-        }
-        self.assertEqual(totals["floor_bytes"], 1048576)
-        self.assertEqual(
-            totals["required_total_bytes"],
-            totals["floor_bytes"]
-            + totals["handoff_reservation_bytes"]
-            + totals["forward_total_bytes"]
-            + totals["rollback_total_bytes"],
-        )
-
-        # Rollback preparation precedes the first persistent replacement.
         last_rb_copy = max(self.hub.indices(lambda e: e[0] == "rollback_copy"))
-        first_install = min(self.hub.indices(lambda e: e[0] == "install_file"))
-        self.assertLess(last_rb_copy, first_install)
-
-        # Retention + handoff ordering, all before the first replacement.
-        prunes = self.hub.indices(lambda e: e[0] == "prune")
         handoff = self.hub.first_index(lambda e: e[0] == "handoff")
-        self.assertEqual(len(prunes), 2)
-        self.assertLess(prunes[0], handoff)
-        self.assertLess(handoff, prunes[1])
-        self.assertLess(prunes[1], first_install)
+        first_copy = self.hub.first_index(lambda e: e[0] == "new_copy")
+        last_copy = max(self.hub.indices(lambda e: e[0] == "new_copy"))
+        first_install = self.hub.first_index(lambda e: e[0] == "install_file")
+        self.assertLess(last_rb_copy, first_copy)
+        self.assertLess(handoff, first_copy)
+        self.assertLess(last_copy, first_install)
 
         # codex_webui is the final replacement and appears exactly once.
         forward = install_file_dests(self.hub, rollback=False)
@@ -881,32 +720,60 @@ class PythonInstallerMutating(unittest.TestCase):
         # No service action before post-write verification.
         verify_index = self.hub.first_index(lambda e: e[0] == "verify_installed")
         self.assert_no_service_before(verify_index)
-        # Installed payload bytes actually landed; mode canonical.
         webui_bytes = (INST.PAYLOAD / "bin" / "codex_webui").read_bytes()
         self.assertEqual(md5_bytes(self.hub.fs[self.webui_dest]["data"]),
                          md5_bytes(webui_bytes))
         self.assertEqual(self.hub.fs[self.webui_dest]["mode"], "755")
 
-        # Owned staging tree removed at the end; only candidate dests plus the
-        # handoff root were persistently touched.
+        # Staging removed, no .codex-new/.codex-rb left, and only candidate
+        # dests (plus their temporary copies) were persistently touched.
         rm_rf_targets = [e[1] for e in self.hub.events if e[0] == "rm_rf"]
         self.assertEqual(rm_rf_targets, [self.hub.stage])
         self.assertEqual(self.hub.paths_under_stage(), [])
+        self.assertEqual(self.hub.leftovers(), [])
         for event in self.hub.events:
             if event[0] == "persistent_write":
                 self.assertTrue(
-                    event[1] in forward or event[1].startswith(INST.HANDOFF_ROOT),
+                    event[1] in forward or event[1].removesuffix(INST.NEW_SUFFIX) in forward,
                     f"unrelated persistent path mutated: {event[1]}",
                 )
-        # base_argv passes --no-apply-cloud-restart, so the happy path must NOT
-        # reboot; the cloud restart ordering is covered by its own flag contract.
         self.assertNotIn(("service", "reboot"), self.hub.events)
 
+    def test_flash_full_in_phase_one_changes_nothing(self):
+        """[PYTHON BEHAVIORAL] running out of flash while writing new copies
+        removes every copy (including the truncated one), leaves all live
+        files untouched, starts no services, and reports BLOCKED_CAPACITY."""
+        webui_size = (INST.PAYLOAD / "bin" / "codex_webui").stat().st_size
+        self.hub.available_bytes = webui_size  # earlier copies use some of it
+        code, stdout, stderr = self.harness.run(self.harness.base_argv())
+        self.assertEqual(code, 2, stderr or stdout)
+        self.assertEqual(kv_multi(stdout, "verdict")[-1], INST.VERDICT_CAPACITY)
+        self.assertEqual(install_file_dests(self.hub), [])
+        self.assert_originals_restored({"/data/codex/init.sh": "600"})
+        for path in self.created_paths:
+            self.assertNotIn(path, self.hub.fs)
+        self.assertFalse(any(e[0] == "service" for e in self.hub.events))
+        self.assertEqual(self.hub.paths_under_stage(), [])
+
+    def test_nothing_to_install_writes_nothing(self):
+        """[PYTHON BEHAVIORAL] a hub that already matches the payload gets no
+        handoff, no writes, and no service restart."""
+        hub = FakeHub()
+        prime_current_hub(hub)
+        harness = InstallerHarness(hub)
+        self.addCleanup(harness.close)
+        code, stdout, stderr = harness.run(harness.base_argv())
+        self.assertEqual(code, 0, stderr or stdout)
+        self.assertEqual(kv_value(stdout, "changed_count"), "0")
+        self.assertEqual([e for e in hub.events if e[0] == "persistent_write"], [])
+        self.assertFalse(any(e[0] in ("handoff", "service", "new_copy") for e in hub.events))
+
     def test_true_reverse_install_order_on_rollback(self):
-        """[PYTHON BEHAVIORAL] failing the LAST replacement (codex_webui)
+        """[PYTHON BEHAVIORAL] failing the LAST rename (codex_webui)
         reverse-restores every earlier file to original bytes and observed
-        mode, removes created files, and never continues to services."""
-        self.hub.fail_install_dest = self.webui_dest
+        mode, removes created files and leftover copies, and never continues
+        to services."""
+        self.hub.fail_rename_dest = self.webui_dest
         code, _stdout, stderr = self.harness.run(self.harness.base_argv())
         self.assertEqual(code, 1, stderr)
         self.assertIn("install failed and was rolled back", stderr)
@@ -920,11 +787,6 @@ class PythonInstallerMutating(unittest.TestCase):
             [d for d in reversed(forward) if d in self.originals],
             "rollback must restore replaced files in reverse order",
         )
-        # Rollback restores pass the exact 1 MiB floor minimum.
-        for call in engine_calls(self.hub, "--install-file"):
-            if "--rollback-restore" in call:
-                self.assertGreaterEqual(int(call[4]), 1048576)
-
         self.assert_originals_restored({"/data/codex/init.sh": "600"})
         for path in self.created_paths:
             self.assertNotIn(path, self.hub.fs, f"created {path} must be removed")
@@ -939,7 +801,7 @@ class PythonInstallerMutating(unittest.TestCase):
     def test_transport_timeout_rolls_back(self):
         """[PYTHON BEHAVIORAL] transport timeout after earlier replacements
         follows the same rollback path and removes staging."""
-        self.hub.timeout_install_dest = "/data/codex/init.sh"
+        self.hub.timeout_rename_dest = "/data/codex/init.sh"
         code, _stdout, stderr = self.harness.run(self.harness.base_argv())
         self.assertEqual(code, 1, stderr)
         self.assertIn("install failed and was rolled back", stderr)
@@ -971,17 +833,6 @@ class PythonInstallerMutating(unittest.TestCase):
         self.assert_originals_restored({"/data/codex/init.sh": "600"})
         starts = [e for e in self.hub.events if e == ("service", "start")]
         self.assertGreaterEqual(len(starts), 2)
-
-    def test_post_rename_nonzero_rolls_back(self):
-        """[PYTHON BEHAVIORAL] a nonzero C result after rename_completed=1
-        is treated as changed and fully rolled back."""
-        self.hub.fail_post_write_dest = self.webui_dest
-        code, _stdout, stderr = self.harness.run(self.harness.base_argv())
-        self.assertEqual(code, 1, stderr)
-        self.assertIn("install failed and was rolled back", stderr)
-        self.assertTrue(install_file_dests(self.hub, rollback=True))
-        self.assert_originals_restored({"/data/codex/init.sh": "600"})
-        self.assertEqual(self.hub.paths_under_stage(), [])
 
     def test_post_write_verification_failure_rolls_back(self):
         """[PYTHON BEHAVIORAL] a post-install checksum mismatch triggers a
@@ -1020,7 +871,7 @@ class PythonInstallerMutating(unittest.TestCase):
     def test_incomplete_rollback_is_fatal_and_preserves_stage(self):
         """[PYTHON BEHAVIORAL] a failed rollback restore is fatal: staging is
         deliberately preserved for manual recovery and never removed."""
-        self.hub.fail_install_dest = self.webui_dest
+        self.hub.fail_rename_dest = self.webui_dest
         self.hub.fail_rollback_restore_dest = "/data/codex/bin/codex_hbus"
         code, _stdout, stderr = self.harness.run(self.harness.base_argv())
         self.assertEqual(code, 1, stderr)
@@ -1029,18 +880,51 @@ class PythonInstallerMutating(unittest.TestCase):
         # Staging preserved: no rm -rf of the tree, staged files still there.
         self.assertEqual([e[1] for e in self.hub.events if e[0] == "rm_rf"], [])
         self.assertTrue(self.hub.paths_under_stage())
-        # Never continues after a failed rollback.
         self.assertFalse(any(e[0] == "service" for e in self.hub.events))
-        # The unrestorable file keeps the failed new content; the others were
+        # The unrestorable file keeps the new content; the others were
         # restored (reverse order continued past the failed item).
         restored = install_file_dests(self.hub, rollback=True)
         self.assertNotIn("/data/codex/bin/codex_hbus", restored)
         self.assertTrue(restored)
 
+    def test_prunes_only_old_installer_handoffs(self):
+        """[PYTHON BEHAVIORAL] after the new handoff, only installer-owned
+        webui-handoff-* generations beyond the newest HANDOFF_KEEP are
+        removed; other backups are never touched."""
+        old = [f"{INST.HANDOFF_ROOT}/webui-handoff-2025010{i}-000000" for i in range(1, 5)]
+        other = f"{INST.HANDOFF_ROOT}/webui-irdb-fix-20250101T000000Z"
+        self.hub.backup_listing = old + [other]
+        code, stdout, stderr = self.harness.run(self.harness.base_argv())
+        self.assertEqual(code, 0, stderr or stdout)
+        pruned = kv_multi(stdout, "pruned")
+        self.assertEqual(pruned, old[:2])
+        rm_rf_targets = [e[1] for e in self.hub.events if e[0] == "rm_rf"]
+        self.assertNotIn(other, rm_rf_targets)
+        self.assertEqual(set(rm_rf_targets), set(old[:2]) | {self.hub.stage})
+
+    def test_reboot_only_when_cloud_blocker_changes(self):
+        """[PYTHON BEHAVIORAL] without --no-apply-cloud-restart the hub reboots
+        only if netservicestarter.lua or cloud_blocker.conf changed."""
+        argv = [a for a in self.harness.base_argv() if a != "--no-apply-cloud-restart"]
+        code, stdout, stderr = self.harness.run(argv)
+        self.assertEqual(code, 0, stderr or stdout)
+        self.assertIn(("service", "reboot"), self.hub.events)
+
+        hub = FakeHub()
+        prime_upgrade_hub(hub)
+        nss = INST.PAYLOAD / "scripts" / "netservicestarter.lua"
+        hub.fs["/opt/luaworks/tasks/connectserver/netservicestarter.lua"] = {
+            "data": nss.read_bytes(), "mode": "644"}
+        harness = InstallerHarness(hub)
+        self.addCleanup(harness.close)
+        code, stdout, stderr = harness.run(argv)
+        self.assertEqual(code, 0, stderr or stdout)
+        self.assertNotIn(("service", "reboot"), hub.events)
+
 
 class PythonInstallerFileStatus(unittest.TestCase):
-    """[PYTHON BEHAVIORAL] staged C --file-status powers discovery and
-    post-install verification; the fake fails any shell stat/readlink."""
+    """[PYTHON BEHAVIORAL] the BusyBox ls/md5sum probe powers discovery and
+    post-install verification; the fake fails any stat/readlink/mktemp/df."""
 
     def setUp(self):
         self.hub = FakeHub()
@@ -1048,48 +932,45 @@ class PythonInstallerFileStatus(unittest.TestCase):
         self.harness = InstallerHarness(self.hub)
         self.addCleanup(self.harness.close)
 
-    def test_probe_uses_file_status_no_shell_stat(self):
-        """[PYTHON BEHAVIORAL] destination discovery emits --file-status for
-        every candidate and handoff path; no remote shell stat/readlink."""
+    def test_probe_covers_candidates_and_handoff_paths(self):
+        """[PYTHON BEHAVIORAL] one probe covers every candidate and handoff path."""
         code, stdout, stderr = self.harness.run(self.harness.base_argv("--preflight-only"))
         self.assertEqual(code, 0, stderr or stdout)
-        calls = engine_calls(self.hub, "--file-status")
-        self.assertTrue(calls)
-        probed = {call[1] for call in calls}
-        # Every handoff path was probed via staged C file-status.
-        for event in self.hub.events:
-            if event[0] == "cmd":
-                self.assertNotIn("stat -c", event[1])
-                self.assertNotIn("readlink", event[1])
+        probes = [e[1] for e in self.hub.events if e[0] == "probe"]
+        self.assertEqual(len(probes), 1)
         for path in INST.HANDOFF_REQUIRED_PATHS:
-            self.assertIn(path, probed, f"handoff path {path} not probed via file-status")
+            self.assertIn(path, probes[0], f"handoff path {path} not probed")
 
     def test_post_install_wrong_mode_rejected(self):
-        """[PYTHON BEHAVIORAL] a post-install mode mismatch from file-status
-        fails verification and rolls back."""
-        # Prime the fake so post-install file-status reports a wrong mode for
-        # an always-replaced destination.
+        """[PYTHON BEHAVIORAL] a post-install mode mismatch fails verification
+        and rolls back."""
         self.hub.file_status_wrong_mode["/data/codex/init.sh"] = "777"
         code, _stdout, stderr = self.harness.run(self.harness.base_argv())
         self.assertEqual(code, 1, stderr)
         self.assertIn("post-install mode mismatch", stderr)
         self.assertIn("install failed and was rolled back", stderr)
 
-    def test_file_status_refusal_is_fatal_validation(self):
-        """[PYTHON BEHAVIORAL] an allowed=0/ok=0 file-status refusal is a
-        validation failure with no persistent mutation."""
-        self.hub.file_status_refuse["/data/codex/init.sh"] = "destination_not_allowed"
+    def test_malformed_probe_output_is_fatal_validation(self):
+        """[PYTHON BEHAVIORAL] an unparsable probe record is a validation
+        failure with no persistent mutation."""
+        self.hub.file_status_garbage.add("/data/codex/init.sh")
         code, stdout, stderr = self.harness.run(self.harness.base_argv("--preflight-only"))
         self.assertNotEqual(code, 0, stderr or stdout)
         self.assertIn("file-status", stderr)
-        writes = [e[1] for e in self.hub.events if e[0] == "persistent_write"]
-        self.assertEqual(writes, [])
+        self.assertEqual([e[1] for e in self.hub.events if e[0] == "persistent_write"], [])
 
-    def test_absence_and_presence_via_file_status(self):
-        """[PYTHON BEHAVIORAL] allowed absence succeeds with exists=0 and
-        created paths; presence reports regular with correct md5/mode."""
-        # The primed hub already mixes present (upgrade originals) and absent
-        # (if-missing manifests) destinations; the happy path covers both.
+    def test_symlink_destination_is_refused(self):
+        """[PYTHON BEHAVIORAL] a candidate destination that is a symlink is a
+        validation failure, never written through."""
+        self.hub.symlinks.add("/data/codex/init.sh")
+        code, stdout, stderr = self.harness.run(self.harness.base_argv())
+        self.assertNotEqual(code, 0, stderr or stdout)
+        self.assertIn("symlink", stderr)
+        self.assertEqual([e[1] for e in self.hub.events if e[0] == "persistent_write"], [])
+
+    def test_absence_and_presence_via_probe(self):
+        """[PYTHON BEHAVIORAL] absent if-missing destinations are created and
+        present ones replaced with the payload bytes."""
         code, stdout, stderr = self.harness.run(self.harness.base_argv())
         self.assertEqual(code, 0, stderr or stdout)
         for path in ("/pkg/codexactivity/manifest.json", "/pkg/codexmqtt/manifest.json"):
@@ -1098,6 +979,15 @@ class PythonInstallerFileStatus(unittest.TestCase):
             md5_bytes(self.hub.fs["/data/codex/bin/codex_webui"]["data"]),
             md5_bytes((INST.PAYLOAD / "bin" / "codex_webui").read_bytes()),
         )
+
+    def test_perm_string_round_trip(self):
+        """[PYTHON BEHAVIORAL] ls -l permission strings map to octal modes."""
+        for mode in ("755", "644", "600", "700", "777"):
+            self.assertEqual(INST.perm_to_mode(mode_to_perm(mode)), mode)
+        self.assertEqual(INST.perm_to_mode("-rwsr-xr-x"), "4755")
+        self.assertEqual(INST.perm_to_mode("-rwxr-xr-t"), "1755")
+        with self.assertRaises(ValueError):
+            INST.perm_to_mode("drwxr-xr-x")
 
 
 class PowerShellStaticContract(unittest.TestCase):
@@ -1142,8 +1032,11 @@ class PowerShellStaticContract(unittest.TestCase):
         self.assertIn("[switch]$CleanInstall", self.text)
 
     def test_constants_match_python(self):
-        """[PS1 STATIC] capacity floor, stage prefix, verdicts match Python."""
-        self.assertIn(f"$FloorBytes = {INST.FLOOR_BYTES}", self.text)
+        """[PS1 STATIC] stage prefix, suffixes, margins, verdicts match Python."""
+        self.assertIn(f"$HandoffKeep = {INST.HANDOFF_KEEP}", self.text)
+        self.assertIn(f"$RamMarginBytes = {INST.RAM_MARGIN_BYTES // 1048576} * 1048576", self.text)
+        self.assertEqual(self.ps_scalar("NewSuffix"), INST.NEW_SUFFIX)
+        self.assertEqual(self.ps_scalar("RestoreSuffix"), INST.RESTORE_SUFFIX)
         self.assertEqual(self.ps_scalar("StagePrefix"), INST.STAGE_PREFIX)
         self.assertEqual(self.ps_scalar("HandoffRoot"), INST.HANDOFF_ROOT)
         self.assertEqual(self.ps_scalar("WebuiDest"), INST.WEBUI_DEST)
@@ -1182,7 +1075,9 @@ class PowerShellStaticContract(unittest.TestCase):
         """[PS1 STATIC] main order: rollback copies -> retention/handoff ->
         install -> Test-Installed -> wiring -> Start-Services -> cleanup."""
         main = self.main
-        self.assertLess(main.index("Add-RollbackCopies"), main.index("Install-Sequence"))
+        self.assertLess(main.index("Add-RollbackCopies"), main.index("New-HandoffBackup"))
+        self.assertLess(main.index("New-HandoffBackup"), main.index("Write-NewCopies"))
+        self.assertLess(main.index("Write-NewCopies"), main.index("Install-Sequence"))
         self.assertLess(main.index("Install-Sequence"), main.index("Test-Installed"))
         self.assertLess(main.index("Test-Installed"), main.index("Invoke-PostWiring"))
         self.assertLess(main.index("Invoke-PostWiring"), main.index("Start-Services"))
@@ -1202,20 +1097,26 @@ class PowerShellStaticContract(unittest.TestCase):
         self.assertIn("$WebuiDest", add_lines[-1])
 
     def test_rollback_contract_tokens(self):
-        """[PS1 STATIC] rollback restores in reverse via the staged C engine,
-        and an incomplete rollback preserves staging and throws."""
-        self.assertIn("--rollback-restore", self.rollback)
+        """[PS1 STATIC] rollback removes leftover copies, restores in reverse
+        via copy-then-rename, and an incomplete rollback preserves staging."""
+        self.assertIn("Remove-NewCopies", self.rollback)
+        self.assertIn("$RestoreSuffix", self.rollback)
+        self.assertIn("mv -f", self.rollback)
         self.assertIn("[Array]::Reverse($pending)", self.rollback)
         self.assertIn("$script:PreserveStage = $true", self.rollback)
         self.assertIn("rollback incomplete", self.rollback)
         self.assertIn("Do NOT reboot", self.rollback)
 
-    def test_engine_modes_and_strict_md5(self):
-        """[PS1 STATIC] staged C engine modes and strict BusyBox md5 regex."""
-        for flag in ("--storage-status", "--install-plan", "--install-file",
-                     "--prune-backups", "--rollback-restore", "--file-status"):
-            self.assertIn(flag, self.text)
+    def test_busybox_only_and_strict_md5(self):
+        """[PS1 STATIC] no C engine modes or missing BusyBox applets remain;
+        strict BusyBox md5 regex and the flash-full abort are present."""
+        for gone in ("--storage-status", "--install-plan", "--install-file",
+                     "--prune-backups", "--rollback-restore", "--file-status",
+                     "mktemp -d", "Invoke-StagedC"):
+            self.assertNotIn(gone, self.text)
         self.assertIn("'^[0-9a-f]{32}  .+$'", self.text)
+        self.assertIn("catch [CapacityAbort]", self.main)
+        self.assertIn("cat /proc/meminfo", self.text)
 
     def test_no_remote_shell_stat_or_readlink(self):
         """[PS1 STATIC] no remote shell stat/readlink may remain anywhere in
@@ -1226,17 +1127,21 @@ class PowerShellStaticContract(unittest.TestCase):
 
     def test_file_status_powers_probe_and_verify(self):
         """[PS1 STATIC] destination discovery and post-install verification
-        call staged C --file-status, never a remote shell loop."""
+        both use the shared BusyBox Get-FileStatus probe, which matches the
+        Python probe command byte for byte."""
         probe = self.text.split("function Invoke-DestinationProbe()", 1)[1].split(
             "function Stop-WithValidation(", 1
         )[0]
-        self.assertIn("--file-status", probe)
-        self.assertNotIn("for p in", probe)
+        self.assertIn("Get-FileStatus", probe)
         verify = self.text.split("function Test-Installed()", 1)[1].split(
             "function Invoke-Rollback(", 1
         )[0]
-        self.assertIn("--file-status", verify)
+        self.assertIn("Get-FileStatus", verify)
         self.assertNotIn("md5sum", verify)
+        loop = INST.file_status_command(["X"]).split("; do ", 1)[1]
+        ps_loop = "".join(re.findall(
+            r"'([^']*)'", self.text.split("function Get-FileStatus(", 1)[1].split("$r = Invoke-RemoteRc", 1)[0]))
+        self.assertEqual(ps_loop, loop)
         handoff = self.text.split("function New-HandoffBackup()", 1)[1].split(
             "function Install-Sequence()", 1
         )[0]

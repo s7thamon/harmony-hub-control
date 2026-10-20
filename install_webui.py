@@ -6,16 +6,27 @@ The hub must already have root SSH access. This installer intentionally uses
 plain ssh plus remote "cat > file" uploads, because the minimal Dropbear setup
 used by the root tool does not provide scp, sftp, or tftp.
 
-Step 4A flow: every candidate file is first uploaded into ONE private 0700
-staging tree under /var/volatile/codex-install-*, verified against locally
-computed MD5 sums using strict BusyBox md5sum output, and only then installed
-through the staged codex_webui C engine (--storage-status / --install-plan /
---install-file / --rollback-restore), which performs capacity-gated,
-same-directory atomic replacements with /mnt/data (or /data) as the
-authoritative statvfs source. Preflight-only mode reports the complete
-inventory, plans, backup generations, handoff estimate, and verdict with zero
-persistent mutations and no service actions. Default mode is upgrade and
-preserves existing configuration; --clean-install regenerates configuration.
+Every candidate file is first uploaded into ONE private 0700 staging tree
+under /var/volatile/codex-install-* (RAM), verified against locally computed
+MD5 sums using strict BusyBox md5sum output, and compared with the hub's
+current files. Candidates that already match are left alone.
+
+The hub's BusyBox has no mktemp, stat, df, or sync applets, so everything
+here uses only cat, cp, mv, rm, chmod, mkdir, ls -l, and md5sum. Flash free
+space cannot be measured, so changed files install as a two-phase commit:
+
+  1. copy each changed file next to its destination as <dest>.codex-new and
+     verify it; if flash fills up, every .codex-new is removed and no live
+     file has changed (BLOCKED_CAPACITY);
+  2. rename each .codex-new over its destination, codex_webui last.
+
+Originals are copied into RAM before phase 1, so any later failure restores
+them (copy to <dest>.codex-rb, then rename) with their observed modes.
+
+Preflight-only mode reports the inventory, actions, RAM headroom, backup
+generations, handoff estimate, and verdict with zero persistent mutations and
+no service actions. Default mode is upgrade and preserves existing
+configuration; --clean-install regenerates configuration.
 """
 
 from __future__ import annotations
@@ -25,6 +36,7 @@ import getpass
 import hashlib
 import json
 import re
+import secrets
 import shlex
 import socket
 import subprocess
@@ -36,12 +48,15 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 PAYLOAD = ROOT / "payload"
 
-FLOOR_BYTES = 1048576
 STAGE_PREFIX = "/var/volatile/codex-install-"
 HANDOFF_ROOT = "/data/codex-backups"
 HANDOFF_BUDGET_BYTES = 256 * 1024
+HANDOFF_KEEP = 3
 WEBUI_DEST = "/data/codex/bin/codex_webui"
-DEFAULT_FRAGMENT_BYTES = 4096
+NEW_SUFFIX = ".codex-new"
+RESTORE_SUFFIX = ".codex-rb"
+# RAM that must stay free after staging and rollback copies (tmpfs is RAM).
+RAM_MARGIN_BYTES = 4 * 1048576
 
 HANDOFF_REQUIRED_PATHS = [
     "/etc/init.d/rcS.local",
@@ -195,21 +210,9 @@ def bin_manifest_names() -> list[str]:
     return names
 
 
-def parse_kv_lines(text: str) -> dict[str, str]:
-    result: dict[str, str] = {}
-    for line in text.splitlines():
-        line = line.strip()
-        if not line or "=" not in line:
-            continue
-        key, _, value = line.partition("=")
-        result[key.strip()] = value.strip()
-    return result
-
-
-def ceil_to_fragment(size: int, fragment: int) -> int:
-    if size <= 0:
-        return 0
-    return ((size + fragment - 1) // fragment) * fragment
+def stage_suffix() -> str:
+    """Random staging-dir suffix (the hub has no mktemp)."""
+    return secrets.token_hex(6)
 
 
 def tcp_open(host: str, port: int, timeout: float = 1.2) -> bool:
@@ -252,10 +255,8 @@ class Candidate:
         self.condition = condition  # always | if-missing
         self.bytes = 0
         self.md5 = ""
-        self.action = "replace"  # replace | create | preserve | skipped
+        self.action = "replace"  # replace | create | preserve | unchanged
         self.staged_name = ""
-        self.forward_reservation = 0
-        self.rollback_reservation = 0
 
     def data(self) -> bytes:
         if self.local is not None:
@@ -269,54 +270,83 @@ class Candidate:
 
 
 MD5_HEX_RE = re.compile(r"^[0-9a-f]{32}$")
+PERM_RE = re.compile(r"^-[r-][w-][xsS-][r-][w-][xsS-][r-][w-][xtT-]$")
 FILE_STATUS_TYPES = ("absent", "regular", "symlink", "other")
+STATUS_LINE_RE = re.compile(r"^file_status type=(\S+)(?: perm=(\S*) bytes=(\S*) md5=(\S*))? path=(.+)$")
 
 
-def parse_file_status(destination: str, parsed: dict[str, str], raw: str) -> dict[str, str]:
-    """Validate one staged-C --file-status record into the installer probe shape.
+def perm_to_mode(perm: str) -> str:
+    """Octal mode from an `ls -l` permission string, e.g. -rwxr-xr-x -> 755."""
+    if not PERM_RE.match(perm):
+        raise ValueError(perm)
+    special = 0
+    digits = []
+    for index, (shift, flag) in enumerate(((0, 4), (3, 2), (6, 1))):
+        r, w, x = perm[1 + shift : 4 + shift]
+        value = (4 if r == "r" else 0) + (2 if w == "w" else 0)
+        if x in "xst":
+            value += 1
+        if x in "sStT":
+            special |= flag
+        digits.append(str(value))
+    mode = "".join(digits)
+    return f"{special}{mode}" if special else mode
 
-    Strict: operation/ok/destination/allowed/exists/type plus unsigned
-    bytes/allocated_bytes/mode_decimal are required; md5 must be 32 lowercase
-    hex or none. Fails closed on any unexpected or missing field.
-    Returns {path, kind, size, mode(octal string), md5}.
+
+def file_status_command(paths: list[str]) -> str:
+    """One BusyBox-only probe for many paths (no stat/readlink on the hub)."""
+    quoted = " ".join(remote_quote(p) for p in paths)
+    return (
+        f"for p in {quoted}; do "
+        'if [ -L "$p" ]; then echo "file_status type=symlink path=$p"; '
+        'elif [ -f "$p" ]; then set -- $(ls -l "$p"); m=$(md5sum "$p"); '
+        'echo "file_status type=regular perm=$1 bytes=$5 md5=${m%% *} path=$p"; '
+        'elif [ -e "$p" ]; then echo "file_status type=other path=$p"; '
+        'else echo "file_status type=absent path=$p"; fi; done'
+    )
+
+
+def parse_file_status(paths: list[str], raw: str) -> dict[str, dict[str, str]]:
+    """Validate probe output into {path: {path, kind, size, mode, md5}}.
+
+    Strict: every requested path must appear exactly once with a known type;
+    regular files need a valid permission string, decimal size, and 32-hex
+    md5. Fails closed on anything else.
     """
-    context = f"file-status for {destination}"
-    if parsed.get("operation") != "file-status":
-        raise RuntimeError(f"{context} reported unexpected operation:\n{raw.strip()}")
-    if parsed.get("ok") != "1":
-        raise RuntimeError(f"{context} failed: reason={parsed.get('reason', 'unknown')}")
-    if parsed.get("destination") != destination:
-        raise RuntimeError(f"{context} echoed wrong destination:\n{raw.strip()}")
-    if parsed.get("allowed") != "1":
-        raise RuntimeError(f"{context} refused: reason={parsed.get('reason', 'destination_not_allowed')}")
-    exists = parsed.get("exists")
-    kind = parsed.get("type")
-    if exists not in ("0", "1") or kind not in FILE_STATUS_TYPES:
-        raise RuntimeError(f"{context} reported invalid exists/type:\n{raw.strip()}")
-    try:
-        size = int(parsed["bytes"], 10)
-        int(parsed["allocated_bytes"], 10)
-        int(parsed["mode_decimal"], 10)
-    except (KeyError, ValueError):
-        raise RuntimeError(f"{context} reported invalid numeric fields:\n{raw.strip()}")
-    md5 = parsed.get("md5", "")
-    if not (md5 == "none" or MD5_HEX_RE.match(md5)):
-        raise RuntimeError(f"{context} reported invalid md5:\n{raw.strip()}")
-    if exists == "0":
-        if kind != "absent":
-            raise RuntimeError(f"{context} exists=0 without type=absent:\n{raw.strip()}")
-        return {"path": destination, "kind": "absent", "size": "0", "mode": "", "md5": ""}
-    if kind != "regular":
-        return {"path": destination, "kind": kind, "size": "0", "mode": "", "md5": ""}
-    if not MD5_HEX_RE.match(md5):
-        raise RuntimeError(f"{context} regular file without a computed md5:\n{raw.strip()}")
-    return {
-        "path": destination,
-        "kind": "regular",
-        "size": str(size),
-        "mode": format(int(parsed["mode_decimal"], 10), "o"),
-        "md5": md5,
-    }
+    wanted = set(paths)
+    states: dict[str, dict[str, str]] = {}
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        match = STATUS_LINE_RE.match(line)
+        if not match:
+            raise RuntimeError(f"file-status: unexpected probe line: {line!r}")
+        kind, perm, size, md5, path = match.groups()
+        if path not in wanted:
+            raise RuntimeError(f"file-status: probe reported unexpected path: {path!r}")
+        if path in states:
+            raise RuntimeError(f"file-status: probe reported {path} twice")
+        if kind not in FILE_STATUS_TYPES:
+            raise RuntimeError(f"file-status for {path} reported invalid type {kind!r}")
+        if kind != "regular":
+            if perm is not None:
+                raise RuntimeError(f"file-status for {path}: {kind} with file fields: {line!r}")
+            states[path] = {"path": path, "kind": kind, "size": "0", "mode": "", "md5": ""}
+            continue
+        try:
+            mode = perm_to_mode(perm or "")
+        except ValueError:
+            raise RuntimeError(f"file-status for {path} reported invalid permissions {perm!r}")
+        if not (size or "").isdigit():
+            raise RuntimeError(f"file-status for {path} reported invalid size {size!r}")
+        if not MD5_HEX_RE.match(md5 or ""):
+            raise RuntimeError(f"file-status for {path}: regular file without a computed md5")
+        states[path] = {"path": path, "kind": "regular", "size": size, "mode": mode, "md5": md5}
+    missing = wanted - set(states)
+    if missing:
+        raise RuntimeError(f"file-status: probe output missing {sorted(missing)}")
+    return states
 
 
 class Installer:
@@ -324,22 +354,22 @@ class Installer:
         self.args = args
         self.key_path = Path(args.key_path).expanduser().resolve()
         self.stage = ""
-        self.fragment = DEFAULT_FRAGMENT_BYTES
         self.preserve_stage = False
-        self.storage_path = ""
         self.candidates: list[Candidate] = []
         self.probe: dict[str, dict[str, str]] = {}
         self.handoff_estimate = 0
-        self.handoff_reservation = 0
         self.forward_total = 0
         self.rollback_total = 0
-        self.required_total = 0
+        self.staged_total = 0
+        self.ram_free_bytes = 0
+        self.ram_required_bytes = 0
         self.verdict = VERDICT_VALIDATION
         self.verdict_reasons: list[str] = []
         self.generations = {"handoff": 0, "resource": 0, "settings": 0, "update": 0}
+        self.handoff_dirs: list[str] = []
         self.changed: list[dict[str, object]] = []
+        self.new_copies: list[str] = []
         self.hub_id = ""
-        self.engine = ""
 
     # ------------------------------------------------------------------ ssh
 
@@ -400,18 +430,24 @@ class Installer:
             print(stderr.strip())
         return stdout
 
+    def remote_md5(self, path: str, timeout: int = 90) -> str:
+        code, out, _err = self.run_remote_rc(f"md5sum {remote_quote(path)}", timeout=timeout)
+        match = MD5_LINE_RE.match(out.strip()) if code == 0 else None
+        return match.group(1) if match and match.group(2) == path else ""
+
     # ------------------------------------------------------------- staging
 
     def create_stage(self) -> None:
         step("Creating private staging tree")
-        cmd = (
-            f"D=$(mktemp -d {STAGE_PREFIX}XXXXXX 2>/dev/null) || exit 1; "
-            f'chmod 700 "$D" || exit 1; echo "$D"'
-        )
+        stage = f"{STAGE_PREFIX}{stage_suffix()}"
+        if not re.match(r"^/var/volatile/codex-install-[0-9a-z]+$", stage):
+            raise RuntimeError(f"unsafe staging path: {stage!r}")
+        # mkdir fails if the path already exists, so the tree is ours alone.
+        cmd = f"mkdir {remote_quote(stage)} && chmod 700 {remote_quote(stage)} && echo {remote_quote(stage)}"
         out = self.run_remote(cmd, timeout=30).strip()
-        if not out.startswith(STAGE_PREFIX) or ".." in out or out.count("/") != 3:
-            raise RuntimeError(f"unsafe staging path from mktemp: {out!r}")
-        self.stage = out
+        if out != stage:
+            raise RuntimeError(f"staging tree creation echoed {out!r}, expected {stage!r}")
+        self.stage = stage
         kv(f"staging_dir={self.stage}")
         info("mode=0700 owner-only volatile staging; deleted before exit unless rollback needs it")
 
@@ -585,53 +621,26 @@ class Installer:
 
     # ------------------------------------------------------------ discovery
 
-    def staged_webui(self) -> str:
-        for cand in self.candidates:
-            if cand.dest == WEBUI_DEST:
-                return f"{self.stage}/{cand.staged_name}"
-        raise RuntimeError("codex_webui candidate missing from inventory")
-
-    def prepare_engine(self) -> None:
-        """Make an executable 0700 copy of the staged engine.
-
-        Candidates stay at 0600 per contract; the C engine itself must be
-        executable to run the staged maintenance modes.
-        """
-        if self.engine:
-            return
-        source = self.staged_webui()
-        engine = f"{self.stage}/engine-{source.rsplit('/', 1)[-1]}"
-        cmd = (
-            f"cp -p {remote_quote(source)} {remote_quote(engine)} && "
-            f"chmod 700 {remote_quote(engine)} && md5sum {remote_quote(engine)}"
-        )
-        out = self.run_remote(cmd, timeout=60, quiet=True)
-        match = MD5_LINE_RE.match(out.strip().splitlines()[-1])
-        expected = next(c.md5 for c in self.candidates if c.dest == WEBUI_DEST)
-        if not match or match.group(1) != expected:
-            raise RuntimeError("staged engine copy failed md5 verification")
-        self.engine = engine
-
-    def run_c(self, arguments: list[str], timeout: int = 120) -> tuple[int, str]:
-        self.prepare_engine()
-        command = " ".join([remote_quote(self.engine)] + [remote_quote(a) for a in arguments])
-        code, out, err = self.run_remote_rc(command, timeout=timeout)
-        return code, f"{out}{err}"
+    def file_status(self, paths: list[str]) -> dict[str, dict[str, str]]:
+        code, out, err = self.run_remote_rc(file_status_command(paths), timeout=180)
+        if code != 0:
+            self.fail_validation(f"file-status probe failed (exit {code}): {err.strip()}")
+        try:
+            return parse_file_status(paths, out)
+        except RuntimeError as exc:
+            self.fail_validation(str(exc))
+        raise AssertionError("unreachable")
 
     def probe_destinations(self) -> None:
-        step("Probing destination state (staged C --file-status)")
+        step("Probing destination state (BusyBox ls -l / md5sum)")
         dests = [c.dest for c in self.candidates]
         dests += [p for p in HANDOFF_REQUIRED_PATHS if p not in dests]
-        for dest in dests:
-            code, out = self.run_c(["--file-status", dest])
-            parsed = parse_kv_lines(out)
-            try:
-                state = parse_file_status(dest, parsed, out)
-            except RuntimeError as exc:
-                self.fail_validation(str(exc))
-            self.probe[dest] = state
-            if code != 0:
-                self.fail_validation(f"file-status nonzero exit for {dest} (exit {code})")
+        self.probe = self.file_status(dests)
+        for cand in self.candidates:
+            if self.probe[cand.dest]["kind"] in ("symlink", "other"):
+                self.fail_validation(
+                    f"destination {cand.dest} is a {self.probe[cand.dest]['kind']}, not a regular file"
+                )
 
     def fail_validation(self, reason: str) -> None:
         self.verdict = VERDICT_VALIDATION
@@ -661,12 +670,14 @@ class Installer:
         info(f"using hub id {hub_id}")
 
     def apply_upgrade_gates(self) -> None:
-        """Decide replace/create/preserve per candidate from probe state."""
+        """Decide replace/create/preserve/unchanged per candidate from probe state."""
         for cand in self.candidates:
             state = self.probe.get(cand.dest, {})
             exists = state.get("kind") == "regular"
             if cand.condition == "if-missing" and exists and not self.args.clean_install:
                 cand.action = "preserve"
+            elif exists and state.get("md5") == cand.md5 and state.get("mode") == cand.mode:
+                cand.action = "unchanged"
             elif exists:
                 cand.action = "replace"
             else:
@@ -681,68 +692,34 @@ class Installer:
                 "upgrade mode: /data/codex/hub_id missing and no explicit --hub-id supplied"
             )
 
-    def storage_status(self, floor: int) -> dict[str, str]:
-        code, out = self.run_c(["--storage-status", str(floor)])
-        parsed = parse_kv_lines(out)
-        if code != 0 and not parsed.get("available_bytes"):
-            raise RuntimeError(f"staged codex_webui --storage-status failed (exit {code}):\n{out.strip()}")
-        try:
-            self.available_bytes = int(parsed["available_bytes"])
-        except (KeyError, ValueError):
-            raise RuntimeError(f"storage-status did not report available_bytes:\n{out.strip()}")
-        self.storage_path = parsed.get("storage_path", "")
-        if parsed.get("fragment_bytes", "").isdigit():
-            self.fragment = int(parsed["fragment_bytes"])
-        return parsed
+    def active_candidates(self) -> list[Candidate]:
+        return [c for c in self.candidates if c.action in ("replace", "create")]
+
+    def ram_status(self) -> None:
+        """Free RAM from /proc/meminfo; staging and rollback copies live in tmpfs."""
+        out = self.run_remote("cat /proc/meminfo", timeout=30, quiet=True)
+        match = re.search(r"^MemFree:\s+(\d+) kB$", out, re.M)
+        if not match:
+            self.fail_validation("could not read MemFree from /proc/meminfo")
+        self.ram_free_bytes = int(match.group(1)) * 1024
 
     def build_plans(self) -> None:
-        step("Building capacity plans per destination")
+        step("Planning changed destinations")
         self.forward_total = 0
         self.rollback_total = 0
+        self.staged_total = sum(c.bytes for c in self.candidates)
         for cand in self.candidates:
-            if cand.action not in ("replace", "create"):
-                continue
-            code, out = self.run_c(
-                [
-                    "--install-plan",
-                    f"{self.stage}/{cand.staged_name}",
-                    cand.dest,
-                    cand.mode,
-                    str(FLOOR_BYTES),
-                ]
-            )
-            parsed = parse_kv_lines(out)
-            # C returns exit 1 for a capacity shortfall while still emitting
-            # ok=1 with the complete reservation fields. Accept that truthful
-            # refusal and classify it as capacity; any other nonzero (ok=0:
-            # mode/floor/allowlist/evaluate refusal) is a validation failure.
-            if parsed.get("ok") != "1":
-                self.fail_validation(f"install-plan failed for {cand.dest} (exit {code}):\n{out.strip()}")
-            if code != 0 and parsed.get("sufficient") != "0":
-                self.fail_validation(f"install-plan failed for {cand.dest} (exit {code}):\n{out.strip()}")
-            try:
-                cand.forward_reservation = int(parsed["candidate_reservation_bytes"])
-                cand.rollback_reservation = int(parsed["rollback_reservation_bytes"])
-            except (KeyError, ValueError):
-                self.fail_validation(f"install-plan for {cand.dest} missing reservation keys:\n{out.strip()}")
-            if code != 0:
-                self.verdict_reasons.append(
-                    f"install-plan insufficient for {cand.dest}: "
-                    f"available {parsed.get('available_bytes', '?')} < required "
-                    f"{parsed.get('required_bytes', '?')} (exit {code}, sufficient=0)"
-                )
-            self.forward_total += cand.forward_reservation
-            self.rollback_total += cand.rollback_reservation
+            state = self.probe.get(cand.dest, {})
+            if cand.action in ("replace", "create"):
+                self.forward_total += cand.bytes
+            if cand.action == "replace":
+                self.rollback_total += int(state.get("size", "0"))
             kv(
-                f"destination dest={cand.dest} exists={1 if cand.action == 'replace' else 0} "
-                f"action={cand.action} bytes={cand.bytes} mode={cand.mode} "
-                f"forward_reservation_bytes={cand.forward_reservation} "
-                f"rollback_reservation_bytes={cand.rollback_reservation}"
+                f"destination dest={cand.dest} exists={1 if state.get('kind') == 'regular' else 0} "
+                f"action={cand.action} bytes={cand.bytes} mode={cand.mode}"
             )
-        if self.verdict_reasons:
-            # Truthful classification: any per-candidate shortfall blocks on
-            # capacity before decide_verdict's aggregate comparison.
-            self.verdict = VERDICT_CAPACITY
+        # Staged candidates already occupy RAM; rollback copies are added next.
+        self.ram_required_bytes = self.rollback_total + RAM_MARGIN_BYTES
 
     def count_backup_generations(self) -> None:
         cmd = (
@@ -752,9 +729,12 @@ class Installer:
         out = self.run_remote(cmd, timeout=30, quiet=True)
         stamp_re = re.compile(r"^\d{8}-\d{6}$")
         for line in out.splitlines():
-            name = line.strip().rsplit("/", 1)[-1]
+            path = line.strip()
+            name = path.rsplit("/", 1)[-1]
             if name.startswith("webui-handoff-") and stamp_re.match(name[len("webui-handoff-"):]):
                 self.generations["handoff"] += 1
+                if path == f"{HANDOFF_ROOT}/{name}":
+                    self.handoff_dirs.append(path)
             elif name.startswith("settings_") and re.match(r"^\d{8}_\d{6}$", name[len("settings_"):]):
                 self.generations["settings"] += 1
             elif re.match(r"^\d{8}_\d{6}$", name):
@@ -763,14 +743,8 @@ class Installer:
                 self.generations["update"] += 1
 
     def compute_handoff_estimate(self) -> None:
-        total = 0
-        for path in HANDOFF_REQUIRED_PATHS:
-            state = self.probe.get(path, {})
-            if state.get("kind") == "regular":
-                total += int(state.get("size", "0"))
-        self.handoff_estimate = total
-        self.handoff_reservation = sum(
-            ceil_to_fragment(int(state.get("size", "0")), self.fragment) + self.fragment
+        self.handoff_estimate = sum(
+            int(state.get("size", "0"))
             for path, state in self.probe.items()
             if path in HANDOFF_REQUIRED_PATHS and state.get("kind") == "regular"
         )
@@ -778,22 +752,10 @@ class Installer:
     def decide_verdict(self) -> None:
         if self.verdict == VERDICT_CONFIG_UNCERTAIN:
             return
-        self.required_total = (
-            FLOOR_BYTES + self.handoff_reservation + self.forward_total + self.rollback_total
-        )
-        if self.verdict == VERDICT_CAPACITY:
-            # Per-candidate plan shortfall already classified truthfully.
-            return
-        if self.available_bytes < FLOOR_BYTES + self.handoff_reservation + self.forward_total:
-            self.verdict = VERDICT_CAPACITY
-            self.verdict_reasons.append(
-                f"available {self.available_bytes} < floor+handoff+forward "
-                f"{FLOOR_BYTES + self.handoff_reservation + self.forward_total}"
-            )
-        elif self.available_bytes < self.required_total:
+        if self.ram_free_bytes < self.ram_required_bytes:
             self.verdict = VERDICT_ROLLBACK_CAPACITY
             self.verdict_reasons.append(
-                f"available {self.available_bytes} < total required incl. rollback {self.required_total}"
+                f"free RAM {self.ram_free_bytes} < rollback copies + margin {self.ram_required_bytes}"
             )
         else:
             self.verdict = VERDICT_ALLOWED
@@ -814,8 +776,8 @@ class Installer:
         )
         if self.args.preflight_only:
             info(
-                "Mode: --preflight-only — stages, verifies, plans capacity, "
-                "and prints a terminal verdict; performs no persistent writes "
+                "Mode: --preflight-only — stages, verifies, compares, and "
+                "prints a terminal verdict; performs no persistent writes "
                 "and no service actions."
             )
         if self.args.clean_install:
@@ -830,6 +792,7 @@ class Installer:
             )
         kv(f"preflight_mode={'clean' if self.args.clean_install else 'upgrade'}")
         kv(f"candidate_count={len(self.candidates)}")
+        kv(f"changed_count={len(self.active_candidates())}")
         info(
             "Candidate destinations and nonsensitive expected MD5 hashes "
             "(sensitive values redacted):"
@@ -856,19 +819,20 @@ class Installer:
             f"update={self.generations['update']}"
         )
         kv(f"handoff_estimate_bytes={self.handoff_estimate}")
-        kv(f"handoff_reservation_bytes={self.handoff_reservation}")
-        kv(f"storage_path={self.storage_path}")
-        kv(f"available_bytes={self.available_bytes}")
-        kv(f"fragment_bytes={self.fragment}")
-        kv(f"floor_bytes={FLOOR_BYTES}")
+        kv("flash_capacity_check=two-phase-commit")
         kv(f"forward_total_bytes={self.forward_total}")
         kv(f"rollback_total_bytes={self.rollback_total}")
-        kv(f"required_total_bytes={self.required_total}")
+        kv(f"staged_total_bytes={self.staged_total}")
+        kv(f"ram_free_bytes={self.ram_free_bytes}")
+        kv(f"ram_required_bytes={self.ram_required_bytes}")
         info(
-            f"Capacity summary: available={self.available_bytes} "
-            f"floor={FLOOR_BYTES} forward={self.forward_total} "
-            f"rollback={self.rollback_total} required_total={self.required_total} "
-            f"storage_path={self.storage_path or '(unset)'}"
+            "Flash free space cannot be measured on this firmware (no df/statvfs): "
+            f"changed files ({self.forward_total} bytes) are written as {NEW_SUFFIX} copies "
+            "first, and the install aborts with no live changes if flash fills up."
+        )
+        info(
+            f"RAM: free={self.ram_free_bytes} required={self.ram_required_bytes} "
+            f"(rollback copies {self.rollback_total} + margin {RAM_MARGIN_BYTES})"
         )
         for reason in self.verdict_reasons:
             kv(f"verdict_reason={reason}")
@@ -881,10 +845,7 @@ class Installer:
         kv(f"verdict={self.verdict}")
         info(f"Terminal verdict: {self.verdict}")
         if self.verdict == VERDICT_ALLOWED:
-            info(
-                "ALLOWED — capacity, rollback reservation, and validation are "
-                "sufficient for the selected mode."
-            )
+            info("ALLOWED — validation and RAM headroom are sufficient for the selected mode.")
             if self.args.preflight_only:
                 info(
                     "Preflight-only complete: volatile staging will be removed; "
@@ -893,18 +854,17 @@ class Installer:
             else:
                 info(
                     "Persistent install may proceed after this report "
-                    "(atomic same-directory replacements via staged C engine)."
+                    f"({NEW_SUFFIX} copies, then same-directory renames)."
                 )
         elif self.verdict == VERDICT_CAPACITY:
             info(
-                "BLOCKED_CAPACITY — free space is below the floor plus handoff "
-                "and forward candidate reservations. No persistent changes."
+                "BLOCKED_CAPACITY — flash filled up while writing the new copies; "
+                "they were removed and no live file changed."
             )
         elif self.verdict == VERDICT_ROLLBACK_CAPACITY:
             info(
-                "BLOCKED_ROLLBACK_CAPACITY — free space covers forward install "
-                "reservations but not the additional rollback reservation. "
-                "No persistent changes."
+                "BLOCKED_ROLLBACK_CAPACITY — not enough free RAM to hold rollback "
+                "copies of the files being replaced. No persistent changes."
             )
         elif self.verdict == VERDICT_CONFIG_UNCERTAIN:
             info(
@@ -914,7 +874,7 @@ class Installer:
             )
         else:
             info(
-                "BLOCKED_VALIDATION_FAILURE — staging, path, hash, or plan "
+                "BLOCKED_VALIDATION_FAILURE — staging, path, hash, or probe "
                 "validation failed; see verdict_reason lines above. "
                 "No persistent changes."
             )
@@ -928,8 +888,6 @@ class Installer:
         for index, cand in enumerate(self.candidates):
             if cand.action == "replace":
                 state = self.probe[cand.dest]
-                # Flat leaf under the staging dir: C requires SOURCE
-                # /var/volatile/codex-install-<dir>/<leaf>.
                 rb = f"{self.stage}/rb-{index:02d}-{cand.dest.rsplit('/', 1)[-1]}"
                 cmd = (
                     f"cp -p {remote_quote(cand.dest)} {remote_quote(rb)} && "
@@ -944,10 +902,8 @@ class Installer:
                     {
                         "dest": cand.dest,
                         "mode": state.get("mode", cand.mode),
-                        "canonical_mode": cand.mode,
                         "md5": state.get("md5", ""),
                         "rb": rb,
-                        "bytes": int(state.get("size", "0")),
                         "was_absent": False,
                         "done": False,
                     }
@@ -959,28 +915,34 @@ class Installer:
                     {
                         "dest": cand.dest,
                         "mode": cand.mode,
-                        "canonical_mode": cand.mode,
                         "md5": "",
                         "rb": "",
-                        "bytes": 0,
                         "was_absent": True,
                         "done": False,
                     }
                 )
 
-    def run_retention(self, label: str) -> None:
-        step(label)
-        code, out = self.run_c(["--prune-backups"], timeout=120)
-        for line in out.strip().splitlines():
-            info(line)
-        if code != 0 and "over_budget=1 errors=0" not in out:
-            raise RuntimeError(f"staged --prune-backups failed (exit {code})")
+    def prune_handoffs(self) -> None:
+        """Keep only the newest HANDOFF_KEEP installer handoff generations.
+
+        Only installer-owned webui-handoff-<stamp> directories directly under
+        HANDOFF_ROOT are ever removed; other backups are never touched.
+        """
+        step(f"Pruning installer handoff backups (keeping newest {HANDOFF_KEEP})")
+        old = sorted(self.handoff_dirs)[: max(0, len(self.handoff_dirs) - HANDOFF_KEEP)]
+        for path in old:
+            if not re.match(rf"^{re.escape(HANDOFF_ROOT)}/webui-handoff-\d{{8}}-\d{{6}}$", path):
+                raise RuntimeError(f"refusing to prune unexpected path {path!r}")
+            code, _out, err = self.run_remote_rc(f"rm -rf {remote_quote(path)}", timeout=60)
+            if code != 0:
+                info(f"warning: could not prune {path}: {err.strip()}")
+            else:
+                kv(f"pruned={path}")
+        if not old:
+            info("nothing to prune")
 
     def create_handoff(self) -> None:
         step("Creating bounded handoff backup")
-        # Sizes come from the staged C probe (no remote shell stat). The shell
-        # only copies and accumulates installer-supplied sizes; the budget
-        # guard remains on the hub side.
         sized: list[tuple[str, int]] = []
         for path in HANDOFF_REQUIRED_PATHS:
             state = self.probe.get(path, {})
@@ -1010,104 +972,92 @@ class Installer:
         out = self.run_remote(cmd, timeout=120)
         for line in out.strip().splitlines():
             info(line)
-        if not any(line.startswith("handoff=") for line in out.strip().splitlines()):
+        created = [line[len("handoff="):] for line in out.strip().splitlines() if line.startswith("handoff=")]
+        if not created:
             raise RuntimeError("handoff directory rename did not complete")
+        self.handoff_dirs.append(created[-1])
+
+    def remove_new_copies(self) -> list[str]:
+        """Remove every <dest>.codex-new this run wrote; return those that failed."""
+        failed = []
+        for path in self.new_copies:
+            code, _out, _err = self.run_remote_rc(f"rm -f {remote_quote(path)}", timeout=30)
+            if code != 0:
+                failed.append(path)
+        self.new_copies = []
+        return failed
+
+    def write_new_copies(self) -> None:
+        """Phase 1: write and verify <dest>.codex-new next to every changed dest."""
+        step(f"Phase 1: writing verified {NEW_SUFFIX} copies (no live file changes)")
+        for cand in self.active_candidates():
+            new = cand.dest + NEW_SUFFIX
+            self.new_copies.append(new)
+            cmd = (
+                f"cp {remote_quote(f'{self.stage}/{cand.staged_name}')} {remote_quote(new)} && "
+                f"chmod {remote_quote(cand.mode)} {remote_quote(new)} && "
+                f"md5sum {remote_quote(new)}"
+            )
+            code, out, err = self.run_remote_rc(cmd, timeout=180)
+            lines = out.strip().splitlines()
+            match = MD5_LINE_RE.match(lines[-1]) if code == 0 and lines else None
+            if not match or match.group(1) != cand.md5:
+                left = self.remove_new_copies()
+                reason = err.strip() or "copy verification failed"
+                if left:
+                    raise InstallFailure(
+                        f"could not write {new} ({reason}) and could not remove {left}"
+                    )
+                raise CapacityAbort(f"could not write {new}: {reason}")
+            info(f"staged dest={new} bytes={cand.bytes}")
 
     def install_sequence(self) -> None:
-        step("Installing candidates (staged C atomic replace, codex_webui last)")
-        active = [c for c in self.candidates if c.action in ("replace", "create")]
-        reservations = [c.forward_reservation + c.rollback_reservation for c in active]
-        for position, cand in enumerate(active):
-            # The handoff was already written and consumed its reservation on
-            # the same authoritative backing; per-file floors after handoff
-            # are floor + remaining reservations only.
-            floor = FLOOR_BYTES + sum(reservations[position + 1 :])
-            code, out = self.run_c(
-                [
-                    "--install-file",
-                    f"{self.stage}/{cand.staged_name}",
-                    cand.dest,
-                    cand.mode,
-                    str(floor),
-                ],
-                timeout=180,
+        """Phase 2: rename each verified copy over its destination, codex_webui last."""
+        step("Phase 2: renaming new copies into place (codex_webui last)")
+        for cand in self.active_candidates():
+            new = cand.dest + NEW_SUFFIX
+            code, _out, err = self.run_remote_rc(
+                f"mv -f {remote_quote(new)} {remote_quote(cand.dest)}", timeout=60
             )
-            parsed = parse_kv_lines(out)
-            if parsed.get("rename_completed") == "1":
-                # The destination was replaced even though C reported a
-                # nonzero outcome (post-write measurement/floor failure):
-                # record it as changed so rollback restores the original.
-                for item in self.changed:
-                    if item["dest"] == cand.dest:
-                        item["done"] = True
-            # Fail closed: nonzero exit, missing/unrecognized result, or a
-            # completed write whose post-write outcome is bad all abort.
-            result = parsed.get("result")
-            if code != 0 or result not in ("installed", "no-op"):
-                raise InstallFailure(f"install-file failed for {cand.dest} (exit {code}):\n{out.strip()}")
-            if result == "installed":
-                if parsed.get("errors") != "0":
-                    raise InstallFailure(
-                        f"install-file post-write outcome failed for {cand.dest}:\n{out.strip()}"
-                    )
-                if "available_bytes_after" in parsed:
-                    try:
-                        after = int(parsed["available_bytes_after"])
-                    except ValueError:
-                        after = -1
-                    if after < 0 or after < FLOOR_BYTES or parsed.get("floor_met_after") != "1":
-                        raise InstallFailure(
-                            f"install-file post-write floor failed for {cand.dest}:\n{out.strip()}"
-                        )
+            if code != 0:
+                raise InstallFailure(f"rename failed for {cand.dest}: {err.strip()}")
+            self.new_copies.remove(new)
             for item in self.changed:
                 if item["dest"] == cand.dest:
                     item["done"] = True
             info(f"installed dest={cand.dest} mode={cand.mode} bytes={cand.bytes}")
 
-
     def verify_installed(self) -> None:
-        step("Verifying installed bytes, hashes, modes, and storage (staged C --file-status)")
-        active = [c for c in self.candidates if c.action in ("replace", "create")]
+        step("Verifying installed bytes, hashes, and modes")
+        active = self.active_candidates()
+        states = self.file_status([c.dest for c in active])
         for cand in active:
-            code, out = self.run_c(["--file-status", cand.dest])
-            parsed = parse_kv_lines(out)
-            state = parse_file_status(cand.dest, parsed, out)
-            if code != 0 or state["kind"] != "regular":
-                raise RuntimeError(
-                    f"post-install verification failed for {cand.dest}: "
-                    f"kind={state['kind']} exit={code}"
-                )
+            state = states[cand.dest]
+            if state["kind"] != "regular":
+                raise InstallFailure(f"post-install verification failed for {cand.dest}: kind={state['kind']}")
             if int(state["size"], 10) != cand.bytes:
-                raise RuntimeError(
+                raise InstallFailure(
                     f"post-install byte mismatch for {cand.dest}: "
                     f"expected {cand.bytes} got {state['size']}"
                 )
             if state["md5"] != cand.md5:
-                raise RuntimeError(f"post-install checksum mismatch for {cand.dest}")
-            try:
-                got_mode = int(state["mode"], 8)
-            except ValueError:
-                got_mode = -1
-            if got_mode != int(cand.mode, 8):
-                raise RuntimeError(
+                raise InstallFailure(f"post-install checksum mismatch for {cand.dest}")
+            if state["mode"] != cand.mode:
+                raise InstallFailure(
                     f"post-install mode mismatch for {cand.dest}: "
                     f"expected {cand.mode} got {state['mode']}"
                 )
-        self.storage_status(FLOOR_BYTES)
-        info("installed candidates verified; storage rechecked")
+        info("installed candidates verified")
 
     def rollback_changes(self, trigger: str) -> None:
         step("Rolling back changed paths")
         info(f"trigger: {trigger}")
-        done_items = [item for item in self.changed if item["done"]]
-        pending = list(reversed(done_items))
-        restore_items = [item for item in pending if not item["was_absent"]]
-        reservations = [
-            ceil_to_fragment(int(item["bytes"]), self.fragment) + self.fragment
-            for item in restore_items
-        ]
         incomplete = False
-        for item in pending:
+        for path in self.remove_new_copies():
+            incomplete = True
+            info(f"ROLLBACK FAILED could not remove leftover {path}")
+        done_items = [item for item in self.changed if item["done"]]
+        for item in reversed(done_items):
             dest = str(item["dest"])
             if item["was_absent"]:
                 code, out, _err = self.run_remote_rc(f"rm -f {remote_quote(dest)}", timeout=30)
@@ -1115,61 +1065,38 @@ class Installer:
                     incomplete = True
                     info(f"ROLLBACK FAILED remove new path {dest}: {out.strip()}")
                     continue
-                code, out, _err = self.run_remote_rc(f'test ! -e {remote_quote(dest)}', timeout=30)
-                if code != 0:
-                    incomplete = True
-                    info(f"ROLLBACK FAILED path still present after remove: {dest}")
-                    continue
                 info(f"removed new path {dest} (original absence recorded)")
                 continue
-            index = restore_items.index(item)
-            # Caller floor = 1048576 plus all later reverse restorations.
-            floor = FLOOR_BYTES + sum(reservations[index + 1 :])
-            # C requires MODE to equal the destination's canonical allowlist
-            # mode; the observed pre-install mode is restored afterwards.
-            code, out = self.run_c(
-                [
-                    "--install-file",
-                    str(item["rb"]),
-                    dest,
-                    str(item["canonical_mode"]),
-                    str(floor),
-                    "--rollback-restore",
-                ],
+            tmp = dest + RESTORE_SUFFIX
+            code, out, err = self.run_remote_rc(
+                f"cp {remote_quote(str(item['rb']))} {remote_quote(tmp)} && "
+                f"chmod {remote_quote(str(item['mode']))} {remote_quote(tmp)} && "
+                f"mv -f {remote_quote(tmp)} {remote_quote(dest)}",
                 timeout=180,
             )
             if code != 0:
                 incomplete = True
-                info(f"ROLLBACK FAILED restore {dest}: {out.strip()}")
+                self.run_remote_rc(f"rm -f {remote_quote(tmp)}", timeout=30)
+                info(f"ROLLBACK FAILED restore {dest}: {(err or out).strip()}")
                 continue
-            if str(item["mode"]) != str(item["canonical_mode"]):
-                chmod_code, chmod_out, _chmod_err = self.run_remote_rc(
-                    f"chmod {remote_quote(str(item['mode']))} {remote_quote(dest)}", timeout=30
-                )
-                if chmod_code != 0:
-                    incomplete = True
-                    info(f"ROLLBACK FAILED mode restore {dest}: {chmod_out.strip()}")
-                    continue
             info(f"restored {dest} mode={item['mode']}")
         # verify rollback
         for item in done_items:
             dest = str(item["dest"])
             if item["was_absent"]:
-                code, _out, _err = self.run_remote_rc(f'test ! -e {remote_quote(dest)}', timeout=30)
+                code, _out, _err = self.run_remote_rc(f"test ! -e {remote_quote(dest)}", timeout=30)
                 if code != 0:
                     incomplete = True
                     info(f"ROLLBACK VERIFY FAILED path still present: {dest}")
                 continue
-            code, out, _err = self.run_remote_rc(f"md5sum {remote_quote(dest)}", timeout=60)
-            match = MD5_LINE_RE.match(out.strip()) if code == 0 else None
-            if not match or match.group(1) != item["md5"]:
+            if self.remote_md5(dest) != item["md5"]:
                 incomplete = True
                 info(f"ROLLBACK VERIFY FAILED md5 for {dest}")
         if incomplete:
             self.preserve_stage = True
             raise RuntimeError(
                 f"rollback incomplete; staged tree preserved for manual recovery at {self.stage}. "
-                "Do NOT reboot; inspect the staged rollback copies and restore manually."
+                "Do NOT reboot (it is in RAM); inspect the staged rollback copies and restore manually."
             )
         info("rollback verified: all changed paths restored")
         self.cleanup_stage()
@@ -1208,7 +1135,8 @@ class Installer:
     def start_services(self) -> None:
         start = (
             "killall codex_webui 2>/dev/null || true; killall codex_bthid_keyboard 2>/dev/null || true; "
-            "/data/codex/offline_egress_guard.sh monitor >> /cache/codex-init.log 2>&1 & "
+            "if ! ps | grep '[o]ffline_egress_guard.sh monitor' >/dev/null 2>&1; then "
+            "/data/codex/offline_egress_guard.sh monitor >> /cache/codex-init.log 2>&1 & fi; "
             "if ! ps | grep '[d]ropbear' >/dev/null 2>&1; then /usr/sbin/dropbear -R -p 22; fi; "
             "mkdir -p /cache/bin; ln -sf /data/codex/bin/codex_bthid_keyboard /cache/bin/bthid_keyboard; "
             "/data/codex/bin/codex_webui 8080 >> /cache/codex-init.log 2>&1 & "
@@ -1223,9 +1151,13 @@ class Installer:
         print(self.run_remote(start, timeout=90).strip())
 
     def ensure_parent_dirs(self) -> None:
-        dirs = sorted({c.dest.rsplit("/", 1)[0] for c in self.candidates if c.action in ("replace", "create")})
+        dirs = sorted({c.dest.rsplit("/", 1)[0] for c in self.active_candidates()})
         cmd = "mkdir -p " + " ".join(remote_quote(d) for d in dirs)
         self.run_remote(cmd, timeout=30, quiet=True)
+
+    def cloud_blocker_changed(self) -> bool:
+        cloud = {"/opt/luaworks/tasks/connectserver/netservicestarter.lua", "/data/codex/cloud_blocker.conf"}
+        return any(c.dest in cloud for c in self.active_candidates())
 
     def run(self) -> int:
         step("Checking SSH")
@@ -1245,11 +1177,7 @@ class Installer:
 
         self.probe_destinations()
         self.apply_upgrade_gates()
-
-        step("Querying authoritative storage status")
-        status = self.storage_status(FLOOR_BYTES)
-        for key in sorted(status):
-            kv(f"storage {key}={status[key]}")
+        self.ram_status()
 
         self.count_backup_generations()
         self.compute_handoff_estimate()
@@ -1271,45 +1199,38 @@ class Installer:
             info("normal mode aborted before any persistent mutation")
             return 2
 
+        if not self.active_candidates():
+            self.cleanup_stage()
+            step("Done")
+            info("The hub already matches this payload; nothing was written or restarted.")
+            return 0
+
         try:
             self.stage_rollback_copies()
-            self.run_retention("Step 3 retention (before handoff)")
             self.create_handoff()
-            self.run_retention("Step 3 retention (after handoff)")
-            # The handoff reservation was consumed by the handoff itself on
-            # the same authoritative backing; recheck against the remaining
-            # floor + forward + rollback only (never re-charge the handoff).
-            post_handoff_required = FLOOR_BYTES + self.forward_total + self.rollback_total
-            step("Rechecking storage after retention and handoff")
-            self.storage_status(max(FLOOR_BYTES, post_handoff_required))
-            if self.available_bytes < post_handoff_required:
-                raise InstallFailure(
-                    f"storage recheck failed: available {self.available_bytes} "
-                    f"< required {post_handoff_required}"
-                )
+            self.prune_handoffs()
             self.ensure_parent_dirs()
+            self.write_new_copies()
             self.install_sequence()
             self.verify_installed()
+        except CapacityAbort as exc:
+            self.verdict = VERDICT_CAPACITY
+            self.verdict_reasons.append(str(exc))
+            kv(f"verdict_reason={exc}")
+            self.render_verdict()
+            self.cleanup_stage()
+            return 2
         except InstallFailure as exc:
             try:
                 self.rollback_changes(str(exc))
             except RuntimeError as rb_exc:
                 fail(str(rb_exc))
             fail(f"install failed and was rolled back: {exc}")
-        except RuntimeError as exc:
-            if self.changed and any(item["done"] for item in self.changed):
-                try:
-                    self.rollback_changes(str(exc))
-                except RuntimeError as rb_exc:
-                    fail(str(rb_exc))
-                fail(f"install failed and was rolled back: {exc}")
-            self.cleanup_stage()
-            raise
         except Exception as exc:
             # Transport-level failures (subprocess.TimeoutExpired, OSError,
             # anything else mid-install) must reach the same rollback
             # decision, never escape past it into blanket staging cleanup.
-            if self.changed and any(item["done"] for item in self.changed):
+            if self.new_copies or any(item["done"] for item in self.changed):
                 try:
                     self.rollback_changes(str(exc))
                 except RuntimeError as rb_exc:
@@ -1343,7 +1264,7 @@ class Installer:
 
         self.cleanup_stage()
 
-        if not self.args.skip_cloud_suppression and not self.args.no_apply_cloud_restart:
+        if self.cloud_blocker_changed() and not self.args.no_apply_cloud_restart:
             step("Applying cloud blocker")
             info("Rebooting the hub so Logitech cloud services restart in blocked mode.")
             self.run_remote("(/bin/sleep 2; /sbin/reboot || reboot) >/dev/null 2>&1 & echo rebooting", timeout=30, quiet=True)
@@ -1360,13 +1281,17 @@ class Installer:
         info(f"Web UI: http://{self.args.hub_host}:8080/")
         info("Web UI authentication: disabled")
         if not self.args.skip_cloud_suppression:
-            info("Cloud blocker: enabled and applied")
+            info("Cloud blocker: enabled" + (" and applied" if self.cloud_blocker_changed() else " (unchanged)"))
         info("If IR commands do not work, update /data/codex/hub_id with the correct hub id and restart codex_webui.")
         return 0
 
 
 class InstallFailure(RuntimeError):
     """Failure after persistent changes began; requires rollback."""
+
+
+class CapacityAbort(RuntimeError):
+    """Phase 1 could not write a new copy; every copy was removed, nothing live changed."""
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
@@ -1377,7 +1302,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
             "existing configuration. Use --clean-install for an explicit clean "
             "install that regenerates configuration. Use --preflight-only to "
             "stage candidates in private volatile storage, verify MD5 hashes, "
-            "plan capacity, and print a terminal verdict with zero persistent "
+            "compare with the hub, and print a terminal verdict with zero persistent "
             "writes and no service actions."
         ),
     )
@@ -1395,7 +1320,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--mqtt-client-id", default=None, help="MQTT client ID")
     parser.add_argument("--mqtt-disabled", action="store_true", default=None, help="Install with MQTT disabled")
     parser.add_argument("--skip-cloud-suppression", action="store_true", help="Do not replace netservicestarter.lua")
-    parser.add_argument("--no-apply-cloud-restart", action="store_true", help="Do not reboot after enabling the Logitech cloud blocker")
+    parser.add_argument("--no-apply-cloud-restart", action="store_true", help="Do not reboot after the Logitech cloud blocker files change")
     parser.add_argument("--no-prompt", action="store_true", help="Fail instead of asking for missing required values")
     parser.add_argument(
         "--preflight-only",
@@ -1403,8 +1328,9 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help=(
             "Volatile preflight only: upload candidates into a private "
             "/var/volatile/codex-install-* tree, verify nonsensitive MD5 "
-            "hashes, run C storage-status/install-plan checks, and print "
-            "inventory plus a terminal verdict (ALLOWED or BLOCKED_*). "
+            "hashes, compare them with the hub's current files, check RAM "
+            "for rollback copies, and print inventory plus a terminal "
+            "verdict (ALLOWED or BLOCKED_*). "
             "Performs no persistent writes, pruning, handoff, installs, "
             "restarts, or other service actions."
         ),

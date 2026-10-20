@@ -5,19 +5,22 @@
   Default mode is upgrade and preserves existing configuration.
   -CleanInstall is an explicit clean install that regenerates configuration.
   -PreflightOnly performs volatile staging only under private
-  /var/volatile/codex-install-*: it verifies nonsensitive MD5 hashes, runs C
-  storage-status/install-plan checks, and prints inventory plus a terminal
-  verdict (ALLOWED or BLOCKED_*). It performs no persistent writes, pruning,
-  handoff, installs, restarts, or other service actions.
+  /var/volatile/codex-install-*: it verifies nonsensitive MD5 hashes,
+  compares them with the hub's current files, checks RAM for rollback
+  copies, and prints inventory plus a terminal verdict (ALLOWED or
+  BLOCKED_*). It performs no persistent writes, pruning, handoff, installs,
+  restarts, or other service actions.
 
-  Normal install still stages every candidate in that private 0700 volatile
-  tree and verifies BusyBox md5sum before any persistent mutation, then uses
-  the staged codex_webui C engine (--storage-status / --install-plan /
-  --install-file / --rollback-restore) for capacity-gated same-directory
-  atomic replacements with /mnt/data (or /data) as the authoritative
-  statvfs source.
+  Normal install stages every candidate in that private 0700 volatile tree
+  and verifies BusyBox md5sum before any persistent mutation. The hub's
+  BusyBox has no mktemp, stat, df, or sync, so changed files install as a
+  two-phase commit: each is first written and verified beside its
+  destination as <dest>.codex-new (if flash fills up, every copy is removed
+  and nothing live changed), then renamed into place, codex_webui last.
+  Unchanged files are left alone. Originals are copied into RAM first so any
+  later failure restores them with their observed modes.
 .PARAMETER PreflightOnly
-  Volatile preflight only: stage/verify/plan/report under
+  Volatile preflight only: stage/verify/compare/report under
   /var/volatile/codex-install-*. No persistent writes, pruning, handoff,
   installs, restarts, or other service actions.
 .PARAMETER CleanInstall
@@ -45,7 +48,7 @@ param(
     [switch]$SkipCloudSuppression,
     [switch]$NoApplyCloudRestart,
     [switch]$NoPrompt,
-    # -PreflightOnly: volatile stage/verify/plan/report only under /var/volatile/codex-install-*; no persistent mutation or service actions
+    # -PreflightOnly: volatile stage/verify/compare/report only under /var/volatile/codex-install-*; no persistent mutation or service actions
     [switch]$PreflightOnly,
     # -CleanInstall: explicit clean install regenerating configuration; default without this switch is upgrade preserving existing configuration
     [switch]$CleanInstall
@@ -53,12 +56,20 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-$FloorBytes = 1048576
 $StagePrefix = "/var/volatile/codex-install-"
 $HandoffRoot = "/data/codex-backups"
 $HandoffBudgetBytes = 256 * 1024
+$HandoffKeep = 3
 $WebuiDest = "/data/codex/bin/codex_webui"
-$DefaultFragmentBytes = 4096
+$NewSuffix = ".codex-new"
+$RestoreSuffix = ".codex-rb"
+# RAM that must stay free after staging and rollback copies (tmpfs is RAM).
+$RamMarginBytes = 4 * 1048576
+
+# Phase 1 could not write a new copy; every copy was removed, nothing live changed.
+class CapacityAbort : System.Exception { CapacityAbort([string]$m) : base($m) {} }
+# Failure after persistent changes began; requires rollback.
+class InstallFailure : System.Exception { InstallFailure([string]$m) : base($m) {} }
 
 $HandoffRequiredPaths = @(
     "/etc/init.d/rcS.local",
@@ -270,23 +281,6 @@ function Get-LocalMd5([string]$Path) {
     return (Get-FileHash -Algorithm MD5 -LiteralPath $Path).Hash.ToLowerInvariant()
 }
 
-function Get-CeilFragment([long]$Size, [long]$Fragment) {
-    if ($Size -le 0) { return 0 }
-    return [long][Math]::Ceiling([double]$Size / $Fragment) * $Fragment
-}
-
-function ConvertFrom-KvLines([string]$Text) {
-    $result = @{}
-    foreach ($line in ($Text -split "`n")) {
-        $line = $line.Trim()
-        if (-not $line) { continue }
-        $i = $line.IndexOf("=")
-        if ($i -le 0) { continue }
-        $result[$line.Substring(0, $i).Trim()] = $line.Substring($i + 1).Trim()
-    }
-    return $result
-}
-
 function Get-BinManifestNames() {
     # Canonical install list: payload/bin/MANIFEST.txt (same source as tools/payload_bin_inventory.mjs).
     $manifestPath = Join-Path $Payload "bin/MANIFEST.txt"
@@ -328,21 +322,20 @@ $Payload = Join-Path $ScriptRoot "payload"
 
 # ------------------------------------------------------------- shared state
 $Stage = ""
-$Engine = ""
-$Fragment = $DefaultFragmentBytes
-$AvailableBytes = -1
-$StoragePath = ""
 $Candidates = [System.Collections.ArrayList]::new()
 $Probe = @{}
 $HandoffEstimate = 0
-$HandoffReservation = 0
 $ForwardTotal = 0
 $RollbackTotal = 0
-$RequiredTotal = 0
+$StagedTotal = 0
+$RamFreeBytes = 0
+$RamRequiredBytes = 0
 $Verdict = $VerdictValidation
 $VerdictReasons = [System.Collections.ArrayList]::new()
 $Generations = @{ handoff = 0; resource = 0; settings = 0; update = 0 }
+$HandoffDirs = [System.Collections.ArrayList]::new()
 $Changed = [System.Collections.ArrayList]::new()
+$NewCopies = [System.Collections.ArrayList]::new()
 $ResolvedHubId = ""
 $PreserveStage = $false
 $MqttExplicitSupplied = ($PSBoundParameters.ContainsKey("MqttBroker") -or
@@ -371,8 +364,6 @@ function New-Candidate([string]$Dest, [string]$Mode, [string]$Kind,
         Md5 = ""
         Action = "replace"
         StagedName = ""
-        ForwardReservation = 0
-        RollbackReservation = 0
     }
 }
 
@@ -434,15 +425,23 @@ function Build-Inventory() {
 
 # --------------------------------------------------------------- staging
 
+function New-StageSuffix() {
+    # Random staging-dir suffix (the hub has no mktemp).
+    $bytes = New-Object byte[] 6
+    [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
+    return ([BitConverter]::ToString($bytes)).Replace("-", "").ToLowerInvariant()
+}
+
 function New-StagingTree() {
     Step "Creating private staging tree"
-    $cmd = "D=`$(mktemp -d $StagePrefix" + "XXXXXX 2>/dev/null) || exit 1; chmod 700 `"`$D`" || exit 1; echo `"`$D`""
-    $out = (Invoke-Remote $cmd $null 30000).Trim()
-    if (-not $out.StartsWith($StagePrefix) -or $out.Contains("..") -or ($out.ToCharArray() | Where-Object { $_ -eq '/' }).Count -ne 3) {
-        throw "unsafe staging path from mktemp: $out"
-    }
-    $script:Stage = $out
-    KV "staging_dir=$out"
+    $stage = $StagePrefix + (New-StageSuffix)
+    if ($stage -cnotmatch '^/var/volatile/codex-install-[0-9a-z]+$') { throw "unsafe staging path: $stage" }
+    # mkdir fails if the path already exists, so the tree is ours alone.
+    $q = Remote-Quote $stage
+    $out = (Invoke-Remote "mkdir $q && chmod 700 $q && echo $q" $null 30000).Trim()
+    if ($out -cne $stage) { throw "staging tree creation echoed '$out', expected '$stage'" }
+    $script:Stage = $stage
+    KV "staging_dir=$stage"
     Info "mode=0700 owner-only volatile staging; deleted before exit unless rollback needs it"
 }
 
@@ -511,99 +510,86 @@ function Test-StagedMd5() {
     Info "all staged candidates verified"
 }
 
+function Get-RemoteMd5([string]$Path) {
+    $r = Invoke-RemoteRc ("md5sum " + (Remote-Quote $Path)) $null 90000
+    $first = ($r.Out.Trim() -split "`n")[0].Trim()
+    if ($r.Code -ne 0 -or $first -cnotmatch '^[0-9a-f]{32}  .+$') { return "" }
+    $parts = $first -split "  ", 2
+    if ($parts[1] -cne $Path) { return "" }
+    return $parts[0]
+}
+
 # ------------------------------------------------------------- discovery
 
-function Get-StagedWebui() {
-    foreach ($cand in $Candidates) {
-        if ($cand.Dest -eq $WebuiDest) { return "$Stage/$($cand.StagedName)" }
+function ConvertTo-OctalMode([string]$Perm) {
+    # Octal mode from an `ls -l` permission string, e.g. -rwxr-xr-x -> 755.
+    if ($Perm -cnotmatch '^-[r-][w-][xsS-][r-][w-][xsS-][r-][w-][xtT-]$') { throw "bad permissions $Perm" }
+    $special = 0
+    $digits = ""
+    $flags = @(4, 2, 1)
+    for ($g = 0; $g -lt 3; $g++) {
+        $r = $Perm[1 + 3 * $g]; $w = $Perm[2 + 3 * $g]; $x = $Perm[3 + 3 * $g]
+        $value = 0
+        if ($r -ceq 'r') { $value += 4 }
+        if ($w -ceq 'w') { $value += 2 }
+        if ('xst'.Contains([string]$x)) { $value += 1 }
+        if ('sStT'.Contains([string]$x)) { $special = $special -bor $flags[$g] }
+        $digits += [string]$value
     }
-    throw "codex_webui candidate missing from inventory"
+    if ($special) { return "$special$digits" }
+    return $digits
 }
 
-function Get-EnginePath() {
-    # Candidates stay at 0600 per contract; the C engine itself must be
-    # executable to run the staged maintenance modes, so use a verified
-    # 0700 copy.
-    if ($script:Engine) { return $script:Engine }
-    $source = Get-StagedWebui
-    $engine = "$Stage/engine-" + $source.Split('/')[-1]
-    $cmd = "cp -p $(Remote-Quote $source) $(Remote-Quote $engine) && chmod 700 $(Remote-Quote $engine) && md5sum $(Remote-Quote $engine)"
-    $out = Invoke-Remote $cmd $null 60000
-    $last = ($out.Trim() -split "`n")[-1].Trim()
-    $md5Re = '^[0-9a-f]{32}  .+$'
-    $expected = ($Candidates | Where-Object { $_.Dest -eq $WebuiDest }).Md5
-    if (($last -cnotmatch $md5Re) -or (($last -split "  ", 2)[0] -cne $expected)) {
-        throw "staged engine copy failed md5 verification"
+function Get-FileStatus([string[]]$Paths) {
+    # One BusyBox-only probe for many paths: just test, ls -l, and md5sum.
+    $quoted = ($Paths | ForEach-Object { Remote-Quote $_ }) -join " "
+    $cmd = "for p in $quoted; do " +
+        'if [ -L "$p" ]; then echo "file_status type=symlink path=$p"; ' +
+        'elif [ -f "$p" ]; then set -- $(ls -l "$p"); m=$(md5sum "$p"); ' +
+        'echo "file_status type=regular perm=$1 bytes=$5 md5=${m%% *} path=$p"; ' +
+        'elif [ -e "$p" ]; then echo "file_status type=other path=$p"; ' +
+        'else echo "file_status type=absent path=$p"; fi; done'
+    $r = Invoke-RemoteRc $cmd $null 180000
+    if ($r.Code -ne 0) { Stop-WithValidation "file-status probe failed (exit $($r.Code)): $($r.Err.Trim())" }
+    # Strict: every requested path exactly once with a known type; regular
+    # files need valid permissions, a decimal size, and a 32-hex md5.
+    $lineRe = '^file_status type=(\S+)(?: perm=(\S*) bytes=(\S*) md5=(\S*))? path=(.+)$'
+    $states = @{}
+    foreach ($line in ($r.Out -split "`n")) {
+        $line = $line.Trim()
+        if (-not $line) { continue }
+        if ($line -cnotmatch $lineRe) { Stop-WithValidation "file-status: unexpected probe line: $line" }
+        $kind = $Matches[1]; $perm = $Matches[2]; $size = $Matches[3]; $md5 = $Matches[4]; $path = $Matches[5]
+        if ($Paths -cnotcontains $path) { Stop-WithValidation "file-status: probe reported unexpected path: $path" }
+        if ($states.Contains($path)) { Stop-WithValidation "file-status: probe reported $path twice" }
+        if ($kind -cnotin @("absent", "regular", "symlink", "other")) { Stop-WithValidation "file-status for $path reported invalid type $kind" }
+        if ($kind -cne "regular") {
+            if ($null -ne $perm) { Stop-WithValidation "file-status for ${path}: $kind with file fields: $line" }
+            $states[$path] = @{ kind = $kind; size = "0"; mode = ""; md5 = "" }
+            continue
+        }
+        $mode = ""
+        try { $mode = ConvertTo-OctalMode $perm } catch { Stop-WithValidation "file-status for $path reported invalid permissions $perm" }
+        if ($size -cnotmatch '^\d+$') { Stop-WithValidation "file-status for $path reported invalid size $size" }
+        if ($md5 -cnotmatch '^[0-9a-f]{32}$') { Stop-WithValidation "file-status for ${path}: regular file without a computed md5" }
+        $states[$path] = @{ kind = "regular"; size = $size; mode = $mode; md5 = $md5 }
     }
-    $script:Engine = $engine
-    return $engine
-}
-
-function Invoke-StagedC([string[]]$Arguments, [int]$TimeoutMs = 120000) {
-    $binary = Get-EnginePath
-    $cmd = (Remote-Quote $binary) + " " + (($Arguments | ForEach-Object { Remote-Quote $_ }) -join " ")
-    $r = Invoke-RemoteRc $cmd $null $TimeoutMs
-    return @{ Code = $r.Code; Out = ($r.Out + $r.Err) }
-}
-
-function ConvertFrom-FileStatus([string]$Destination, $Parsed, [string]$Raw) {
-    # Strict validation of one staged-C --file-status record into the probe
-    # shape @{ kind; size; mode(octal string); md5 }. Fails closed on any
-    # unexpected or missing field.
-    $context = "file-status for $Destination"
-    if ($Parsed["operation"] -cne "file-status") { throw "$context reported unexpected operation:`n$($Raw.Trim())" }
-    if ($Parsed["ok"] -cne "1") { throw "$context failed: reason=$($Parsed['reason'])" }
-    if ($Parsed["destination"] -cne $Destination) { throw "$context echoed wrong destination:`n$($Raw.Trim())" }
-    if ($Parsed["allowed"] -cne "1") { throw "$context refused: reason=$($Parsed['reason'])" }
-    $exists = $Parsed["exists"]
-    $kind = $Parsed["type"]
-    if ($exists -notin @("0", "1") -or $kind -notin @("absent", "regular", "symlink", "other")) {
-        throw "$context reported invalid exists/type:`n$($Raw.Trim())"
+    foreach ($path in $Paths) {
+        if (-not $states.Contains($path)) { Stop-WithValidation "file-status: probe output missing $path" }
     }
-    $size = 0; $alloc = 0; $modeDec = 0
-    if (-not [long]::TryParse($Parsed["bytes"], [ref]$size)) { throw "$context invalid bytes:`n$($Raw.Trim())" }
-    if (-not [long]::TryParse($Parsed["allocated_bytes"], [ref]$alloc)) { throw "$context invalid allocated_bytes:`n$($Raw.Trim())" }
-    if (-not [long]::TryParse($Parsed["mode_decimal"], [ref]$modeDec)) { throw "$context invalid mode_decimal:`n$($Raw.Trim())" }
-    $md5 = [string]$Parsed["md5"]
-    if ($md5 -cne "none" -and $md5 -cnotmatch '^[0-9a-f]{32}$') {
-        throw "$context reported invalid md5:`n$($Raw.Trim())"
-    }
-    if ($exists -eq "0") {
-        if ($kind -cne "absent") { throw "$context exists=0 without type=absent:`n$($Raw.Trim())" }
-        return @{ kind = "absent"; size = "0"; mode = ""; md5 = "" }
-    }
-    if ($kind -cne "regular") {
-        return @{ kind = $kind; size = "0"; mode = ""; md5 = "" }
-    }
-    if ($md5 -cnotmatch '^[0-9a-f]{32}$') { throw "$context regular file without a computed md5:`n$($Raw.Trim())" }
-    return @{
-        kind = "regular"
-        size = [string]$size
-        mode = [Convert]::ToString([int]$modeDec, 8)
-        md5 = $md5
-    }
-}
-
-function Get-DestinationFileStatus([string]$Destination) {
-    $r = Invoke-StagedC @("--file-status", $Destination)
-    $parsed = ConvertFrom-KvLines $r.Out
-    $state = ConvertFrom-FileStatus $Destination $parsed $r.Out
-    if ($r.Code -ne 0) { throw "file-status nonzero exit for $Destination (exit $($r.Code))" }
-    return $state
+    return $states
 }
 
 function Invoke-DestinationProbe() {
-    Step "Probing destination state (staged C --file-status)"
+    Step "Probing destination state (BusyBox ls -l / md5sum)"
     $dests = @($Candidates | ForEach-Object { $_.Dest })
     foreach ($p in $HandoffRequiredPaths) { if ($dests -notcontains $p) { $dests += $p } }
-    foreach ($dest in $dests) {
-        $state = $null
-        try {
-            $state = Get-DestinationFileStatus $dest
-        } catch {
-            Stop-WithValidation $_.Exception.Message
+    $script:Probe = Get-FileStatus $dests
+    foreach ($cand in $Candidates) {
+        $kind = $Probe[$cand.Dest]["kind"]
+        if ($kind -in @("symlink", "other")) {
+            Stop-WithValidation "destination $($cand.Dest) is a $kind, not a regular file"
         }
-        $script:Probe[$dest] = $state
     }
 }
 
@@ -645,6 +631,8 @@ function Set-UpgradeGates() {
         $exists = ($null -ne $state) -and ($state["kind"] -eq "regular")
         if ($cand.Condition -eq "if-missing" -and $exists -and -not $CleanInstall) {
             $cand.Action = "preserve"
+        } elseif ($exists -and ($state["md5"] -ceq $cand.Md5) -and ($state["mode"] -ceq $cand.Mode)) {
+            $cand.Action = "unchanged"
         } elseif ($exists) {
             $cand.Action = "replace"
         } else {
@@ -661,75 +649,46 @@ function Set-UpgradeGates() {
     }
 }
 
-function Get-StorageStatus([long]$Floor) {
-    $r = Invoke-StagedC @("--storage-status", [string]$Floor)
-    $parsed = ConvertFrom-KvLines $r.Out
-    if ($r.Code -ne 0 -and -not $parsed.Contains("available_bytes")) {
-        throw "staged codex_webui --storage-status failed (exit $($r.Code)):`n$($r.Out.Trim())"
-    }
-    if (-not $parsed.Contains("available_bytes")) {
-        throw "storage-status did not report available_bytes:`n$($r.Out.Trim())"
-    }
-    $script:AvailableBytes = [long]$parsed["available_bytes"]
-    if ($parsed.Contains("storage_path")) { $script:StoragePath = $parsed["storage_path"] }
-    if ($parsed.Contains("fragment_bytes")) { $script:Fragment = [long]$parsed["fragment_bytes"] }
-    return $parsed
+function Get-ActiveCandidates() {
+    return @($Candidates | Where-Object { $_.Action -in @("replace", "create") })
+}
+
+function Get-RamStatus() {
+    # Free RAM from /proc/meminfo; staging and rollback copies live in tmpfs.
+    $out = Invoke-Remote "cat /proc/meminfo" $null 30000
+    if ($out -cnotmatch '(?m)^MemFree:\s+(\d+) kB\s*$') { Stop-WithValidation "could not read MemFree from /proc/meminfo" }
+    $script:RamFreeBytes = [long]$Matches[1] * 1024
 }
 
 function Build-Plans() {
-    Step "Building capacity plans per destination"
+    Step "Planning changed destinations"
     $script:ForwardTotal = 0
     $script:RollbackTotal = 0
-    $planShortfall = $false
+    $script:StagedTotal = 0
     foreach ($cand in $Candidates) {
-        if ($cand.Action -notin @("replace", "create")) { continue }
-        $r = Invoke-StagedC @("--install-plan", "$Stage/$($cand.StagedName)", $cand.Dest, $cand.Mode, [string]$FloorBytes)
-        $parsed = ConvertFrom-KvLines $r.Out
-        # C returns exit 1 for a capacity shortfall while still emitting ok=1
-        # with the complete reservation fields. Accept that truthful refusal
-        # and classify it as capacity; any other nonzero (ok=0: mode/floor/
-        # allowlist/evaluate refusal) is a validation failure.
-        $ok = $parsed.Contains("ok") -and ($parsed["ok"] -eq "1")
-        if (-not $ok) {
-            Stop-WithValidation "install-plan failed for $($cand.Dest) (exit $($r.Code)):`n$($r.Out.Trim())"
-        }
-        $capacityRefusal = ($r.Code -ne 0) -and $parsed.Contains("sufficient") -and ($parsed["sufficient"] -eq "0")
-        if (($r.Code -ne 0) -and -not $capacityRefusal) {
-            Stop-WithValidation "install-plan failed for $($cand.Dest) (exit $($r.Code)):`n$($r.Out.Trim())"
-        }
-        if (-not $parsed.Contains("candidate_reservation_bytes") -or -not $parsed.Contains("rollback_reservation_bytes")) {
-            Stop-WithValidation "install-plan for $($cand.Dest) missing reservation keys:`n$($r.Out.Trim())"
-        }
-        $cand.ForwardReservation = [long]$parsed["candidate_reservation_bytes"]
-        $cand.RollbackReservation = [long]$parsed["rollback_reservation_bytes"]
-        if ($capacityRefusal) {
-            $available = $parsed["available_bytes"]
-            if (-not $available) { $available = "?" }
-            $required = $parsed["required_bytes"]
-            if (-not $required) { $required = "?" }
-            $VerdictReasons.Add("install-plan insufficient for $($cand.Dest): available $available < required $required (exit $($r.Code), sufficient=0)") | Out-Null
-            $planShortfall = $true
-        }
-        $script:ForwardTotal += $cand.ForwardReservation
-        $script:RollbackTotal += $cand.RollbackReservation
+        $script:StagedTotal += $cand.Bytes
+        $state = $Probe[$cand.Dest]
+        if ($cand.Action -in @("replace", "create")) { $script:ForwardTotal += $cand.Bytes }
+        if ($cand.Action -eq "replace") { $script:RollbackTotal += [long]$state["size"] }
         $existsFlag = 0
-        if ($cand.Action -eq "replace") { $existsFlag = 1 }
-        KV "destination dest=$($cand.Dest) exists=$existsFlag action=$($cand.Action) bytes=$($cand.Bytes) mode=$($cand.Mode) forward_reservation_bytes=$($cand.ForwardReservation) rollback_reservation_bytes=$($cand.RollbackReservation)"
+        if ($state["kind"] -eq "regular") { $existsFlag = 1 }
+        KV "destination dest=$($cand.Dest) exists=$existsFlag action=$($cand.Action) bytes=$($cand.Bytes) mode=$($cand.Mode)"
     }
-    if ($planShortfall) {
-        # Truthful classification: any per-candidate shortfall blocks on
-        # capacity before Set-Verdict's aggregate comparison.
-        $script:Verdict = $VerdictCapacity
-    }
+    # Staged candidates already occupy RAM; rollback copies are added next.
+    $script:RamRequiredBytes = $RollbackTotal + $RamMarginBytes
 }
 
 function Count-BackupGenerations() {
     $cmd = 'for d in /data/codex-backups /data/codex/resource-backups /data/codex/update-backups; do [ -d "$d" ] || continue; for n in "$d"/*; do [ -e "$n" ] && echo "$n"; done; done'
     $out = Invoke-Remote $cmd $null 30000
     foreach ($line in ($out -split "`n")) {
-        $name = $line.Trim().Split('/')[-1]
+        $path = $line.Trim()
+        $name = $path.Split('/')[-1]
         if (-not $name) { continue }
-        if ($name -match '^webui-handoff-\d{8}-\d{6}$') { $Generations["handoff"]++ }
+        if ($name -match '^webui-handoff-\d{8}-\d{6}$') {
+            $Generations["handoff"]++
+            if ($path -ceq "$HandoffRoot/$name") { $HandoffDirs.Add($path) | Out-Null }
+        }
         elseif ($name -match '^settings_\d{8}_\d{6}$') { $Generations["settings"]++ }
         elseif ($name -match '^\d{8}_\d{6}$') { $Generations["resource"]++ }
         elseif ($name -match '^\d+$') { $Generations["update"]++ }
@@ -738,31 +697,19 @@ function Count-BackupGenerations() {
 
 function Get-HandoffEstimate() {
     $total = 0
-    $reservation = 0
     foreach ($path in $HandoffRequiredPaths) {
         if ($Probe.Contains($path) -and $Probe[$path]["kind"] -eq "regular") {
-            $size = [long]$Probe[$path]["size"]
-            $total += $size
-            $reservation += (Get-CeilFragment $size $Fragment) + $Fragment
+            $total += [long]$Probe[$path]["size"]
         }
     }
     $script:HandoffEstimate = $total
-    $script:HandoffReservation = $reservation
 }
 
 function Set-Verdict() {
     if ($Verdict -eq $VerdictConfigUncertain) { return }
-    $script:RequiredTotal = $FloorBytes + $HandoffReservation + $ForwardTotal + $RollbackTotal
-    if ($Verdict -eq $VerdictCapacity) {
-        # Per-candidate plan shortfall already classified truthfully.
-        return
-    }
-    if ($AvailableBytes -lt ($FloorBytes + $HandoffReservation + $ForwardTotal)) {
-        $script:Verdict = $VerdictCapacity
-        $VerdictReasons.Add("available $AvailableBytes < floor+handoff+forward $($FloorBytes + $HandoffReservation + $ForwardTotal)") | Out-Null
-    } elseif ($AvailableBytes -lt $RequiredTotal) {
+    if ($RamFreeBytes -lt $RamRequiredBytes) {
         $script:Verdict = $VerdictRollbackCapacity
-        $VerdictReasons.Add("available $AvailableBytes < total required incl. rollback $RequiredTotal") | Out-Null
+        $VerdictReasons.Add("free RAM $RamFreeBytes < rollback copies + margin $RamRequiredBytes") | Out-Null
     } else {
         $script:Verdict = $VerdictAllowed
     }
@@ -777,7 +724,7 @@ function Show-PreflightReport() {
     Info "Status so far uses private volatile staging under /var/volatile/codex-install-* only."
     Info "No persistent hub paths have been written, pruned, handed off, installed, or restarted yet."
     if ($PreflightOnly) {
-        Info "Mode: -PreflightOnly — stages, verifies, plans capacity, and prints a terminal verdict; performs no persistent writes and no service actions."
+        Info "Mode: -PreflightOnly — stages, verifies, compares, and prints a terminal verdict; performs no persistent writes and no service actions."
     }
     if ($CleanInstall) {
         Info "Install mode: explicit clean install — configuration candidates are regenerated."
@@ -788,6 +735,7 @@ function Show-PreflightReport() {
     if ($CleanInstall) { $mode = "clean" }
     KV "preflight_mode=$mode"
     KV "candidate_count=$($Candidates.Count)"
+    KV "changed_count=$((Get-ActiveCandidates).Count)"
     Info "Candidate destinations and nonsensitive expected MD5 hashes (sensitive values redacted):"
     for ($i = 0; $i -lt $Candidates.Count; $i++) {
         $cand = $Candidates[$i]
@@ -802,15 +750,14 @@ function Show-PreflightReport() {
     }
     KV "backup_generations handoff=$($Generations['handoff']) resource=$($Generations['resource']) settings=$($Generations['settings']) update=$($Generations['update'])"
     KV "handoff_estimate_bytes=$HandoffEstimate"
-    KV "handoff_reservation_bytes=$HandoffReservation"
-    KV "storage_path=$StoragePath"
-    KV "available_bytes=$AvailableBytes"
-    KV "fragment_bytes=$Fragment"
-    KV "floor_bytes=$FloorBytes"
+    KV "flash_capacity_check=two-phase-commit"
     KV "forward_total_bytes=$ForwardTotal"
     KV "rollback_total_bytes=$RollbackTotal"
-    KV "required_total_bytes=$RequiredTotal"
-    Info "Capacity summary: available=$AvailableBytes floor=$FloorBytes forward=$ForwardTotal rollback=$RollbackTotal required_total=$RequiredTotal storage_path=$(if ($StoragePath) { $StoragePath } else { '(unset)' })"
+    KV "staged_total_bytes=$StagedTotal"
+    KV "ram_free_bytes=$RamFreeBytes"
+    KV "ram_required_bytes=$RamRequiredBytes"
+    Info "Flash free space cannot be measured on this firmware (no df/statvfs): changed files ($ForwardTotal bytes) are written as $NewSuffix copies first, and the install aborts with no live changes if flash fills up."
+    Info "RAM: free=$RamFreeBytes required=$RamRequiredBytes (rollback copies $RollbackTotal + margin $RamMarginBytes)"
     foreach ($reason in $VerdictReasons) {
         KV "verdict_reason=$reason"
         Info "verdict_reason: $reason"
@@ -824,20 +771,20 @@ function Show-Verdict() {
     KV "verdict=$Verdict"
     Info "Terminal verdict: $Verdict"
     if ($Verdict -eq $VerdictAllowed) {
-        Info "ALLOWED — capacity, rollback reservation, and validation are sufficient for the selected mode."
+        Info "ALLOWED — validation and RAM headroom are sufficient for the selected mode."
         if ($PreflightOnly) {
             Info "Preflight-only complete: volatile staging will be removed; no persistent changes or service actions were performed."
         } else {
-            Info "Persistent install may proceed after this report (atomic same-directory replacements via staged C engine)."
+            Info "Persistent install may proceed after this report ($NewSuffix copies, then same-directory renames)."
         }
     } elseif ($Verdict -eq $VerdictCapacity) {
-        Info "BLOCKED_CAPACITY — free space is below the floor plus handoff and forward candidate reservations. No persistent changes."
+        Info "BLOCKED_CAPACITY — flash filled up while writing the new copies; they were removed and no live file changed."
     } elseif ($Verdict -eq $VerdictRollbackCapacity) {
-        Info "BLOCKED_ROLLBACK_CAPACITY — free space covers forward install reservations but not the additional rollback reservation. No persistent changes."
+        Info "BLOCKED_ROLLBACK_CAPACITY — not enough free RAM to hold rollback copies of the files being replaced. No persistent changes."
     } elseif ($Verdict -eq $VerdictConfigUncertain) {
         Info "BLOCKED_CONFIGURATION_UNCERTAINTY — required configuration state is missing or ambiguous for default upgrade; pass -HubId or use -CleanInstall. No persistent changes."
     } else {
-        Info "BLOCKED_VALIDATION_FAILURE — staging, path, hash, or plan validation failed; see verdict_reason lines above. No persistent changes."
+        Info "BLOCKED_VALIDATION_FAILURE — staging, path, hash, or probe validation failed; see verdict_reason lines above. No persistent changes."
     }
 }
 
@@ -852,8 +799,6 @@ function Add-RollbackCopies() {
         $cand = $Candidates[$i]
         if ($cand.Action -eq "replace") {
             $state = $Probe[$cand.Dest]
-            # Flat leaf under the staging dir: C requires SOURCE
-            # /var/volatile/codex-install-<dir>/<leaf>.
             $rb = "$Stage/rb-{0:D2}-{1}" -f $i, ($cand.Dest.Split('/')[-1])
             $cmd = "cp -p $(Remote-Quote $cand.Dest) $(Remote-Quote $rb) && chmod 600 $(Remote-Quote $rb) && md5sum $(Remote-Quote $rb)"
             $out = Invoke-Remote $cmd $null 90000
@@ -864,10 +809,8 @@ function Add-RollbackCopies() {
             $Changed.Add(@{
                 Dest = $cand.Dest
                 Mode = $state["mode"]
-                CanonicalMode = $cand.Mode
                 Md5 = $state["md5"]
                 Rb = $rb
-                Bytes = [long]$state["size"]
                 WasAbsent = $false
                 Done = $false
             }) | Out-Null
@@ -878,10 +821,8 @@ function Add-RollbackCopies() {
             $Changed.Add(@{
                 Dest = $cand.Dest
                 Mode = $cand.Mode
-                CanonicalMode = $cand.Mode
                 Md5 = ""
                 Rb = ""
-                Bytes = 0
                 WasAbsent = $true
                 Done = $false
             }) | Out-Null
@@ -889,20 +830,26 @@ function Add-RollbackCopies() {
     }
 }
 
-function Invoke-Retention([string]$Label) {
-    Step $Label
-    $r = Invoke-StagedC @("--prune-backups")
-    foreach ($line in ($r.Out.Trim() -split "`n")) { Info $line }
-    if ($r.Code -ne 0 -and $r.Out -notmatch "over_budget=1 errors=0") {
-        throw "staged --prune-backups failed (exit $($r.Code))"
+function Invoke-HandoffPrune() {
+    # Keep only the newest $HandoffKeep installer handoff generations. Only
+    # installer-owned webui-handoff-<stamp> directories directly under
+    # $HandoffRoot are ever removed; other backups are never touched.
+    Step "Pruning installer handoff backups (keeping newest $HandoffKeep)"
+    $sorted = @($HandoffDirs | Sort-Object)
+    $count = [Math]::Max(0, $sorted.Count - $HandoffKeep)
+    $pattern = '^' + [regex]::Escape($HandoffRoot) + '/webui-handoff-\d{8}-\d{6}$'
+    for ($i = 0; $i -lt $count; $i++) {
+        $path = $sorted[$i]
+        if ($path -cnotmatch $pattern) { throw "refusing to prune unexpected path '$path'" }
+        $r = Invoke-RemoteRc ("rm -rf " + (Remote-Quote $path)) $null 60000
+        if ($r.Code -ne 0) { Info "warning: could not prune ${path}: $($r.Err.Trim())" } else { KV "pruned=$path" }
     }
+    if ($count -eq 0) { Info "nothing to prune" }
 }
 
 function New-HandoffBackup() {
     Step "Creating bounded handoff backup"
-    # Sizes come from the staged C probe (no remote shell stat). The shell
-    # only copies and accumulates installer-supplied sizes; the budget guard
-    # remains on the hub side.
+    # Sizes come from the BusyBox probe; the budget guard runs on the hub.
     $cmd = "S=`$(date -u +%Y%m%d-%H%M%S); B=$HandoffRoot; " +
         'I="$B/.incomplete-webui-handoff-$S"; ' +
         'mkdir -p "$B" || exit 1; mkdir "$I" || exit 1; tot=0; '
@@ -919,65 +866,69 @@ function New-HandoffBackup() {
     $cmd += 'mv "$I" "$B/webui-handoff-$S" || { rm -rf "$I"; exit 1; }; ' +
         'echo "handoff=$B/webui-handoff-$S"'
     $out = Invoke-Remote $cmd $null 120000
-    $handoffSeen = $false
+    $created = $null
     foreach ($line in ($out.Trim() -split "`n")) {
         Info $line
-        if ($line.StartsWith("handoff=")) { $handoffSeen = $true }
+        if ($line.StartsWith("handoff=")) { $created = $line.Substring(8).Trim() }
     }
-    if (-not $handoffSeen) { throw "handoff directory rename did not complete" }
+    if (-not $created) { throw "handoff directory rename did not complete" }
+    $HandoffDirs.Add($created) | Out-Null
+}
+
+function Remove-NewCopies() {
+    # Remove every <dest>.codex-new this run wrote; return those that failed.
+    $failed = @()
+    foreach ($path in @($NewCopies)) {
+        $r = Invoke-RemoteRc ("rm -f " + (Remote-Quote $path)) $null 30000
+        if ($r.Code -ne 0) { $failed += $path }
+    }
+    $NewCopies.Clear()
+    return $failed
+}
+
+function Write-NewCopies() {
+    # Phase 1: write and verify <dest>.codex-new next to every changed dest.
+    Step "Phase 1: writing verified $NewSuffix copies (no live file changes)"
+    foreach ($cand in (Get-ActiveCandidates)) {
+        $new = $cand.Dest + $NewSuffix
+        $NewCopies.Add($new) | Out-Null
+        $cmd = "cp $(Remote-Quote "$Stage/$($cand.StagedName)") $(Remote-Quote $new) && " +
+            "chmod $(Remote-Quote $cand.Mode) $(Remote-Quote $new) && md5sum $(Remote-Quote $new)"
+        $r = Invoke-RemoteRc $cmd $null 180000
+        $last = ($r.Out.Trim() -split "`n")[-1].Trim()
+        $ok = ($r.Code -eq 0) -and ($last -cmatch '^[0-9a-f]{32}  .+$') -and (($last -split "  ", 2)[0] -ceq $cand.Md5)
+        if (-not $ok) {
+            $left = @(Remove-NewCopies)
+            $reason = $r.Err.Trim()
+            if (-not $reason) { $reason = "copy verification failed" }
+            if ($left.Count -gt 0) {
+                throw (New-Object InstallFailure "could not write $new ($reason) and could not remove $($left -join ', ')")
+            }
+            throw (New-Object CapacityAbort "could not write ${new}: $reason")
+        }
+        Info "staged dest=$new bytes=$($cand.Bytes)"
+    }
 }
 
 function Install-Sequence() {
-    Step "Installing candidates (staged C atomic replace, codex_webui last)"
-    $active = @($Candidates | Where-Object { $_.Action -in @("replace", "create") })
-    $reservations = @($active | ForEach-Object { $_.ForwardReservation + $_.RollbackReservation })
-    for ($pos = 0; $pos -lt $active.Count; $pos++) {
-        $cand = $active[$pos]
-        $rest = 0
-        for ($j = $pos + 1; $j -lt $reservations.Count; $j++) { $rest += $reservations[$j] }
-        # The handoff was already written and consumed its reservation on the
-        # same authoritative backing; per-file floors after handoff are
-        # floor + remaining reservations only.
-        $floor = $FloorBytes + $rest
-        $r = Invoke-StagedC @("--install-file", "$Stage/$($cand.StagedName)", $cand.Dest, $cand.Mode, [string]$floor) 180000
-        $parsed = ConvertFrom-KvLines $r.Out
-        if ($parsed.Contains("rename_completed") -and ($parsed["rename_completed"] -eq "1")) {
-            # The destination was replaced even though C reported a nonzero
-            # outcome (post-write measurement/floor failure): record it as
-            # changed so rollback restores the original.
-            foreach ($item in $Changed) { if ($item.Dest -eq $cand.Dest) { $item.Done = $true } }
-        }
-        # Fail closed: nonzero exit, missing/unrecognized result, or a
-        # completed write whose post-write outcome is bad all abort.
-        $result = $null
-        if ($parsed.Contains("result")) { $result = $parsed["result"] }
-        $resultOk = ($result -eq "installed") -or ($result -eq "no-op")
-        if ($r.Code -ne 0 -or -not $resultOk) {
-            throw "install-file failed for $($cand.Dest) (exit $($r.Code)):`n$($r.Out.Trim())"
-        }
-        if ($result -eq "installed") {
-            if (-not $parsed.Contains("errors") -or ($parsed["errors"] -ne "0")) {
-                throw "install-file post-write outcome failed for $($cand.Dest):`n$($r.Out.Trim())"
-            }
-            if ($parsed.Contains("available_bytes_after")) {
-                $after = -1
-                try { $after = [long]$parsed["available_bytes_after"] } catch { $after = -1 }
-                $floorAfterOk = $parsed.Contains("floor_met_after") -and ($parsed["floor_met_after"] -eq "1")
-                if (($after -lt 0) -or ($after -lt $FloorBytes) -or -not $floorAfterOk) {
-                    throw "install-file post-write floor failed for $($cand.Dest):`n$($r.Out.Trim())"
-                }
-            }
-        }
+    # Phase 2: rename each verified copy over its destination, codex_webui last.
+    Step "Phase 2: renaming new copies into place (codex_webui last)"
+    foreach ($cand in (Get-ActiveCandidates)) {
+        $new = $cand.Dest + $NewSuffix
+        $r = Invoke-RemoteRc ("mv -f " + (Remote-Quote $new) + " " + (Remote-Quote $cand.Dest)) $null 60000
+        if ($r.Code -ne 0) { throw "rename failed for $($cand.Dest): $($r.Err.Trim())" }
+        $NewCopies.Remove($new)
         foreach ($item in $Changed) { if ($item.Dest -eq $cand.Dest) { $item.Done = $true } }
         Info "installed dest=$($cand.Dest) mode=$($cand.Mode) bytes=$($cand.Bytes)"
     }
 }
 
 function Test-Installed() {
-    Step "Verifying installed bytes, hashes, modes, and storage (staged C --file-status)"
-    $active = @($Candidates | Where-Object { $_.Action -in @("replace", "create") })
+    Step "Verifying installed bytes, hashes, and modes"
+    $active = Get-ActiveCandidates
+    $states = Get-FileStatus @($active | ForEach-Object { $_.Dest })
     foreach ($cand in $active) {
-        $state = Get-DestinationFileStatus $cand.Dest
+        $state = $states[$cand.Dest]
         if ($state["kind"] -cne "regular") {
             throw "post-install verification failed for $($cand.Dest): kind=$($state['kind'])"
         }
@@ -987,26 +938,24 @@ function Test-Installed() {
         if ($state["md5"] -cne $cand.Md5) {
             throw "post-install checksum mismatch for $($cand.Dest)"
         }
-        $gotMode = -1
-        try { $gotMode = [Convert]::ToInt32($state["mode"], 8) } catch { $gotMode = -1 }
-        if ($gotMode -ne [Convert]::ToInt32($cand.Mode, 8)) {
+        if ($state["mode"] -cne $cand.Mode) {
             throw "post-install mode mismatch for $($cand.Dest): expected $($cand.Mode) got $($state['mode'])"
         }
     }
-    Get-StorageStatus $FloorBytes | Out-Null
-    Info "installed candidates verified; storage rechecked"
+    Info "installed candidates verified"
 }
 
 function Invoke-Rollback([string]$Trigger) {
     Step "Rolling back changed paths"
     Info "trigger: $Trigger"
-    $md5Re = '^[0-9a-f]{32}  .+$'
+    $incomplete = $false
+    foreach ($path in @(Remove-NewCopies)) {
+        $incomplete = $true
+        Info "ROLLBACK FAILED could not remove leftover $path"
+    }
     $doneItems = @($Changed | Where-Object { $_.Done })
     $pending = @($doneItems)
     [Array]::Reverse($pending)
-    $restoreItems = @($pending | Where-Object { -not $_.WasAbsent })
-    $reservations = @($restoreItems | ForEach-Object { (Get-CeilFragment ([long]$_.Bytes) $Fragment) + $Fragment })
-    $incomplete = $false
     foreach ($item in $pending) {
         $dest = $item.Dest
         if ($item.WasAbsent) {
@@ -1016,35 +965,21 @@ function Invoke-Rollback([string]$Trigger) {
                 Info "ROLLBACK FAILED remove new path ${dest}: $($r.Out.Trim())"
                 continue
             }
-            $r = Invoke-RemoteRc ("test ! -e " + (Remote-Quote $dest)) $null 30000
-            if ($r.Code -ne 0) {
-                $incomplete = $true
-                Info "ROLLBACK FAILED path still present after remove: $dest"
-                continue
-            }
             Info "removed new path $dest (original absence recorded)"
             continue
         }
-        $index = [Array]::IndexOf($restoreItems, $item)
-        # Caller floor = 1048576 plus all later reverse restorations.
-        $rest = 0
-        for ($j = $index + 1; $j -lt $reservations.Count; $j++) { $rest += $reservations[$j] }
-        $floor = $FloorBytes + $rest
-        # C requires MODE to equal the destination's canonical allowlist
-        # mode; the observed pre-install mode is restored afterwards.
-        $r = Invoke-StagedC @("--install-file", [string]$item.Rb, $dest, [string]$item.CanonicalMode, [string]$floor, "--rollback-restore") 180000
+        # Restore the RAM copy beside the destination with its observed mode,
+        # then rename over it.
+        $tmp = $dest + $RestoreSuffix
+        $cmd = "cp $(Remote-Quote ([string]$item.Rb)) $(Remote-Quote $tmp) && " +
+            "chmod $(Remote-Quote ([string]$item.Mode)) $(Remote-Quote $tmp) && " +
+            "mv -f $(Remote-Quote $tmp) $(Remote-Quote $dest)"
+        $r = Invoke-RemoteRc $cmd $null 180000
         if ($r.Code -ne 0) {
             $incomplete = $true
-            Info "ROLLBACK FAILED restore ${dest}: $($r.Out.Trim())"
+            Invoke-RemoteRc ("rm -f " + (Remote-Quote $tmp)) $null 30000 | Out-Null
+            Info "ROLLBACK FAILED restore ${dest}: $(($r.Err + $r.Out).Trim())"
             continue
-        }
-        if ([string]$item.Mode -ne [string]$item.CanonicalMode) {
-            $rc = Invoke-RemoteRc ("chmod " + (Remote-Quote ([string]$item.Mode)) + " " + (Remote-Quote $dest)) $null 30000
-            if ($rc.Code -ne 0) {
-                $incomplete = $true
-                Info "ROLLBACK FAILED mode restore ${dest}: $($rc.Out.Trim())"
-                continue
-            }
         }
         Info "restored $dest mode=$($item.Mode)"
     }
@@ -1059,18 +994,14 @@ function Invoke-Rollback([string]$Trigger) {
             }
             continue
         }
-        $r = Invoke-RemoteRc ("md5sum " + (Remote-Quote $dest)) $null 60000
-        $first = ($r.Out.Trim() -split "`n")[0].Trim()
-        $ok = ($r.Code -eq 0) -and ($first -cmatch $md5Re)
-        if ($ok) { $ok = (($first -split "  ", 2)[0] -ceq $item.Md5) }
-        if (-not $ok) {
+        if ((Get-RemoteMd5 $dest) -cne $item.Md5) {
             $incomplete = $true
             Info "ROLLBACK VERIFY FAILED md5 for $dest"
         }
     }
     if ($incomplete) {
         $script:PreserveStage = $true
-        throw "rollback incomplete; staged tree preserved for manual recovery at $Stage. Do NOT reboot; inspect the staged rollback copies and restore manually."
+        throw "rollback incomplete; staged tree preserved for manual recovery at $Stage. Do NOT reboot (it is in RAM); inspect the staged rollback copies and restore manually."
     }
     Info "rollback verified: all changed paths restored"
     Remove-StagingTree
@@ -1107,7 +1038,8 @@ function Invoke-PostWiring() {
 
 function Start-Services() {
     $start = "killall codex_webui 2>/dev/null || true; killall codex_bthid_keyboard 2>/dev/null || true; " +
-        "/data/codex/offline_egress_guard.sh monitor >> /cache/codex-init.log 2>&1 & " +
+        "if ! ps | grep '[o]ffline_egress_guard.sh monitor' >/dev/null 2>&1; then " +
+        "/data/codex/offline_egress_guard.sh monitor >> /cache/codex-init.log 2>&1 & fi; " +
         "if ! ps | grep '[d]ropbear' >/dev/null 2>&1; then /usr/sbin/dropbear -R -p 22; fi; " +
         "mkdir -p /cache/bin; ln -sf /data/codex/bin/codex_bthid_keyboard /cache/bin/bthid_keyboard; " +
         "/data/codex/bin/codex_webui 8080 >> /cache/codex-init.log 2>&1 & " +
@@ -1120,12 +1052,17 @@ function Start-Services() {
 }
 
 function Ensure-ParentDirs() {
-    $dirs = @($Candidates | Where-Object { $_.Action -in @("replace", "create") } | ForEach-Object {
+    $dirs = @(Get-ActiveCandidates | ForEach-Object {
         $i = $_.Dest.LastIndexOf("/")
         if ($i -le 0) { "/" } else { $_.Dest.Substring(0, $i) }
     } | Sort-Object -Unique)
     $cmd = "mkdir -p " + (($dirs | ForEach-Object { Remote-Quote $_ }) -join " ")
     Invoke-Remote $cmd $null 30000 | Out-Null
+}
+
+function Test-CloudBlockerChanged() {
+    $cloud = @("/opt/luaworks/tasks/connectserver/netservicestarter.lua", "/data/codex/cloud_blocker.conf")
+    return [bool](Get-ActiveCandidates | Where-Object { $cloud -contains $_.Dest })
 }
 
 # ------------------------------------------------------------------ main
@@ -1183,10 +1120,7 @@ Test-StagedMd5
 
 Invoke-DestinationProbe
 Set-UpgradeGates
-
-Step "Querying authoritative storage status"
-$status = Get-StorageStatus $FloorBytes
-foreach ($key in ($status.Keys | Sort-Object)) { KV "storage $key=$($status[$key])" }
+Get-RamStatus
 
 Count-BackupGenerations
 Get-HandoffEstimate
@@ -1211,27 +1145,32 @@ if ($Verdict -ne $VerdictAllowed) {
     exit 2
 }
 
+if ((Get-ActiveCandidates).Count -eq 0) {
+    Remove-StagingTree
+    Step "Done"
+    Info "The hub already matches this payload; nothing was written or restarted."
+    exit 0
+}
+
 try {
     Add-RollbackCopies
-    Invoke-Retention "Step 3 retention (before handoff)"
     New-HandoffBackup
-    Invoke-Retention "Step 3 retention (after handoff)"
-    # The handoff reservation was consumed by the handoff itself on the same
-    # authoritative backing; recheck against the remaining floor + forward +
-    # rollback only (never re-charge the handoff).
-    $postHandoffRequired = $FloorBytes + $ForwardTotal + $RollbackTotal
-    Step "Rechecking storage after retention and handoff"
-    Get-StorageStatus ([Math]::Max($FloorBytes, $postHandoffRequired)) | Out-Null
-    if ($AvailableBytes -lt $postHandoffRequired) {
-        throw "storage recheck failed: available $AvailableBytes < required $postHandoffRequired"
-    }
+    Invoke-HandoffPrune
     Ensure-ParentDirs
+    Write-NewCopies
     Install-Sequence
     Test-Installed
+} catch [CapacityAbort] {
+    $script:Verdict = $VerdictCapacity
+    $VerdictReasons.Add($_.Exception.Message) | Out-Null
+    KV "verdict_reason=$($_.Exception.Message)"
+    Show-Verdict
+    Remove-StagingTree
+    exit 2
 } catch {
     $err = $_.Exception.Message
     $anyDone = [bool]($Changed | Where-Object { $_.Done })
-    if ($anyDone) {
+    if ($anyDone -or $NewCopies.Count -gt 0) {
         try {
             Invoke-Rollback $err
         } catch {
@@ -1274,7 +1213,8 @@ try {
 
 Remove-StagingTree
 
-if (-not $SkipCloudSuppression -and -not $NoApplyCloudRestart) {
+$cloudChanged = Test-CloudBlockerChanged
+if ($cloudChanged -and -not $NoApplyCloudRestart) {
     Step "Applying cloud blocker"
     Info "Rebooting the hub so Logitech cloud services restart in blocked mode."
     Invoke-Remote "(/bin/sleep 2; /sbin/reboot || reboot) >/dev/null 2>&1 & echo rebooting" $null 30000 | Out-Null
@@ -1293,6 +1233,6 @@ Info "Persistent paths were mutated only after preflight ALLOWED; staging was vo
 Info "Web UI: http://$HubHost`:8080/"
 Info "Web UI authentication: disabled"
 if (-not $SkipCloudSuppression) {
-    Info "Cloud blocker: enabled and applied"
+    if ($cloudChanged) { Info "Cloud blocker: enabled and applied" } else { Info "Cloud blocker: enabled (unchanged)" }
 }
 Info "If IR commands do not work, update /data/codex/hub_id with the correct hub id and restart codex_webui."

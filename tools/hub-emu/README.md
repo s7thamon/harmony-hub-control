@@ -124,6 +124,11 @@ and leaves the copy-failure seam explicitly disarmed.
 
 ### Step 4A capacity-gated install fixtures
 
+> These fixtures exercise C maintenance modes (`--storage-status`,
+> `--install-plan`, `--install-file`, `--prune-backups`) that the current
+> `codex_webui` does not implement. `install_webui.py` / `install_webui.ps1`
+> no longer use them; they install with BusyBox commands only.
+
 The installer's capacity gate and atomic same-directory installs run against
 the box's REAL MIPS maintenance CLI — `codex_webui --storage-status`,
 `--install-plan`, `--install-file [--rollback-restore]` — under qemu-mips,
