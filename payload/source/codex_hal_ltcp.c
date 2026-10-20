@@ -1,19 +1,87 @@
 #include <arpa/inet.h>
 #include <ctype.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <netinet/in.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#include <sys/file.h>
 #include <sys/socket.h>
 #include <sys/time.h>
+#include <time.h>
 #include <unistd.h>
 
 #define HAL_PORT 16716
 #define LTCP_FRAME_SIZE 64
 #define MAX_JSON_SIZE 16383
 #define MAX_RESPONSE_SIZE 32768
+
+/*
+ * Stock hal frees its global Bluetooth HID instance inside
+ * bt_hid_disconnect() and then sleeps ~1 s before clearing the pointer, so a
+ * second bthid.* call that lands in that window reads freed memory and
+ * crashes hal (seen 2026: two bthid.connect calls 0.8 s apart).  Every
+ * bthid.* call from our tools takes one shared lock, and calls that follow a
+ * connect/disconnect wait out a cool-down first.
+ */
+#define BTHID_LOCK_PATH "/var/run/codex-bthid.lock"
+#define BTHID_STAMP_PATH "/var/run/codex-bthid.last"
+#define BTHID_TEARDOWN_COOLDOWN_MS 1500
+
+static long long bthid_now_ms(void) {
+    struct timespec ts;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) return 0;
+    return (long long)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+}
+
+static int bthid_guard_begin(const char *cmd) {
+    int fd, stamp;
+    char text[32];
+    ssize_t n;
+    long long last = 0, wait_ms;
+    if (strncmp(cmd, "bthid.", 6) != 0) return -1;
+    fd = open(BTHID_LOCK_PATH, O_CREAT | O_RDWR | O_CLOEXEC, 0600);
+    if (fd < 0) return -1;
+    while (flock(fd, LOCK_EX) != 0) {
+        if (errno != EINTR) {
+            close(fd);
+            return -1;
+        }
+    }
+    stamp = open(BTHID_STAMP_PATH, O_RDONLY | O_CLOEXEC);
+    if (stamp >= 0) {
+        n = read(stamp, text, sizeof(text) - 1);
+        close(stamp);
+        if (n > 0) {
+            text[n] = 0;
+            last = strtoll(text, NULL, 10);
+        }
+    }
+    wait_ms = last > 0 ? last + BTHID_TEARDOWN_COOLDOWN_MS - bthid_now_ms() : 0;
+    if (wait_ms > BTHID_TEARDOWN_COOLDOWN_MS) wait_ms = BTHID_TEARDOWN_COOLDOWN_MS;
+    if (wait_ms > 0) usleep((useconds_t)wait_ms * 1000);
+    return fd;
+}
+
+static void bthid_guard_end(int fd, const char *cmd) {
+    int stamp, len;
+    char text[32];
+    if (fd < 0) return;
+    if (strcmp(cmd, "bthid.connect") == 0 || strcmp(cmd, "bthid.disconnect") == 0) {
+        stamp = open(BTHID_STAMP_PATH, O_CREAT | O_WRONLY | O_TRUNC | O_CLOEXEC, 0600);
+        if (stamp >= 0) {
+            len = snprintf(text, sizeof(text), "%lld\n", bthid_now_ms());
+            if (len > 0 && write(stamp, text, (size_t)len) < 0) {
+                /* best effort: a missing stamp only skips the cool-down */
+            }
+            close(stamp);
+        }
+    }
+    flock(fd, LOCK_UN);
+    close(fd);
+}
 
 static int send_all(int fd, const unsigned char *buf, size_t len) {
     size_t sent = 0;
@@ -298,8 +366,8 @@ static int parse_hex_payload(const char *hex, unsigned char **out, size_t *outle
     return 0;
 }
 
-static int run_ltcp_once(const char *cmd, const char *data, int timeout, const char *payload_hex,
-                         char *response, size_t response_len) {
+static int run_ltcp_once_unguarded(const char *cmd, const char *data, int timeout, const char *payload_hex,
+                                   char *response, size_t response_len) {
     char *json;
     unsigned char *binary = NULL;
     unsigned char *request = NULL;
@@ -409,6 +477,14 @@ static int run_ltcp_once(const char *cmd, const char *data, int timeout, const c
     free(payload);
     free(buf);
     return 0;
+}
+
+static int run_ltcp_once(const char *cmd, const char *data, int timeout, const char *payload_hex,
+                         char *response, size_t response_len) {
+    int guard = bthid_guard_begin(cmd);
+    int rc = run_ltcp_once_unguarded(cmd, data, timeout, payload_hex, response, response_len);
+    bthid_guard_end(guard, cmd);
+    return rc;
 }
 
 static int json_reply_code(const char *json) {

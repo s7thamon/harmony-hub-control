@@ -80,12 +80,12 @@ PINNED_SOURCES = {
         "070278725b6d2a4b9590efb4e126e07f68e5f67930da33b7cd65ac0f00dad8c5",
     ),
     "codex_bthid_keyboard.c": (
-        "cfb831152ccd576ea5bb307e71c687212c60c684",
-        "fcfc5c9c44ce5c0ea599dd51082d8341ef75de255b9979f78233c9d8e59c0375",
+        "62f3d35627d726576dc7a6b048cfc66cd3ae8ef2",
+        "9d411cc10970643f2d5423a9b1bb90830121784093917685388615b2db7c0e2b",
     ),
     "codex_hal_ltcp.c": (
-        "03ba4c72cccd173606cde7c63f51e421c42f2fdc",
-        "a24dc967d610af9cb6e59c35822c84f7ae7a4ed8a2a3efdfd43f9b5972dd103d",
+        "f8ce8e7c57e36f39db80da90a337eb68be052700",
+        "de2dfedb38042342186e57eb2e5f9d3469b4b153627c4be133596cc2fb1b280a",
     ),
 }
 
