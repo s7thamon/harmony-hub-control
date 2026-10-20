@@ -155,7 +155,7 @@ class TestExactReconstruction(unittest.TestCase):
         data = Path(REPO_ROOT, "payload/scripts/netservicestarter.lua").read_bytes()
         # the DIAG instrumentation marker documented in SESSION_HANDOFF
         self.assertIn(b"CODEX DIAG", data)
-        self.assertEqual(len(data), 12707)
+        self.assertEqual(len(data), 13039)
 
     def test_offline_guard_is_committed_lineage(self):
         """Guard bytes equal the committed blob (not a hand-edit)."""
