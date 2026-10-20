@@ -10,9 +10,16 @@ local connect = require("tasks.connectserver.core.utils")
 local REQUEST_FILE = "/var/volatile/codex-activity-request.json"
 local RESPONSE_FILE = "/var/volatile/codex-activity-response.json"
 local CLOUD_BLOCKER_FILE = "/data/codex/cloud_blocker.conf"
+-- The activityengine task is the only listener for process_activity, so a
+-- synchronous send is a FIFO barrier behind the init_activity_engine that
+-- harmonyengine broadcasts while handling config_new.
+local ACTIVITY_ENGINE_BARRIER_MESSAGE = "process_activity"
+-- A long activity start can hold the engine; bound the wait (100 ms steps).
+local ACTIVITY_ENGINE_BARRIER_STEPS = 600
 
 local moduleObj
 local workerTask
+local barrierTask
 local stopRequested = false
 local tokenCounter = 0
 
@@ -171,6 +178,40 @@ local function reloadActivityEngine()
   )
   if not ok or result ~= true then
     return nil, "Harmony activity engine rejected the local resource reload"
+  end
+  return true
+end
+
+-- system.sendMessage has no timeout, so send the barrier from a helper task
+-- and poll it. A timed-out helper stays parked until the engine replies; only
+-- one may be outstanding.
+local function waitForActivityEngine()
+  if not system.isMessageRegistered(ACTIVITY_ENGINE_BARRIER_MESSAGE) then
+    return nil, "activity engine barrier is unavailable"
+  end
+  if barrierTask and system.taskStatus(barrierTask) ~= "dead" then
+    return nil, "previous activity engine barrier is still pending"
+  end
+  local state = {done = false}
+  barrierTask = system.addTask("codexactivity-barrier", function()
+    local ok, result = pcall(
+      system.sendMessage,
+      ACTIVITY_ENGINE_BARRIER_MESSAGE,
+      {}
+    )
+    state.ok, state.result, state.done = ok, result, true
+  end)
+  local steps = 0
+  while not state.done do
+    if steps >= ACTIVITY_ENGINE_BARRIER_STEPS then
+      return nil, "activity engine did not finish rebuilding in time"
+    end
+    steps = steps + 1
+    system.blockingSleep(100)
+  end
+  barrierTask = nil
+  if not state.ok then
+    return nil, "activity engine barrier failed: " .. tostring(state.result)
   end
   return true
 end
@@ -454,6 +495,14 @@ local function commitActivityResources(request)
     return {ok = false, localOnly = true, error = validationError}
   end
 
+  if resources.isAnySyncInProgress() then
+    return {
+      ok = false,
+      localOnly = true,
+      error = "a Harmony sync is in progress; try again when it finishes"
+    }
+  end
+
   local previousConfigVersion = tonumber(digest.configVersion) or 0
   local activityEtag = localEtag()
   local mapEtag = localEtag()
@@ -519,8 +568,17 @@ local function commitActivityResources(request)
       error = err
     }
   end
+  -- harmonyengine is already live with the new config, so a slow activity
+  -- engine is not a reason to roll back: its queued init runs next. Wait so
+  -- remotes don't see the new revision early, and report a timeout.
+  local engineReady, engineError = waitForActivityEngine()
+  if not engineReady then
+    log.warning("activity engine barrier:", engineError)
+  end
 
   digest.configVersion = previousConfigVersion + 1
+  -- connect.statedigest?get answers 304 unless stateVersion changes.
+  digest.stateVersion = (tonumber(digest.stateVersion) or 0) + 1
   local digestOk, digestError = pcall(function()
     digest:saveStateDigest()
     notifyLocalClients()
@@ -542,6 +600,8 @@ local function commitActivityResources(request)
     ok = true,
     localOnly = true,
     reloaded = true,
+    activityEngineReady = engineReady and true or false,
+    activityEngineDetail = engineError,
     configVersion = digest.configVersion,
     activityEtag = activityEtag,
     mapEtag = mapEtag,
