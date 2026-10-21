@@ -1,7 +1,7 @@
 # Melodious web UI: porting the Android app's interface
 
 Status: plan approved by the owner, 2026-10-21 (decisions at the end).
-Slices 1 (shell and remote, PR #21) and 2 (Activities) are done; slices 3
+Slices 1 (shell and remote, PR #21) and 2 (Activities, PR #22) are done; slices 3
 (Devices) and 4 (Settings) follow, one PR at a time.
 
 The owner's native Android app (`Android/`, Kotlin + Jetpack Compose,
@@ -238,7 +238,7 @@ on Apple, Segoe on Windows. That costs 0 bytes. Sizes follow the app:
    goes, so the hub stops injecting it into the page (the C change in
    `render_harmony_shell`).
 
-   Done; see "Slice 2 notes" below.
+   Done: PR #22; see "Slice 2 notes" below.
 3. **Devices:** the IR setup functions move into the device pages (settings,
    learn, import, Find codes, batch sweep, lab, add/edit/delete). The old
    `#ir` page goes.
