@@ -79,6 +79,14 @@ export function powerOff() {
   return runActivity(-1);
 }
 
+// One device's power and timing settings; body from deviceSettingsRequest().
+export function saveDeviceSettings({ deviceId, settings }) {
+  return request("/api/device-settings", {
+    method: "POST",
+    body: { deviceId, settings },
+  });
+}
+
 export function irSend({ deviceId, command, functionId, activityId }) {
   const form = {
     deviceId: String(deviceId),

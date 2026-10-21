@@ -65,6 +65,7 @@
 #define MAX_REQUEST_BODY (1024 * 1024)
 #define MAX_REQUEST_BYTES (MAX_REQUEST_BODY + 8192)
 #define MAX_RESOURCE_FILE (2 * 1024 * 1024)
+#define MAX_DEVICE_SETTINGS 4096
 #define MAX_IR_DEVICES 32
 #define MAX_IR_COMMANDS 160
 #define MAX_IR_STORED_COMMANDS 2048
@@ -2651,54 +2652,24 @@ static int harmony_hbus_call(
     return rc;
 }
 
-static int offline_activity_commit(
-    const char *activities,
-    size_t activities_len,
-    const char *maps,
-    size_t maps_len,
-    const char *functions,
-    size_t functions_len,
-    int activity_changed,
-    int map_changed,
-    int function_changed,
+/* Hand one request to the codexactivity plugin through its request file and
+   wait up to 45 s for the response that carries the same id. */
+static int offline_writer_request(
+    const char *request,
+    size_t request_len,
+    const char *request_id,
     char *reply,
     size_t reply_len,
     char *msg,
     size_t msg_len
 ) {
-    char request_id[96], response_id[96], error[512];
-    char *request = NULL, *response = NULL;
-    size_t request_len, response_len = 0;
-    int attempt, written, rc = -1;
-    snprintf(request_id, sizeof(request_id), "%ld-%ld-%08x-%08x",
-        (long)getpid(), (long)time(NULL),
-        resource_hash(activities, activities_len),
-        resource_hash(maps, maps_len) ^ resource_hash(functions, functions_len));
-    request_len = activities_len + maps_len + functions_len +
-        strlen(request_id) + 480;
-    request = (char *)malloc(request_len);
-    if (!request) {
-        snprintf(msg, msg_len, "not enough memory for the offline activity transaction");
-        goto out;
-    }
-    written = snprintf(request, request_len,
-        "{\"id\":\"%s\",\"op\":\"CommitActivityResources\","
-        "\"activityChanged\":%s,\"mapChanged\":%s,\"functionChanged\":%s,"
-        "\"activityList\":%s,\"mapList\":%s,\"functionList\":%s}",
-        request_id,
-        activity_changed ? "true" : "false",
-        map_changed ? "true" : "false",
-        function_changed ? "true" : "false",
-        activities,
-        maps,
-        functions);
-    if (written < 0 || (size_t)written >= request_len) {
-        snprintf(msg, msg_len, "offline activity transaction was too large");
-        goto out;
-    }
+    char response_id[96], error[512];
+    char *response = NULL;
+    size_t response_len = 0;
+    int attempt, rc = -1;
     unlink(ACTIVITY_RESPONSE_FILE);
     unlink(ACTIVITY_REQUEST_FILE);
-    if (write_file_atomic(ACTIVITY_REQUEST_FILE, request, (size_t)written) != 0) {
+    if (write_file_atomic(ACTIVITY_REQUEST_FILE, request, request_len) != 0) {
         snprintf(msg, msg_len, "could not submit the local activity transaction");
         goto out;
     }
@@ -2730,9 +2701,131 @@ static int offline_activity_commit(
         "the offline activity writer did not answer; its local plugin may not be running");
 out:
     unlink(ACTIVITY_REQUEST_FILE);
-    free(request);
     free(response);
     return rc;
+}
+
+static int offline_activity_commit(
+    const char *activities,
+    size_t activities_len,
+    const char *maps,
+    size_t maps_len,
+    const char *functions,
+    size_t functions_len,
+    int activity_changed,
+    int map_changed,
+    int function_changed,
+    char *reply,
+    size_t reply_len,
+    char *msg,
+    size_t msg_len
+) {
+    char request_id[96];
+    char *request = NULL;
+    size_t request_len;
+    int written, rc = -1;
+    snprintf(request_id, sizeof(request_id), "%ld-%ld-%08x-%08x",
+        (long)getpid(), (long)time(NULL),
+        resource_hash(activities, activities_len),
+        resource_hash(maps, maps_len) ^ resource_hash(functions, functions_len));
+    request_len = activities_len + maps_len + functions_len +
+        strlen(request_id) + 480;
+    request = (char *)malloc(request_len);
+    if (!request) {
+        snprintf(msg, msg_len, "not enough memory for the offline activity transaction");
+        goto out;
+    }
+    written = snprintf(request, request_len,
+        "{\"id\":\"%s\",\"op\":\"CommitActivityResources\","
+        "\"activityChanged\":%s,\"mapChanged\":%s,\"functionChanged\":%s,"
+        "\"activityList\":%s,\"mapList\":%s,\"functionList\":%s}",
+        request_id,
+        activity_changed ? "true" : "false",
+        map_changed ? "true" : "false",
+        function_changed ? "true" : "false",
+        activities,
+        maps,
+        functions);
+    if (written < 0 || (size_t)written >= request_len) {
+        snprintf(msg, msg_len, "offline activity transaction was too large");
+        goto out;
+    }
+    rc = offline_writer_request(request, (size_t)written, request_id,
+        reply, reply_len, msg, msg_len);
+out:
+    free(request);
+    return rc;
+}
+
+static int safe_device_id(const char *value) {
+    size_t i, n = strlen(value);
+    if (n == 0 || n > 18) return 0;
+    for (i = 0; i < n; i++) {
+        if (!isdigit((unsigned char)value[i])) return 0;
+    }
+    return 1;
+}
+
+/* One device's power and timing settings. codexactivity checks them against
+   the device's own commands, saves DeviceList, and reloads the engine. */
+static void render_device_settings_json(int fd, const struct request *req) {
+    char device_id[32], request_id[96], msg[768], reply[4096];
+    char *settings = NULL, *request = NULL;
+    size_t settings_len = 0, request_len;
+    int written, rc;
+    FILE *f;
+    device_id[0] = 0;
+    if (req->body) json_string(req->body, "deviceId", device_id, sizeof(device_id));
+    if (!safe_device_id(device_id) ||
+        json_object_value_copy(req->body, "settings", &settings, &settings_len) != 0 ||
+        settings_len > MAX_DEVICE_SETTINGS) {
+        f = send_json_start(fd, "400 Bad Request");
+        if (f) {
+            fputs("{\"ok\":false,\"error\":\"body must contain a numeric deviceId and a settings object\"}\n", f);
+            fclose(f);
+        }
+        goto out;
+    }
+    snprintf(request_id, sizeof(request_id), "%ld-%ld-%08x",
+        (long)getpid(), (long)time(NULL), resource_hash(settings, settings_len));
+    request_len = settings_len + strlen(device_id) + strlen(request_id) + 128;
+    request = (char *)malloc(request_len);
+    if (!request) {
+        f = send_json_start(fd, "503 Service Unavailable");
+        if (f) {
+            fputs("{\"ok\":false,\"error\":\"not enough memory for the device settings\"}\n", f);
+            fclose(f);
+        }
+        goto out;
+    }
+    written = snprintf(request, request_len,
+        "{\"id\":\"%s\",\"op\":\"CommitDeviceSettings\",\"deviceId\":\"%s\",\"settings\":%s}",
+        request_id, device_id, settings);
+    backup_resources();
+    reply[0] = 0;
+    msg[0] = 0;
+    rc = offline_writer_request(request, (size_t)written, request_id,
+        reply, sizeof(reply), msg, sizeof(msg));
+    f = send_json_start(fd, rc == 0 ? "200 OK" :
+        (reply[0] ? "422 Unprocessable Entity" : "503 Service Unavailable"));
+    if (f) {
+        fprintf(f, "{\"ok\":%s,\"saved\":%s,\"localOnly\":true,\"deviceId\":",
+            rc == 0 ? "true" : "false", rc == 0 ? "true" : "false");
+        json_write_string(f, device_id);
+        if (rc == 0) {
+            fputs(",\"message\":\"Device settings were saved and reloaded in the Hub engine.\"", f);
+        } else {
+            fputs(",\"error\":", f);
+            json_write_string(f, msg[0] ? msg : "The device settings were not saved.");
+        }
+        fputs(",\"reply\":", f);
+        json_write_string(f, reply);
+        fputs("}\n", f);
+        fclose(f);
+    }
+out:
+    free(settings);
+    free(request);
 }
 
 static int safe_activity_id(const char *value) {
@@ -8869,6 +8962,8 @@ static void handle_client(int client) {
         render_activity_run_json(client, &req);
     } else if (strcmp(req.method, "POST") == 0 && strcmp(req.path, "/api/activity-save") == 0) {
         render_activity_save_json(client, &req);
+    } else if (strcmp(req.method, "POST") == 0 && strcmp(req.path, "/api/device-settings") == 0) {
+        render_device_settings_json(client, &req);
     } else if (strcmp(req.method, "POST") == 0 && strcmp(req.path, "/api/activity-sync") == 0) {
         render_activity_sync_json(client);
     } else if (strcmp(req.method, "GET") == 0 && strcmp(req.path, "/api/inventory") == 0) {

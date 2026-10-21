@@ -6,7 +6,7 @@
    /api/device-commands) — the UI never trusts its own copy. All dynamic DOM
    is built with the safe setup-kit primitives; there is no innerHTML. */
 
-import { getConfig, getJson, postApiForm, postHubForm, saveActivity } from "../api.js";
+import { getConfig, getJson, postApiForm, postHubForm, saveActivity, saveDeviceSettings } from "../api.js";
 import { el, setText, clear, notice, dangerGuard } from "../setup-kit.js";
 import {
   LIMITS,
@@ -24,6 +24,13 @@ import {
   deviceUsage,
   withoutDeviceMaps,
 } from "./ir-model.js";
+import {
+  POWER_TYPES,
+  commandNames,
+  readDeviceSettings,
+  validateDeviceSettings,
+  deviceSettingsRequest,
+} from "./device-settings-model.js";
 import {
   DOC_LINKS,
   detectFormat,
@@ -251,6 +258,9 @@ export function createIrView(section) {
     side.appendChild(
       button("Edit", "btn-quiet btn-sm", () => openDeviceForm(device)),
     );
+    side.appendChild(
+      button("Power & timing", "btn-quiet btn-sm", () => openSettings(device)),
+    );
     const del = button("Delete", "btn-danger btn-sm", null);
     dangerGuard(del, {
       consequence: `Permanently removes "${device.name}", all of its learned commands and its device screen on the remote from the hub.`,
@@ -357,6 +367,139 @@ export function createIrView(section) {
     ] }));
     body.appendChild(status);
     name.focus();
+  }
+
+  /* ---------------- power & timing ---------------- */
+  /* How activities power the device on and off, and its command timing. The
+     hub checks the settings against the device's commands, saves DeviceList
+     and reloads its engine (codexactivity CommitDeviceSettings). */
+  async function openSettings(device) {
+    refs.settingsPanel.hidden = false;
+    setText(refs.settingsTitle, `Power & timing — ${device.name || device.id}`);
+    clear(refs.settingsBody);
+    refs.settingsBody.appendChild(skeleton(3));
+    refs.settingsPanel.scrollIntoView({ block: "nearest" });
+    const gen = generation;
+    try {
+      const config = await getConfig();
+      if (gen !== generation) return;
+      const entry = (config?.deviceList?.DevicesWithFeatures ?? [])
+        .find((e) => String(e?.Device?.["Id-"]) === device.id);
+      if (!entry) throw new Error("the hub's DeviceList has no such device");
+      renderSettingsForm(device, entry);
+    } catch (error) {
+      if (gen !== generation) return;
+      clear(refs.settingsBody);
+      refs.settingsBody.appendChild(notice("error", `Could not load the device settings: ${error.message}.`));
+    }
+  }
+
+  function closeSettings() {
+    refs.settingsPanel.hidden = true;
+  }
+
+  function renderSettingsForm(device, entry) {
+    const body = refs.settingsBody;
+    clear(body);
+    const names = commandNames(entry);
+    const current = readDeviceSettings(entry);
+    const commandSelect = (id, value) => el("select", {
+      attrs: { id },
+      children: [
+        el("option", { text: "Choose a command", attrs: { value: "" } }),
+        ...names.map((n) => el("option", { text: n, attrs: { value: n, selected: n === value || undefined } })),
+      ],
+    });
+    const checkRow = (id, checked, text) => el("label", {
+      className: "mini",
+      attrs: { for: id },
+      children: [
+        el("input", { attrs: { id, type: "checkbox", checked: checked || undefined } }),
+        el("span", { text: ` ${text}` }),
+      ],
+    });
+    const whole = (input) => (input.value.trim() === "" ? NaN : Number(input.value.trim()));
+
+    const type = el("select", {
+      attrs: { id: "irSetPowerType" },
+      children: POWER_TYPES.map((t) =>
+        el("option", { text: t.label, attrs: { value: t.value, selected: t.value === current.power.type || undefined } })),
+    });
+    const on = commandSelect("irSetPowerOn", current.power.on);
+    const off = commandSelect("irSetPowerOff", current.power.off);
+    const toggle = commandSelect("irSetPowerToggle", current.power.toggle);
+    const delay = textInput("irSetPowerDelay", { value: String(current.power.delayMs / 1000), maxlength: 5 });
+    const alwaysOn = checkRow("irSetAlwaysOn", current.power.alwaysOn, "Always on — never turn this device off");
+    const between = checkRow("irSetBetween", current.power.onBetweenActivities, "Leave on when switching activities");
+    const interKey = textInput("irSetInterKey", { value: String(current.interKeyDelayMs), maxlength: 5 });
+    const interDevice = textInput("irSetInterDevice", { value: String(current.interDeviceDelayMs), maxlength: 5 });
+    const repeats = textInput("irSetRepeats", { value: String(current.repeats), maxlength: 2 });
+
+    const discreteRow = el("div", { className: "row", children: [field("On command", on), field("Off command", off)] });
+    const toggleRow = el("div", { children: [field("Power command", toggle)] });
+    const syncType = () => {
+      discreteRow.hidden = type.value !== "discrete";
+      toggleRow.hidden = type.value !== "toggle";
+    };
+    type.addEventListener("change", syncType);
+    syncType();
+
+    const status = el("div", { className: "setup-status" });
+    const save = button("Save settings", "btn-secondary", async () => {
+      const settings = {
+        interKeyDelayMs: whole(interKey),
+        interDeviceDelayMs: whole(interDevice),
+        repeats: whole(repeats),
+        power: {
+          type: type.value,
+          on: on.value,
+          off: off.value,
+          toggle: toggle.value,
+          delayMs: Math.round(whole(delay) * 1000),
+          alwaysOn: alwaysOn.querySelector("input").checked,
+          onBetweenActivities: between.querySelector("input").checked,
+        },
+      };
+      const errors = validateDeviceSettings(settings, names);
+      if (errors.length) {
+        setNotice(status, "error", errors.join(" "));
+        return;
+      }
+      save.disabled = true;
+      setNotice(status, "info", "Saving and reloading the hub engine…");
+      try {
+        const res = await saveDeviceSettings(deviceSettingsRequest(device.id, settings));
+        setNotice(status, "ok", res.message || "Device settings saved.");
+      } catch (error) {
+        setNotice(status, "error", error.message || "Saving the device settings failed.");
+      } finally {
+        save.disabled = false;
+      }
+    });
+
+    if (!current.hasPowerFeature) {
+      body.appendChild(notice("info",
+        "Activities can't turn this device on or off yet. The choices below are suggested from its command names; save to apply them."));
+    }
+    body.appendChild(el("div", { className: "row", children: [
+      field("Power", type),
+      field("Wait after power-on (seconds)", delay, "How long the device needs before it takes its next command, such as an input change."),
+    ] }));
+    body.appendChild(discreteRow);
+    body.appendChild(toggleRow);
+    body.appendChild(el("div", { className: "setup-fields", children: [alwaysOn, between] }));
+    body.appendChild(el("div", { className: "row", children: [
+      field("Delay between commands (ms)", interKey, "Pause after each command to this device."),
+      field("Inter-device delay (ms)", interDevice, "Pause before this device's command when the previous one went to another device."),
+    ] }));
+    body.appendChild(el("div", { className: "row", children: [
+      field("Repeats", repeats, "Extra times a short press is sent. Raise it if the device misses presses."),
+    ] }));
+    body.appendChild(el("div", { className: "setup-actions", children: [
+      save,
+      button("Close", "btn-ghost", closeSettings),
+    ] }));
+    body.appendChild(status);
   }
 
   /* The hub refuses to delete a device that activities or button maps still
@@ -1260,6 +1403,17 @@ export function createIrView(section) {
     refs.deviceFormPanel = panel({ label: "Device form", title: "Device details", children: [refs.deviceFormBody] });
     refs.deviceFormPanel.hidden = true;
     section.appendChild(refs.deviceFormPanel);
+
+    // power & timing (hidden)
+    refs.settingsTitle = el("h3", { text: "Power & timing" });
+    refs.settingsBody = el("div");
+    refs.settingsPanel = el("section", {
+      className: "panel setup-panel",
+      attrs: { "aria-label": "Device power and timing" },
+      children: [el("div", { className: "panel-head", children: [refs.settingsTitle] }), refs.settingsBody],
+    });
+    refs.settingsPanel.hidden = true;
+    section.appendChild(refs.settingsPanel);
 
     // commands (hidden until a device is chosen)
     refs.commandsTitle = el("h3", { text: "Commands" });

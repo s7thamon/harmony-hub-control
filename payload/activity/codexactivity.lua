@@ -641,6 +641,302 @@ local function statusResponse()
   }
 end
 
+-- After a reload: wait for the activity engine, then publish a new revision
+-- so the remote and /api/state see the change.
+local function publishLocalRevision()
+  local engineReady, engineError = waitForActivityEngine()
+  if not engineReady then
+    log.warning("activity engine barrier:", engineError)
+  end
+  digest.configVersion = (tonumber(digest.configVersion) or 0) + 1
+  -- connect.statedigest?get answers 304 unless stateVersion changes.
+  digest.stateVersion = (tonumber(digest.stateVersion) or 0) + 1
+  local digestOk, digestError = pcall(function()
+    digest:saveStateDigest()
+    notifyLocalClients()
+  end)
+  if not digestOk then
+    log.warning("codexactivity: could not publish the revision:", tostring(digestError))
+  end
+  return engineReady and true or false
+end
+
+local POWER_TYPE_IDS = {none = 0, discrete = 1, toggle = 2}
+local DEVICE_LIST_FILE = "/data/resources/DeviceList.json"
+local DEVICE_ENTRY_KEYS = {"Device", "Commands", "DeviceFeatures"}
+
+-- codex_webui edits DeviceList as text: it finds a device by its
+-- "Device":{...} object and that device's commands at the next "Commands":[.
+-- json.encode writes keys in hash order, so write each entry's keys in the
+-- order those scanners expect.
+local function encodeDeviceList(deviceList)
+  local entries = {}
+  for i, entry in ipairs(deviceList.DevicesWithFeatures) do
+    local parts = {}
+    for _, key in ipairs(DEVICE_ENTRY_KEYS) do
+      if entry[key] ~= nil then
+        parts[#parts + 1] = '"' .. key .. '":' .. json.encode(entry[key])
+      end
+    end
+    for key, value in pairs(entry) do
+      if key ~= "Device" and key ~= "Commands" and key ~= "DeviceFeatures" then
+        parts[#parts + 1] = json.encode(tostring(key)) .. ":" .. json.encode(value)
+      end
+    end
+    entries[i] = "{" .. table.concat(parts, ",") .. "}"
+  end
+  local tail = {}
+  for key, value in pairs(deviceList) do
+    if key ~= "DevicesWithFeatures" then
+      tail[#tail + 1] = "," .. json.encode(tostring(key)) .. ":" .. json.encode(value)
+    end
+  end
+  return '{"DevicesWithFeatures":[' .. table.concat(entries, ",") .. "]" ..
+    table.concat(tail) .. "}"
+end
+
+local function saveDeviceListText(text, expected, etag, hetag)
+  local ok, detail = resources.saveResource(
+    "application/json", etag, text, "DeviceList", nil, hetag
+  )
+  if not ok then
+    return nil, tostring(detail or "could not save local DeviceList")
+  end
+  local status, actualEtag, actual = resources.getResource("DeviceList")
+  if tostring(status or "") ~= "200" or actualEtag ~= etag or
+      type(actual) ~= "table" or not sameValue(expected, actual) then
+    return nil, "local DeviceList verification failed"
+  end
+  return true
+end
+
+local function wholeNumber(value, low, high)
+  if type(value) ~= "number" or value ~= math.floor(value) or
+      value < low or value > high then
+    return nil
+  end
+  return value
+end
+
+local function deviceEntry(deviceList, deviceId)
+  if type(deviceList) ~= "table" or
+      type(deviceList.DevicesWithFeatures) ~= "table" then
+    return nil
+  end
+  for _, entry in ipairs(deviceList.DevicesWithFeatures) do
+    local device = type(entry) == "table" and entry.Device or nil
+    if type(device) == "table" and normalizedId(device["Id-"]) == deviceId then
+      return entry
+    end
+  end
+  return nil
+end
+
+-- The engine keys commands by lower-cased name; return the stored spelling.
+local function storedCommandName(entry, name)
+  if type(name) ~= "string" or name == "" or type(entry.Commands) ~= "table" then
+    return nil
+  end
+  local wanted = string.lower(name)
+  for _, command in ipairs(entry.Commands) do
+    if type(command) == "table" and type(command.Name) == "string" and
+        string.lower(command.Name) == wanted then
+      return command.Name
+    end
+  end
+  return nil
+end
+
+local function pressActions(commandName)
+  if not commandName then
+    return {}
+  end
+  return {{
+    __type = "IRPressAction",
+    IRCommandName = commandName,
+    Order = 0,
+    Duration = json.null,
+    ActionId = 0
+  }}
+end
+
+local function powerFeatureOf(entry)
+  if type(entry.DeviceFeatures) ~= "table" then
+    entry.DeviceFeatures = {}
+  end
+  for _, feature in ipairs(entry.DeviceFeatures) do
+    if type(feature) == "table" and
+        string.find(tostring(feature.__type or ""), "PowerFeature", 1, true) then
+      return feature
+    end
+  end
+  local feature = {
+    __type = "PowerFeature",
+    ["DeviceId-"] = tonumber(entry.Device["Id-"]) or entry.Device["Id-"],
+    Id = 0,
+    State = 1,
+    PowerOnActionId = 0,
+    PowerOffActionId = 0,
+    PowerToggleActionId = 0,
+    PowerOnSetType = 0,
+    PowerOffSetType = 0,
+    PowerOnResetActions = {},
+    PowerOnResetInputName = json.null,
+    ConnectedAppPowerOnDelay = 0,
+    HasAdditionalActions = false
+  }
+  table.insert(entry.DeviceFeatures, feature)
+  return feature
+end
+
+-- Check one device's power and timing settings against its own commands.
+local function deviceSettingsFrom(entry, settings)
+  if type(settings) ~= "table" or type(settings.power) ~= "table" then
+    return nil, "settings.power is required"
+  end
+  local power = settings.power
+  local out = {
+    typeId = POWER_TYPE_IDS[power.type],
+    interKeyDelay = wholeNumber(settings.interKeyDelayMs, 0, 5000),
+    interDeviceDelay = wholeNumber(settings.interDeviceDelayMs, 0, 10000),
+    repeats = wholeNumber(settings.repeats, 0, 10),
+    powerOnDelay = wholeNumber(power.delayMs, 0, 60000)
+  }
+  if not out.typeId then
+    return nil, "power.type must be discrete, toggle or none"
+  end
+  if not out.interKeyDelay then
+    return nil, "interKeyDelayMs must be a whole number from 0 to 5000"
+  end
+  if not out.interDeviceDelay then
+    return nil, "interDeviceDelayMs must be a whole number from 0 to 10000"
+  end
+  if not out.repeats then
+    return nil, "repeats must be a whole number from 0 to 10"
+  end
+  if not out.powerOnDelay then
+    return nil, "power.delayMs must be a whole number from 0 to 60000"
+  end
+  if type(power.alwaysOn) ~= "boolean" or
+      type(power.onBetweenActivities) ~= "boolean" then
+    return nil, "power.alwaysOn and power.onBetweenActivities must be true or false"
+  end
+  out.alwaysOn = power.alwaysOn
+  out.onBetweenActivities = power.onBetweenActivities
+  if out.typeId == 1 then
+    out.on = storedCommandName(entry, power.on)
+    out.off = storedCommandName(entry, power.off)
+    if not out.on or not out.off then
+      return nil, "separate power needs an On and an Off command that the device has"
+    end
+    if out.on == out.off then
+      return nil, "On and Off are the same command; choose one power button instead"
+    end
+  elseif out.typeId == 2 then
+    out.toggle = storedCommandName(entry, power.toggle)
+    if not out.toggle then
+      return nil, "one power button needs a command that the device has"
+    end
+  end
+  return out
+end
+
+local function commitDeviceSettings(request)
+  if not blockerActive() then
+    return {
+      ok = false,
+      localOnly = true,
+      error = "offline device writer refused to run because the cloud blocker is not active"
+    }
+  end
+  if resources.isAnySyncInProgress() then
+    return {
+      ok = false,
+      localOnly = true,
+      error = "a Harmony sync is in progress; try again when it finishes"
+    }
+  end
+  local deviceId = normalizedId(request.deviceId)
+  if not deviceId then
+    return {ok = false, localOnly = true, error = "deviceId must be a device ID"}
+  end
+  local old, readError = resourceSnapshot("DeviceList")
+  local oldText = readFile(DEVICE_LIST_FILE)
+  if not old or not oldText then
+    return {
+      ok = false,
+      localOnly = true,
+      error = readError or "could not read the local DeviceList"
+    }
+  end
+  -- Edit a copy; a failed reload restores the file's exact old text.
+  local copied, deviceList = pcall(json.decode, oldText)
+  if not copied or type(deviceList) ~= "table" then
+    return {ok = false, localOnly = true, error = "could not copy the local DeviceList"}
+  end
+  local entry = deviceEntry(deviceList, deviceId)
+  if not entry then
+    return {ok = false, localOnly = true, error = "DeviceList has no device " .. deviceId}
+  end
+  local settings, settingsError = deviceSettingsFrom(entry, request.settings)
+  if not settings then
+    return {ok = false, localOnly = true, error = settingsError}
+  end
+
+  local device = entry.Device
+  device.InterKeyDelay = settings.interKeyDelay
+  device.InterDeviceDelay = settings.interDeviceDelay
+  device.PressMinRepeats = settings.repeats
+  local feature = powerFeatureOf(entry)
+  feature.PowerTypeId = settings.typeId
+  feature.PowerOnActions = pressActions(settings.on)
+  feature.PowerOffActions = pressActions(settings.off)
+  feature.PowerToggleActions = pressActions(settings.toggle)
+  feature.PowerOnDelay = settings.powerOnDelay
+  if type(feature.DefaultPowerOnDelay) ~= "number" then
+    feature.DefaultPowerOnDelay = settings.powerOnDelay
+  end
+  feature.IsPowerAlwaysOn = settings.alwaysOn
+  feature.IsPoweredOnBetweenActivities = settings.onBetweenActivities
+
+  local deviceEtag = localEtag()
+  local encoded, text = pcall(encodeDeviceList, deviceList)
+  if not encoded then
+    return {ok = false, localOnly = true, error = "could not encode DeviceList: " .. tostring(text)}
+  end
+  local saved, saveError = saveDeviceListText(text, deviceList, deviceEtag, localHetag())
+  if not saved then
+    local restored = saveDeviceListText(oldText, old.resource, old.etag, old.hetag)
+    return {
+      ok = false,
+      localOnly = true,
+      rolledBack = restored and true or false,
+      error = saveError
+    }
+  end
+  local sent, reloaded = pcall(system.sendMessage, "config_new", {"DeviceList"})
+  if not sent or reloaded ~= true then
+    local restored = saveDeviceListText(oldText, old.resource, old.etag, old.hetag)
+    pcall(system.sendMessage, "config_new", {"DeviceList"})
+    return {
+      ok = false,
+      localOnly = true,
+      rolledBack = restored and true or false,
+      error = "Harmony engine rejected the device settings reload"
+    }
+  end
+  local engineReady = publishLocalRevision()
+  return {
+    ok = true,
+    localOnly = true,
+    reloaded = true,
+    deviceId = deviceId,
+    activityEngineReady = engineReady,
+    configVersion = digest.configVersion,
+    deviceEtag = deviceEtag
+  }
+end
+
 local function processRequest(raw)
   local ok, request = pcall(json.decode, raw)
   if not ok or type(request) ~= "table" then
@@ -649,6 +945,8 @@ local function processRequest(raw)
   local response
   if request.op == "CommitActivityResources" then
     response = commitActivityResources(request)
+  elseif request.op == "CommitDeviceSettings" then
+    response = commitDeviceSettings(request)
   elseif request.op == "Status" then
     response = statusResponse()
   else
@@ -689,20 +987,7 @@ local function reloadRequestedResources()
     log.warning("codexactivity: requested resource reload failed:", tostring(result))
     return
   end
-  local engineReady, engineError = waitForActivityEngine()
-  if not engineReady then
-    log.warning("activity engine barrier:", engineError)
-  end
-  digest.configVersion = (tonumber(digest.configVersion) or 0) + 1
-  -- connect.statedigest?get answers 304 unless stateVersion changes.
-  digest.stateVersion = (tonumber(digest.stateVersion) or 0) + 1
-  local digestOk, digestError = pcall(function()
-    digest:saveStateDigest()
-    notifyLocalClients()
-  end)
-  if not digestOk then
-    log.warning("codexactivity: could not publish the reload:", tostring(digestError))
-  end
+  publishLocalRevision()
   log.notice("codexactivity: reloaded resources requested by codex_webui")
 end
 
