@@ -21,12 +21,25 @@ If `node` is missing from `PATH`, point `NODE` at your runtime:
 NODE=/path/to/node tools/webui-sim/server.mjs
 ```
 
-Open http://127.0.0.1:8787/#control
+Open http://127.0.0.1:8787/#remote
 
-- Default view is **Control** — real Harmony remote JPEG + activity/device modes
-- **Home** — now playing + start tiles
-- **Activities** — full offline editor (`vendor/activity-ui.js`)
-- Fixture: `tools/webui-sim/fixtures/activity-config.json` (genuine Logitech shape)
+The UI is **Melodious**, the same interface as the Android app (see
+`DESIGN.md` and `docs/MELODIOUS_WEB_UI.md`). Four tabs:
+
+- **Remote** (`#remote`): "Everything's off" when nothing runs, otherwise
+  the activity's keypad, keyboard tab, More keys and Fix it. `#remote/<id>`
+  tries an activity's keys without starting it.
+- **Activities** (`#activities`): the list, the setup wizard (`#wizard`) and
+  the full offline editor (`#editor`, `vendor/activity-ui.js`).
+- **Devices** (`#devices`): each device's own remote and commands
+  (`#devices/<id>`), and IR setup (`#ir`).
+- **Settings** (`#settings`): Bluetooth, MQTT, Wi-Fi, Backup, System, and
+  the simulator's recent events.
+
+The old `#control` and `#home` hashes open the Remote tab.
+
+Fixture: `tools/webui-sim/fixtures/activity-config.json` (genuine Logitech
+shape).
 
 Set `PORT=<n>` to change the port (default 8787).
 

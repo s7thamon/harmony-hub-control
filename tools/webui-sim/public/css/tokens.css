@@ -1,68 +1,100 @@
 /* ============================================================
-   Harmony Hub Control — design tokens (webui-sim)
-   Runtime source of truth. Must match DESIGN.md at repo root.
+   Melodious — design tokens (webui-sim)
+   Runtime source of truth. Mirrors the Android app's theme
+   (MelodiousTheme.kt) and must match DESIGN.md at repo root.
    ============================================================ */
 
 :root {
   color-scheme: dark;
 
-  /* -- Surfaces ------------------------------------------------ */
-  --surface-canvas: #0c0e10;    /* page background */
-  --surface-primary: #12151a;   /* main content well */
-  --surface-secondary: #181c22; /* cards, side nav */
-  --surface-elevated: #1e242c;  /* popovers, remote shell */
-  --surface-inset: #0a0c0f;     /* recessed remote body */
+  /* -- App palette (MelodiousColors) ---------------------------- */
+  --canvas: #0e1014;          /* page background */
+  --nav-bar: #15181d;         /* bottom bar / rail */
+  --card: #171a20;            /* cards, list groups */
+  --key: #1f232b;             /* remote keys, chips */
+  --key-raised: #2a2f39;      /* pressed key, OK, Start */
+  --dpad-ring: #1a1e25;
+  --divider: #22262e;
+  --live: #6fd3a8;            /* running / connected */
+  --warning: #f2c48d;
+  --power-container: #3a1f1f; /* power + destructive fills */
+  --on-power-container: #ffb4ab;
+  --running-card: #1d2840;
+  --key-red: #f06a6a;
+  --key-green: #5fd08b;
+  --key-yellow: #f2d25c;
+  --key-blue: #6aa2f5;
 
-  /* -- Text ---------------------------------------------------- */
-  --text-primary: #e8eaed;
-  --text-secondary: #9aa3ad;
-  --text-tertiary: #8b93a0;
-  --text-inverse: #0c0e10;      /* text on accent fills */
+  /* -- Material 3 dark scheme ------------------------------------ */
+  --primary: #9db8ff;
+  --on-primary: #0b1a3a;
+  --primary-container: #2b3a5e;
+  --on-primary-container: #d9e2ff;
+  --secondary: #bec6dc;
+  --on-secondary: #283141;
+  --secondary-container: #2b3a5e;
+  --on-secondary-container: #d9e2ff;
+  --tertiary: #8fe0bc;
+  --on-tertiary: #003828;
+  --on-surface: #e7e9ee;
+  --on-surface-variant: #a3aab7;
+  --surface-lowest: #0a0b0e;
+  --surface-low: var(--nav-bar);
+  --surface-container: var(--card);
+  --surface-high: #1a1d23;
+  --surface-highest: #262a33;
+  --outline: #4a505c;
+  --outline-variant: #343a46;
+  --error: #ffb4ab;
+  --on-error: #690005;
+  --error-container: var(--power-container);
+  --on-error-container: var(--on-power-container);
+  --inverse-surface: #e2e2e9;
+  --inverse-on-surface: #2f3036;
+  --inverse-primary: #3f5a9a;
+  --scrim: rgba(0, 0, 0, 0.32);
 
-  /* -- Borders (opacity whites on dark) ------------------------ */
-  --border-default: rgba(255, 255, 255, 0.08);
-  --border-strong: rgba(255, 255, 255, 0.14);
+  /* -- Fixed colours the app's screens use inline ----------------- */
+  --tile: var(--surface-highest);  /* default icon tile */
+  --on-tile: #c3c8d2;
+  --activity-tile: #23302a;
+  --on-activity-tile: #a8e6c8;
+  --hub-tile: #1e3329;
+  --on-hub-tile: var(--tertiary);
+  --sheet-key: #262a33;
+  --warning-container: #2e2718;
+  --running-meta: #b6bfd3;
+  --badge-bluetooth: #b9cbff;
+  --record: #ff8a80;
 
-  /* -- Accent: amber, interactive primary actions only --------- */
-  --accent-primary: #e8a54b;
-  --accent-hover: #f0b862;
-  --accent-muted: rgba(232, 165, 75, 0.14);
-  --border-accent: rgba(232, 165, 75, 0.38);
+  /* State layers: Material's hover / press overlays */
+  --state-hover: rgba(231, 233, 238, 0.08);
+  --state-press: rgba(231, 233, 238, 0.12);
 
-  /* -- Status: teal reserved for live/on-air ------------------- */
-  --status-live: #3dcaa0;
-  --status-live-glow: rgba(61, 202, 160, 0.28);
-  --status-warn: #d4a017;
-  --status-error: #e25c5c;
-  --status-info: #6b8caf;
+  /* -- Shapes (MelodiousShapes) ------------------------------------ */
+  --shape-xs: 8px;
+  --shape-sm: 12px;
+  --shape-md: 16px;
+  --shape-lg: 24px;
+  --shape-xl: 28px;
+  --shape-full: 999px;
 
-  /* Muted status fills for notices, chips, badges */
-  --status-live-muted: rgba(61, 202, 160, 0.12);
-  --status-warn-muted: rgba(212, 160, 23, 0.12);
-  --status-error-muted: rgba(226, 92, 92, 0.12);
-  --status-info-muted: rgba(107, 140, 175, 0.12);
-  --border-live: rgba(61, 202, 160, 0.38);
-  --border-warn: rgba(212, 160, 23, 0.40);
-  --border-error: rgba(226, 92, 92, 0.40);
-  --border-info: rgba(107, 140, 175, 0.38);
+  /* -- Type: system stack (Roboto on Android, like the app) -------- */
+  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --fs-display: 28px;   /* screen titles, "Everything's off" */
+  --fs-headline: 24px;  /* remote title, dialog title */
+  --fs-title-lg: 22px;  /* running card, empty states */
+  --fs-title: 20px;     /* sheet titles */
+  --fs-title-sm: 17px;  /* card and row titles */
+  --fs-body-lg: 16px;   /* list rows */
+  --fs-body: 15px;      /* body, buttons */
+  --fs-label: 14px;     /* section labels, tabs */
+  --fs-body-sm: 13px;   /* subtitles */
+  --fs-caption: 12px;   /* key captions, badges */
+  --fs-overline: 11px;  /* VOL / CH, overlines */
 
-  /* -- Remote keys ---------------------------------------------- */
-  --key-face: #252b34;
-  --key-face-hover: #2f3742;
-  --key-label: #d5dae0;
-  --key-disabled: #1a1f26;
-  /* Tints for the Red/Green/Yellow/Blue shortcut row */
-  --key-tint-red: #cf7d74;
-  --key-tint-green: #7cb98a;
-  --key-tint-yellow: #cdb36e;
-  --key-tint-blue: #7d9ecf;
-
-  --shadow-remote:
-    0 24px 48px rgba(0, 0, 0, 0.45),
-    0 2px 0 rgba(255, 255, 255, 0.04) inset;
-  --overlay: rgba(0, 0, 0, 0.72);
-
-  /* -- Spacing (4px base) --------------------------------------- */
+  /* -- Spacing (4px base) -------------------------------------------- */
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
@@ -73,54 +105,99 @@
   --space-10: 40px;
   --space-12: 48px;
 
-  /* -- Radii ----------------------------------------------------- */
-  --radius-btn: 10px;
-  --radius-panel: 12px;
-  --radius-remote: 18px;
-  --radius-pill: 999px;
+  /* -- Motion (Material 3 easing) ------------------------------------ */
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ease-emphasized: cubic-bezier(0.05, 0.7, 0.1, 1);
+  --dur-short: 150ms;
+  --dur-medium: 250ms;
+  --dur-long: 400ms;
 
-  /* -- Typography ------------------------------------------------ */
-  --font-sans: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
-  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  /* -- Layout ------------------------------------------------------------ */
+  --nav-h: 80px;          /* bottom navigation bar */
+  --rail-w: 88px;         /* navigation rail, 840px and up */
+  --appbar-h: 64px;       /* sub-page top bar */
+  --content-max: 1080px;
+  --remote-max: 440px;
 
-  --text-display: clamp(28px, 4vw, 40px); /* weight 600 / 1.1 / -0.03em */
-  --text-h1: 22px;                        /* weight 600 / 1.25 / -0.02em */
-  --text-h2: 17px;                        /* weight 600 / 1.3 / -0.01em */
-  --text-h3: 14px;                        /* weight 600 / 1.35 */
-  --text-body: 14px;                      /* weight 400 / 1.5 */
-  --text-body-sm: 13px;                   /* weight 400 / 1.45 */
-  --text-caption: 11px;                   /* weight 500 / 1.35 / 0.04em */
-  --text-key: 11px;                       /* weight 600 / 1.1 / 0.02em */
-  --text-mono: 12px;                      /* weight 450 / 1.4 */
-
-  /* -- Motion ---------------------------------------------------- */
-  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
-  --dur-fast: 120ms;
-  --dur-med: 200ms;
-  --dur-slow: 320ms;
-
-  /* -- Layout ---------------------------------------------------- */
-  --content-max: 1280px;
-  --rail-w: 220px;
-  --topbar-h: 56px;
-  --remote-max-w: 320px;
-
-  /* Focus ring: amber, sits off the dark canvas */
+  /* Focus ring: primary, offset from the canvas */
   --ring-focus:
-    0 0 0 2px var(--surface-canvas),
-    0 0 0 4px var(--accent-primary);
+    0 0 0 2px var(--canvas),
+    0 0 0 4px var(--primary);
+}
+
+/* Older names, still used by views that have not been ported to the
+   Melodious layout yet. Each maps onto the palette above; remove them as
+   the last users go. */
+:root {
+  --surface-canvas: var(--canvas);
+  --surface-primary: var(--surface-low);
+  --surface-secondary: var(--card);
+  --surface-elevated: var(--key);
+  --surface-inset: var(--surface-lowest);
+  --text-primary: var(--on-surface);
+  --text-secondary: var(--on-surface-variant);
+  --text-tertiary: #8a91a0;
+  --text-inverse: var(--on-primary);
+  --border-default: var(--divider);
+  --border-strong: var(--outline-variant);
+  --accent-primary: var(--primary);
+  --accent-hover: #b4c8ff;
+  --accent-muted: rgba(157, 184, 255, 0.14);
+  --border-accent: rgba(157, 184, 255, 0.4);
+  --status-live: var(--live);
+  --status-live-glow: rgba(111, 211, 168, 0.28);
+  --status-warn: var(--warning);
+  --status-error: var(--error);
+  --status-info: var(--secondary);
+  --status-live-muted: rgba(111, 211, 168, 0.12);
+  --status-warn-muted: rgba(242, 196, 141, 0.12);
+  --status-error-muted: rgba(255, 180, 171, 0.12);
+  --status-info-muted: rgba(190, 198, 220, 0.1);
+  --border-live: rgba(111, 211, 168, 0.38);
+  --border-warn: rgba(242, 196, 141, 0.4);
+  --border-error: rgba(255, 180, 171, 0.4);
+  --border-info: rgba(190, 198, 220, 0.3);
+  --key-face: var(--key);
+  --key-face-hover: var(--key-raised);
+  --key-label: var(--on-surface);
+  --key-disabled: var(--dpad-ring);
+  --key-tint-red: var(--key-red);
+  --key-tint-green: var(--key-green);
+  --key-tint-yellow: var(--key-yellow);
+  --key-tint-blue: var(--key-blue);
+  --shadow-remote: 0 16px 40px rgba(0, 0, 0, 0.45);
+  --overlay: rgba(0, 0, 0, 0.6);
+  --radius-btn: var(--shape-full);
+  --radius-panel: var(--shape-lg);
+  --radius-remote: var(--shape-xl);
+  --radius-pill: var(--shape-full);
+  --text-display: var(--fs-display);
+  --text-h1: var(--fs-title-lg);
+  --text-h2: var(--fs-title-sm);
+  --text-h3: var(--fs-body-lg);
+  --text-body: var(--fs-body);
+  --text-body-sm: var(--fs-body-sm);
+  --text-caption: var(--fs-caption);
+  --text-key: var(--fs-caption);
+  --text-mono: var(--fs-caption);
+  --ease-out: var(--ease-standard);
+  --dur-fast: var(--dur-short);
+  --dur-med: var(--dur-medium);
+  --dur-slow: var(--dur-long);
+  --topbar-h: 0px;
+  --remote-max-w: 320px;
 }
 
 /* Aliases expected by the vendored activity-ui.css (light-era names
    remapped onto the dark token set; scoped values live in
    activity-overrides.css). */
 :root {
-  --accent: var(--accent-primary);
-  --fg: var(--text-primary);
-  --muted: var(--text-secondary);
-  --line: var(--border-default);
-  --warn: var(--status-warn);
-  --bad: var(--status-error);
-  --wash: var(--surface-primary);
-  --soft2: var(--surface-elevated);
+  --accent: var(--primary);
+  --fg: var(--on-surface);
+  --muted: var(--on-surface-variant);
+  --line: var(--divider);
+  --warn: var(--warning);
+  --bad: var(--error);
+  --wash: var(--surface-low);
+  --soft2: var(--key);
 }

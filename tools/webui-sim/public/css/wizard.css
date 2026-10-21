@@ -154,7 +154,7 @@
 
 /* Soft: wizard-derived default. Solid: user-set or loaded from the activity. */
 .wiz-key.is-mapped-default {
-  background: rgba(232, 165, 75, 0.18);
+  background: rgba(157, 184, 255, 0.16);
   box-shadow: 0 0 0 1px var(--border-accent);
   opacity: 0.92;
 }
@@ -165,7 +165,7 @@
 }
 
 .wiz-key.is-selected {
-  background: rgba(232, 165, 75, 0.35);
+  background: rgba(157, 184, 255, 0.32);
   box-shadow:
     0 0 0 2px var(--accent-primary),
     0 0 18px 4px var(--accent-muted);
