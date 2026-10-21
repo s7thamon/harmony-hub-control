@@ -1,6 +1,7 @@
-/* Shared Melodious UI pieces: snackbar, bottom sheets, the sub-page top
-   bar, and small markup helpers that match the app's Compose
-   components (ScreenTitle, ListGroup/ListRow, IconTile, StatusDot). */
+/* Shared Melodious UI pieces: snackbar, bottom sheets, confirm dialogs,
+   menus, the sub-page top bar, and small markup helpers that match the
+   app's Compose components (ScreenTitle, ListGroup/ListRow, IconTile,
+   StatusDot). */
 
 import { escapeHtml } from "../setup-kit.js";
 import { icon } from "./icons.js";
@@ -50,14 +51,117 @@ export function openSheet({ label, render, onClose, className = "" }) {
   return { dialog, content, close };
 }
 
+/* -- Confirm dialog (ConfirmDialog) ------------------------------------------- */
+
+let dialogCount = 0;
+
+/**
+ * Ask before something that can't be undone. Resolves true for the confirm
+ * button; Cancel, Esc and the scrim resolve false. Cancel has focus first.
+ */
+export function confirmDialog({ title, text, confirmLabel, destructive = false }) {
+  return new Promise((resolve) => {
+    const id = `mDialog${(dialogCount += 1)}`;
+    const dialog = document.createElement("dialog");
+    dialog.className = "m-dialog";
+    dialog.setAttribute("aria-labelledby", `${id}t`);
+    dialog.setAttribute("aria-describedby", `${id}d`);
+    dialog.innerHTML = `<div class="m-dialog-body">
+        <h2 class="m-dialog-title" id="${id}t">${escapeHtml(title)}</h2>
+        <p class="m-dialog-text" id="${id}d">${escapeHtml(text)}</p>
+        <div class="m-dialog-actions">
+          <button type="button" class="btn btn-text" data-answer="" autofocus>Cancel</button>
+          <button type="button" class="btn btn-text${destructive ? " is-destructive" : ""}" data-answer="yes">${escapeHtml(confirmLabel)}</button>
+        </div>
+      </div>`;
+    let answer = false;
+    dialog.addEventListener("click", (event) => {
+      const button = event.target.closest("[data-answer]");
+      if (event.target !== dialog && !button) return;
+      answer = Boolean(button?.dataset.answer);
+      dialog.close();
+    });
+    dialog.addEventListener("close", () => {
+      dialog.remove();
+      resolve(answer);
+    });
+    document.body.appendChild(dialog);
+    dialog.showModal();
+  });
+}
+
+/* -- Menu (DropdownMenu) -------------------------------------------------------- */
+
+/**
+ * A menu dropped from `anchor`, kept inside the window. Items are
+ * { id, label, icon, destructive, disabled }; choosing one closes the menu
+ * and calls onSelect(id). Arrow keys, Home and End move between items; Esc
+ * and a click outside close it, then onClose() runs either way.
+ */
+export function openMenu({ anchor, label, items, onSelect, onClose }) {
+  const dialog = document.createElement("dialog");
+  dialog.className = "m-menu";
+  dialog.setAttribute("aria-label", label);
+  dialog.innerHTML = `<div class="m-menu-body" role="menu" aria-label="${escapeHtml(label)}">${items
+    .map((item) => `<button type="button" role="menuitem" class="m-menu-item${item.destructive ? " is-destructive" : ""}" data-menu-item="${escapeHtml(item.id)}"${item.disabled ? " disabled" : ""}>
+        ${icon(item.icon)}<span>${escapeHtml(item.label)}</span>
+      </button>`)
+    .join("")}</div>`;
+  let picked = null;
+  dialog.addEventListener("click", (event) => {
+    const item = event.target.closest("[data-menu-item]");
+    if (event.target !== dialog && !item) return;
+    picked = item?.dataset.menuItem ?? null;
+    dialog.close();
+  });
+  dialog.addEventListener("keydown", (event) => {
+    if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
+    event.preventDefault();
+    const list = [...dialog.querySelectorAll("[data-menu-item]:not(:disabled)")];
+    const at = list.indexOf(document.activeElement);
+    const next = event.key === "Home" ? 0
+      : event.key === "End" ? list.length - 1
+      : (at + (event.key === "ArrowDown" ? 1 : -1) + list.length) % list.length;
+    list[next]?.focus();
+  });
+  dialog.addEventListener("close", () => {
+    dialog.remove();
+    anchor.setAttribute("aria-expanded", "false");
+    onClose?.();
+    if (picked) onSelect(picked);
+  });
+  document.body.appendChild(dialog);
+  dialog.showModal();
+  anchor.setAttribute("aria-expanded", "true");
+  // Below the anchor, right edges aligned; above it when there's no room.
+  // offsetWidth/Height: the opening animation scales the menu, which a
+  // bounding box would include.
+  const a = anchor.getBoundingClientRect();
+  const width = dialog.offsetWidth;
+  const height = dialog.offsetHeight;
+  const edge = 8;
+  const left = Math.max(edge, Math.min(a.right - width, document.documentElement.clientWidth - width - edge));
+  const below = a.bottom + 4;
+  const top = below + height <= window.innerHeight - edge ? below : Math.max(edge, a.top - 4 - height);
+  dialog.style.left = `${left}px`;
+  dialog.style.top = `${top}px`;
+  dialog.querySelector("[data-menu-item]:not(:disabled)")?.focus();
+  return dialog;
+}
+
 /* -- Sub-page top bar --------------------------------------------------------- */
 
+let appBarBack = null;
+
 /** Show the back-arrow bar (title, parent hash, optional action buttons HTML),
-    or hide it with null. Action clicks are handled by the view that owns them. */
+    or hide it with null. Action clicks are handled by the view that owns them.
+    `close` swaps the arrow for a close button, and `onBack` runs instead of
+    following the link (the wizard asks before it discards changes). */
 export function setAppBar(bar) {
   const el = document.getElementById("appbar");
   const app = document.getElementById("app");
   if (!el || !app) return;
+  appBarBack = bar?.onBack ?? null;
   if (!bar) {
     el.hidden = true;
     app.classList.remove("is-subpage");
@@ -65,7 +169,19 @@ export function setAppBar(bar) {
   }
   el.hidden = false;
   app.classList.add("is-subpage");
-  el.querySelector("#appbarBack").setAttribute("href", `#${bar.back}`);
+  el.classList.toggle("is-compact", Boolean(bar.close));
+  const back = el.querySelector("#appbarBack");
+  if (!back.dataset.wired) {
+    back.dataset.wired = "1";
+    back.addEventListener("click", (event) => {
+      if (!appBarBack) return;
+      event.preventDefault();
+      appBarBack();
+    });
+  }
+  back.setAttribute("href", `#${bar.back}`);
+  back.setAttribute("aria-label", bar.close ? "Close without saving" : "Back");
+  back.innerHTML = icon(bar.close ? "close" : "arrow_back");
   el.querySelector("#appbarTitle").textContent = bar.title;
   el.querySelector("#appbarActions").innerHTML = bar.actions ?? "";
 }

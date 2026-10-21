@@ -1,324 +1,475 @@
-/* Activity setup wizard. Reuses .ir-remote-* from remote.css for the
-   button-mapping step; wizard keys are a config surface, so mapped keys
-   show a persistent indication (unlike Control, where rest is invisible). */
+/* Activity setup, the app's ActivityEditor: step progress, step intros,
+   kind cards, job cards, input chips, the button list and its picker
+   sheet, and the Back / Next bar. The close button and "Step n of m" sit
+   in the shared top bar (app.css). */
 
-.wiz-rail {
+/* At least a screen tall, so the Back / Next bar sits at the bottom even on
+   a short step. */
+.wiz {
   display: flex;
-  gap: var(--space-2);
-  margin-bottom: var(--space-5);
-  flex-wrap: wrap;
+  flex-direction: column;
+  max-width: 720px;
+  min-height: calc(100dvh - var(--appbar-h) - env(safe-area-inset-top, 0px));
+  margin: 0 auto;
 }
 
-.wiz-rail li {
+.wiz-body {
+  flex: 1;
+}
+
+/* Segmented progress: one 4px bar per step, on a taller hit area. */
+.wiz-progress {
   display: flex;
+  gap: 6px;
+  padding: 0 var(--space-1);
+}
+
+.wiz-seg {
+  display: grid;
+  flex: 1;
   align-items: center;
+  height: 24px;
+}
+
+.wiz-seg::before {
+  content: "";
+  height: 4px;
+  border-radius: 2px;
+  background: var(--key-raised);
+  transition: background-color var(--dur-medium) var(--ease-standard);
+}
+
+.wiz-seg.is-done::before {
+  background: var(--primary);
+}
+
+.wiz-seg:disabled {
+  cursor: default;
+}
+
+.wiz-seg:focus-visible {
+  box-shadow: none;
+}
+
+.wiz-seg:focus-visible::before {
+  box-shadow: var(--ring-focus);
+}
+
+/* StepIntro */
+.wiz-intro {
+  display: grid;
   gap: var(--space-2);
-  padding: var(--space-2) var(--space-3);
-  border-radius: var(--radius-pill);
-  border: 1px solid var(--border-default);
-  color: var(--text-tertiary);
-  font-size: var(--text-body-sm);
+  padding: var(--space-6) var(--space-1) var(--space-4);
+}
+
+.wiz-intro h2 {
+  font-size: 26px;
   font-weight: 500;
+  line-height: 32px;
 }
 
-.wiz-rail-dot {
-  display: grid;
-  place-items: center;
-  width: 22px;
-  height: 22px;
-  flex: none;
-  border-radius: 50%;
-  background: var(--surface-elevated);
-  border: 1px solid var(--border-default);
-  font-size: 11px;
-  font-weight: 600;
+.wiz-intro h2:focus,
+.pick-head .sheet-title:focus {
+  box-shadow: none;
 }
 
-.wiz-rail li.is-current {
-  border-color: var(--border-accent);
-  color: var(--text-primary);
+.wiz-intro p {
+  color: var(--on-surface-variant);
+  font-size: var(--fs-body);
+  line-height: 21px;
 }
 
-.wiz-rail li.is-current .wiz-rail-dot {
-  background: var(--accent-primary);
-  border-color: transparent;
-  color: var(--text-inverse);
+.wiz-hint {
+  margin: var(--space-3) var(--space-1) 0;
+  color: var(--on-surface-variant);
+  font-size: var(--fs-body-sm);
+  line-height: 19px;
 }
 
-.wiz-rail li.is-done {
-  color: var(--text-secondary);
-}
+/* -- Name and kind ----------------------------------------------------------- */
 
-.wiz-rail li.is-done .wiz-rail-dot {
-  background: var(--status-live-muted);
-  border-color: var(--border-live);
-  color: var(--status-live);
-}
-
-.wiz-panel {
-  max-width: 860px;
-}
-
-.wiz-panel h3 {
-  font-size: var(--text-h2);
-  font-weight: 600;
-  margin-bottom: var(--space-2);
-}
-
-.wiz-panel > .help {
-  margin-bottom: var(--space-4);
-}
-
-.wiz-kinds {
-  display: flex;
-  gap: var(--space-2);
-  flex-wrap: wrap;
-  margin-top: var(--space-2);
-}
-
-.wiz-kind {
-  padding: var(--space-3) var(--space-4);
-  border-radius: var(--radius-btn);
-  border: 1px solid var(--border-default);
-  background: var(--surface-inset);
-  color: var(--text-secondary);
-  font-size: var(--text-body-sm);
-  font-weight: 600;
-  transition: transform var(--dur-fast) var(--ease-out),
-    opacity var(--dur-fast) var(--ease-out);
-}
-
-.wiz-kind:hover {
-  border-color: var(--border-strong);
-  color: var(--text-primary);
-}
-
-.wiz-kind.is-selected {
-  border-color: var(--border-accent);
-  background: var(--accent-muted);
-  color: var(--accent-hover);
-}
-
-/* -- Devices step ------------------------------------------------------ */
-
-.wiz-roles {
-  display: grid;
-  gap: var(--space-3);
-  margin-bottom: var(--space-4);
-}
-
-.wiz-role {
-  padding: var(--space-3) var(--space-4);
-  border: 1px solid var(--border-default);
-  border-radius: var(--radius-panel);
-  background: var(--surface-primary);
-}
-
-.wiz-role-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, 0.6fr) auto;
-  gap: var(--space-3);
-  align-items: end;
-}
-
-.wiz-role-grid label {
+.wiz-field label {
   margin-top: 0;
 }
 
-.wiz-role-remove {
-  margin-bottom: 2px;
+.wiz-field input {
+  min-height: 56px;
+  border-radius: var(--shape-md);
 }
 
-.wiz-role .help {
-  margin-top: var(--space-2);
-}
-
-/* -- Buttons step -------------------------------------------------------- */
-
-.wiz-map {
+.wiz-choices {
   display: grid;
-  grid-template-columns: minmax(240px, 300px) minmax(0, 1fr);
-  gap: var(--space-5);
-  align-items: start;
+  gap: var(--space-2);
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
 }
 
-.wiz-remote {
-  position: sticky;
-  top: calc(var(--topbar-h) + var(--space-5));
+.wiz-label {
+  padding: var(--space-6) var(--space-1) var(--space-3);
+  font-size: var(--fs-body);
+  font-weight: 500;
 }
 
-.wiz-key.is-mapped {
-  background: var(--accent-muted);
-  box-shadow: 0 0 0 1.5px var(--border-accent);
+/* SelectableCard: a native radio, drawn as the app's card */
+.wiz-choice {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 60px;
+  margin: 0;
+  padding: var(--space-3) 18px;
+  border-radius: 20px;
+  background: var(--card);
+  color: var(--on-surface);
+  font-size: var(--fs-body-lg);
+  font-weight: 400;
+  letter-spacing: 0;
+  cursor: pointer;
+  transition: background-color var(--dur-short) var(--ease-standard);
 }
 
-/* Soft: wizard-derived default. Solid: user-set or loaded from the activity. */
-.wiz-key.is-mapped-default {
-  background: rgba(157, 184, 255, 0.16);
-  box-shadow: 0 0 0 1px var(--border-accent);
-  opacity: 0.92;
+.wiz-choice:hover {
+  box-shadow: inset 0 0 0 100px var(--state-hover);
 }
 
-.wiz-key.is-mapped-user {
-  background: var(--accent-muted);
-  box-shadow: 0 0 0 2px var(--border-accent);
+.wiz-choice.is-selected {
+  background: var(--primary-container);
+  color: var(--on-primary-container);
 }
 
-.wiz-key.is-selected {
-  background: rgba(157, 184, 255, 0.32);
-  box-shadow:
-    0 0 0 2px var(--accent-primary),
-    0 0 18px 4px var(--accent-muted);
-  opacity: 1;
+.wiz-choice input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  opacity: 0;
+  pointer-events: none;
 }
 
-.wiz-assign {
+.wiz-choice:has(input:focus-visible) {
+  box-shadow: var(--ring-focus);
+}
+
+.wiz-choice-text {
+  flex: 1;
+}
+
+/* -- Devices: one card per job ---------------------------------------------- */
+
+.wiz-jobs {
+  display: grid;
+  gap: 10px;
+}
+
+.wiz-job,
+.wiz-add {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  border-radius: 20px;
+  text-align: left;
+  transition: box-shadow var(--dur-short) var(--ease-standard);
+}
+
+.wiz-job {
+  padding: 14px var(--space-4);
+  background: var(--card);
+}
+
+.wiz-job:hover,
+.wiz-add:hover {
+  box-shadow: inset 0 0 0 100px var(--state-hover);
+}
+
+.wiz-job-text {
+  display: grid;
+  flex: 1;
+  gap: 2px;
   min-width: 0;
 }
 
-.wiz-assign-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
+.wiz-job-role {
+  color: var(--on-surface-variant);
+  font-size: var(--fs-body-sm);
+}
+
+.wiz-job-device {
+  overflow: hidden;
+  font-size: var(--fs-title-sm);
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wiz-job-device.is-missing {
+  color: var(--warning);
+}
+
+.wiz-job-caret {
+  color: var(--on-surface-variant);
+}
+
+.wiz-add {
+  min-height: 64px;
+  padding: 0 var(--space-4);
+  border: 1px solid var(--outline-variant);
+  color: var(--on-surface-variant);
+  font-size: var(--fs-body);
+  font-weight: 500;
+}
+
+.wiz-add .ic {
+  margin: 0 var(--space-2);
+}
+
+/* Turning on: power order and the wait after each device */
+.wiz-power {
   gap: var(--space-3);
-  margin-bottom: var(--space-2);
 }
 
-.wiz-assign-head h4 {
-  font-size: var(--text-h3);
-  font-weight: 600;
+.wiz-power-pos {
+  width: 12px;
+  color: var(--outline);
+  font-size: var(--fs-body-sm);
+  text-align: center;
 }
 
-.wiz-hold {
-  margin-top: var(--space-4);
-  padding-top: var(--space-3);
-  border-top: 1px solid var(--border-default);
+.wiz-stepper {
+  display: flex;
+  gap: var(--space-1);
 }
 
-.wiz-hold-toggle {
+.wiz-stepper .icon-btn {
+  width: 40px;
+  height: 40px;
+  background: var(--key);
+  color: var(--on-surface);
+}
+
+.wiz-stepper .icon-btn:hover:not(:disabled) {
+  background: var(--key-raised);
+}
+
+/* -- Inputs ------------------------------------------------------------------ */
+
+.wiz-cards {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.wiz-card {
+  display: grid;
+  gap: 10px;
+  padding: var(--space-4);
+  border-radius: 20px;
+  background: var(--card);
+}
+
+.wiz-card-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.wiz-card-head h3 {
+  min-width: 0;
+  font-size: var(--fs-title-sm);
+  font-weight: 500;
+}
+
+.wiz-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+/* -- Buttons ------------------------------------------------------------------- */
+
+.wiz-reset {
+  margin-left: calc(var(--space-1) - var(--space-3));
+}
+
+.wiz-key {
+  gap: var(--space-4);
+  min-height: 56px;
+  padding: 10px var(--space-4);
+}
+
+.wiz-key-name {
+  flex: none;
+  font-size: var(--fs-body-lg);
+}
+
+.wiz-key-value {
+  display: grid;
+  flex: 1;
+  justify-items: end;
+  min-width: 0;
+  color: var(--on-surface-variant);
+  font-size: var(--fs-body-sm);
+  text-align: right;
+}
+
+.wiz-key-value > span,
+.wiz-key-device,
+.wiz-key-cmd {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The command matters more than the device: the name gives way first. */
+.wiz-key-line {
+  display: flex;
+  justify-content: flex-end;
+  min-width: 0;
+}
+
+.wiz-key-device {
+  min-width: 2ch;
+}
+
+.wiz-key-cmd {
+  flex: none;
+  max-width: 80%;
+}
+
+.wiz-key-value.is-unset {
+  color: var(--outline);
+}
+
+.wiz-key-hold {
+  font-size: var(--fs-caption);
+}
+
+/* The picker sheet (CommandPickerSheet): title, device chips and search stay
+   put while the commands scroll. */
+.pick-sheet {
+  height: 92dvh;
+}
+
+.pick-sheet .sheet-body {
+  height: 100%;
+}
+
+.pick-top {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: grid;
+  gap: var(--space-3);
+  padding-bottom: var(--space-2);
+  background: var(--surface-high);
+}
+
+.pick-head {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  margin: 0;
-  font-size: var(--text-body-sm);
-  font-weight: 500;
-  letter-spacing: 0;
-  text-transform: none;
-  color: var(--text-primary);
-  cursor: pointer;
 }
 
-.wiz-hold-toggle input {
-  width: auto;
-  min-height: 0;
-  accent-color: var(--accent-primary);
+.pick-head .sheet-title {
+  flex: 1;
+  margin-bottom: 0;
 }
 
-.wiz-assign-actions {
+.pick-now {
+  margin: 0 var(--space-1);
+  color: var(--on-surface-variant);
+  font-size: var(--fs-body-sm);
+}
+
+.pick-chips {
   display: flex;
-  gap: var(--space-2);
-  margin-top: var(--space-4);
   flex-wrap: wrap;
+  gap: var(--space-2);
 }
 
-/* -- Review step ---------------------------------------------------------- */
+.pick-top .search-field {
+  margin: 0;
+}
 
-.wiz-review {
+.pick-list {
   display: grid;
+}
+
+.pick-row {
+  display: flex;
+  align-items: center;
   gap: var(--space-3);
-}
-
-.wiz-review-card {
-  display: grid;
-  gap: var(--space-1);
-  padding: var(--space-4);
-  border: 1px solid var(--border-default);
-  border-radius: var(--radius-panel);
-  background: var(--surface-primary);
-}
-
-.wiz-review-card > strong {
-  font-size: var(--text-h2);
-}
-
-.wiz-review-line {
-  font-size: var(--text-body-sm);
-  color: var(--text-secondary);
-}
-
-.wiz-review-line strong {
-  color: var(--text-primary);
-}
-
-.wiz-done {
+  min-height: 52px;
+  padding: 0 var(--space-4);
+  border-radius: var(--shape-md);
+  font-size: var(--fs-body-lg);
   text-align: left;
 }
 
-/* -- Footer --------------------------------------------------------------- */
-
-.wiz-foot {
-  display: flex;
-  align-items: center;
-  gap: var(--space-4);
-  max-width: 860px;
-  margin-top: var(--space-5);
-}
-
-.wiz-note {
+.pick-row > span {
   flex: 1;
   min-width: 0;
-  color: var(--text-tertiary);
-  font-size: var(--text-body-sm);
+  overflow-wrap: anywhere;
 }
 
-.wiz-note.is-error {
-  color: var(--status-error);
+.pick-row:hover {
+  background: var(--state-hover);
 }
 
-.wiz-foot-actions {
+.pick-check {
+  color: var(--primary);
+}
+
+.pick-foot:empty {
+  display: none;
+}
+
+.pick-foot {
+  padding-top: var(--space-2);
+}
+
+@media (min-width: 840px) {
+  .pick-sheet {
+    height: min(84dvh, 760px);
+  }
+}
+
+/* -- Back / Next ------------------------------------------------------------------ */
+
+.wiz-foot {
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
   display: flex;
-  gap: var(--space-2);
-  flex: none;
+  gap: var(--space-3);
+  margin-top: var(--space-6);
+  padding: var(--space-3) 0 calc(var(--space-3) + env(safe-area-inset-bottom, 0px));
+  background: var(--canvas);
 }
 
-/* -- Responsive ------------------------------------------------------------- */
-
-@media (max-width: 900px) {
-  .wiz-role-grid {
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  }
-
-  .wiz-role-remove {
-    grid-column: 1 / -1;
-    justify-self: start;
-  }
-
-  .wiz-map {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .wiz-remote {
-    position: static;
-    max-width: 300px;
-    margin: 0 auto;
-  }
+.wiz-foot .btn {
+  min-height: 52px;
+  font-size: var(--fs-body);
 }
 
-@media (max-width: 560px) {
-  .wiz-role-grid {
-    grid-template-columns: minmax(0, 1fr);
-  }
+.wiz-foot [data-act="back"] {
+  flex: 1;
+}
 
-  .wiz-rail-label {
-    font-size: var(--text-caption);
-  }
+.wiz-foot [data-act="next"] {
+  flex: 2;
+}
 
-  .wiz-foot {
-    flex-wrap: wrap;
-  }
+.wiz-foot .is-busy {
+  cursor: progress;
+}
 
-  .wiz-note {
-    flex-basis: 100%;
-    order: 2;
-  }
+.wiz-foot .btn-filled .m-spinner {
+  width: 18px;
+  height: 18px;
+  border-color: var(--on-primary);
+  border-right-color: transparent;
 }

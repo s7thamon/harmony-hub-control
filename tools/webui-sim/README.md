@@ -89,9 +89,9 @@ What it produces (DEDUP_MIN footprint class, ~0.90 MiB / 942,552 bytes `codex_we
 - **one** minified shell JS (`/assets/harmony-shell.js`, classic + `defer`)
 - **one** minified shell CSS (`/assets/harmony-shell.css`, with
   `activity-overrides.css` baked in)
-- production HTML that defines `globalThis.REMOTE_SKIN_SRC` from the hub's
-  **existing** `REMOTE_SKIN_JPG_B64` seam-injection — the JPEG is never
-  embedded or served a second time.
+- production HTML, embedded whole as `harmony_index`. The shell draws its
+  own keypad and carries no remote photo; only the legacy page still embeds
+  `REMOTE_SKIN_JPG_B64`.
 - The advanced editor lazy-loads the **existing** `/assets/activity-ui.*`
   vendor routes — it is never copied into the shell bundle.
 - No Google Fonts (system fallbacks), no `/sim/` requests, no automatically

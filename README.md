@@ -150,7 +150,7 @@ Installed with defaults, the hub becomes a LAN-only appliance:
 
 Loading the redesigned web UI and navigating between its views makes no
 automatic public-Internet requests. All UI assets (HTML, CSS, JavaScript,
-remote-skin image) are served from the hub itself — no external fonts, no
+icons) are served from the hub itself — no external fonts, no
 CDN-hosted scripts, no analytics beacons. The JavaScript may declare IRDB
 endpoint URLs for Search and Preview, but those are used only after an
 explicit user click.
@@ -308,8 +308,8 @@ Your browser (LAN)
 
 - **Frontend** — a dependency-free JavaScript app (hash-routed views, no
   framework) developed in `tools/webui-sim/`, then minified and embedded
-  into the server binary as C headers. The virtual remote reuses the hub's
-  own remote-skin image and button geometry.
+  into the server binary as C headers. The remote is a keypad drawn in the
+  page (no photo of the physical remote).
 - **Backend** — `payload/source/codex_webui.c`, compiled with Zig as a
   static, stripped MIPS32 binary (~0.9 MB). It serves the app and a JSON API,
   and forks per request.
