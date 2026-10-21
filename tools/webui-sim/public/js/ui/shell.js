@@ -58,8 +58,9 @@ let dialogCount = 0;
 /**
  * Ask before something that can't be undone. Resolves true for the confirm
  * button; Cancel, Esc and the scrim resolve false. Cancel has focus first.
+ * With `cancel: false` it only tells: one button, which has focus.
  */
-export function confirmDialog({ title, text, confirmLabel, destructive = false }) {
+export function confirmDialog({ title, text, confirmLabel, destructive = false, cancel = true }) {
   return new Promise((resolve) => {
     const id = `mDialog${(dialogCount += 1)}`;
     const dialog = document.createElement("dialog");
@@ -70,8 +71,8 @@ export function confirmDialog({ title, text, confirmLabel, destructive = false }
         <h2 class="m-dialog-title" id="${id}t">${escapeHtml(title)}</h2>
         <p class="m-dialog-text" id="${id}d">${escapeHtml(text)}</p>
         <div class="m-dialog-actions">
-          <button type="button" class="btn btn-text" data-answer="" autofocus>Cancel</button>
-          <button type="button" class="btn btn-text${destructive ? " is-destructive" : ""}" data-answer="yes">${escapeHtml(confirmLabel)}</button>
+          ${cancel ? `<button type="button" class="btn btn-text" data-answer="" autofocus>Cancel</button>` : ""}
+          <button type="button" class="btn btn-text${destructive ? " is-destructive" : ""}" data-answer="yes"${cancel ? "" : " autofocus"}>${escapeHtml(confirmLabel)}</button>
         </div>
       </div>`;
     let answer = false;

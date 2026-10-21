@@ -15,7 +15,8 @@
  *   - IRDB network fetches are confined to loadLibraryIndex/fetchLibraryFile
  *     and those helpers are reachable only from explicit Search/Preview clicks
  *   - the click-only guarantee is enforced by fail-closed reference budgets:
- *     each guarded name may appear in views/ir.js only in its pinned roles, so
+ *     each guarded name may appear in views/device-import.js (the Import
+ *     sheet's Find codes) only in its pinned roles, so
  *     indirect scheduling, aliasing and programmatic clicks fail closed
  *   - no alternate automatic network primitives (sendBeacon/XHR/EventSource/
  *     WebSocket/external dynamic import) in production shell JS
@@ -387,7 +388,8 @@ const shellCss = read("./webui-sim/build/harmony-shell.css");
 const header = read("../payload/source/harmony_shell_assets.h");
 const webuiC = read("../payload/source/codex_webui.c");
 const simIndex = read("./webui-sim/public/index.html");
-const irView = read("./webui-sim/public/js/views/ir.js");
+const findView = read("./webui-sim/public/js/views/device-import.js");
+const labView = read("./webui-sim/public/js/views/ir-lab.js");
 const irLibrary = read("./webui-sim/public/js/ir-library.js");
 
 /* -- production HTML: single shell JS + single shell CSS ---------------- */
@@ -671,14 +673,19 @@ const fetchLibraryFileSrc = extractFunctionSource(irLibrary, "fetchLibraryFile")
 const irLibraryWithoutFetchHelpers = irLibrary
   .replace(loadLibraryIndexSrc ?? "\0", "")
   .replace(fetchLibraryFileSrc ?? "\0", "");
-const doFindSearchSrc = extractFunctionSource(irView, "doFindSearch");
-const previewLibraryEntrySrc = extractFunctionSource(irView, "previewLibraryEntry");
-const irViewWithoutUserFetchHandlers = irView
+const doFindSearchSrc = extractFunctionSource(findView, "doFindSearch");
+const previewLibraryEntrySrc = extractFunctionSource(findView, "previewLibraryEntry");
+const findViewWithoutUserFetchHandlers = findView
   .replace(doFindSearchSrc ?? "\0", "")
   .replace(previewLibraryEntrySrc ?? "\0", "");
-const onShowSrc = extractMethodSource(irView, "onShow");
-const mountSrc = extractFunctionSource(irView, "mount");
-const renderFindResultsSrc = extractFunctionSource(irView, "renderFindResults");
+/* The Import sheet's only entry point; with the two click handlers taken out
+ * it is everything that runs when the sheet opens (mount included). */
+const openSheetSrc = extractFunctionSource(findView, "openImportSheet");
+const openingPathSrc = openSheetSrc
+  ? openSheetSrc.replace(doFindSearchSrc ?? "\0", "").replace(previewLibraryEntrySrc ?? "\0", "")
+  : null;
+const mountSrc = extractFunctionSource(findView, "mount");
+const renderFindResultsSrc = extractFunctionSource(findView, "renderFindResults");
 
 check(
   "ir-library.js: loadLibraryIndex and fetchLibraryFile are defined",
@@ -694,18 +701,27 @@ check(
     !loadLibraryIndexSrc.includes("export async function fetchLibraryFile")
 );
 check(
-  "extractor sentinel: doFindSearch does not swallow previewLibraryEntry/mount/onShow",
+  "extractor sentinel: doFindSearch does not swallow previewLibraryEntry/mount/the sheet opening",
   Boolean(doFindSearchSrc) &&
     !/\bfunction\s+previewLibraryEntry\b/.test(doFindSearchSrc) &&
     !/\bfunction\s+mount\b/.test(doFindSearchSrc) &&
-    !/\basync\s+onShow\s*\(/.test(doFindSearchSrc) &&
+    !/\bopenSheet\s*\(/.test(doFindSearchSrc) &&
     !doFindSearchSrc.includes("async function previewLibraryEntry")
 );
 check(
-  "extractor sentinel: previewLibraryEntry does not swallow mount/onShow",
+  "extractor sentinel: previewLibraryEntry does not swallow mount/the sheet opening",
   Boolean(previewLibraryEntrySrc) &&
     !/\bfunction\s+mount\b/.test(previewLibraryEntrySrc) &&
-    !/\basync\s+onShow\s*\(/.test(previewLibraryEntrySrc)
+    !/\bopenSheet\s*\(/.test(previewLibraryEntrySrc)
+);
+check(
+  "extractor sentinel: openImportSheet spans the whole sheet, from its state to the openSheet return",
+  Boolean(openSheetSrc) &&
+    openSheetSrc.includes("const findState") &&
+    /\bfunction\s+mount\b/.test(openSheetSrc) &&
+    /\breturn\s+openSheet\s*\(/.test(openSheetSrc) &&
+    Boolean(openingPathSrc) &&
+    openingPathSrc !== openSheetSrc
 );
 check(
   "ir-library.js: fetchImpl calls live only inside loadLibraryIndex + fetchLibraryFile",
@@ -722,56 +738,57 @@ check(
     irLibrary.includes(`fileBase: "${IRDB_FILE_BASE}"`)
 );
 check(
-  "ir.js: loadLibraryIndex is invoked only from doFindSearch",
+  "device-import.js: loadLibraryIndex is invoked only from doFindSearch",
   Boolean(doFindSearchSrc) &&
     /\bloadLibraryIndex\s*\(/.test(doFindSearchSrc) &&
-    (irView.match(/\bloadLibraryIndex\s*\(/g) ?? []).length === 1 &&
-    !/\bloadLibraryIndex\s*\(/.test(irViewWithoutUserFetchHandlers)
+    (findView.match(/\bloadLibraryIndex\s*\(/g) ?? []).length === 1 &&
+    !/\bloadLibraryIndex\s*\(/.test(findViewWithoutUserFetchHandlers)
 );
 check(
-  "ir.js: fetchLibraryFile is invoked only from previewLibraryEntry",
+  "device-import.js: fetchLibraryFile is invoked only from previewLibraryEntry",
   Boolean(previewLibraryEntrySrc) &&
     /\bfetchLibraryFile\s*\(/.test(previewLibraryEntrySrc) &&
-    (irView.match(/\bfetchLibraryFile\s*\(/g) ?? []).length === 1 &&
-    !/\bfetchLibraryFile\s*\(/.test(irViewWithoutUserFetchHandlers)
+    (findView.match(/\bfetchLibraryFile\s*\(/g) ?? []).length === 1 &&
+    !/\bfetchLibraryFile\s*\(/.test(findViewWithoutUserFetchHandlers)
 );
 // Handler identity is the contract; CSS class names and loop identifiers are not.
 check(
-  "ir.js: Search button wires doFindSearch (explicit user action)",
+  "device-import.js: Search button wires doFindSearch (explicit user action)",
   Boolean(mountSrc) &&
     /button\(\s*["']Search IRDB["']\s*,\s*["'][^"']*["']\s*,\s*doFindSearch\s*\)/.test(mountSrc)
 );
 check(
-  "ir.js: Preview button wires previewLibraryEntry (explicit user action)",
+  "device-import.js: Preview button wires previewLibraryEntry (explicit user action)",
   Boolean(renderFindResultsSrc) &&
     /button\(\s*["']Preview["']\s*,\s*["'][^"']*["']\s*,\s*\(\s*\)\s*=>\s*previewLibraryEntry\s*\(\s*\w+\s*\)\s*\)/.test(
       renderFindResultsSrc
     )
 );
 check(
-  "ir.js: onShow does not call loadLibraryIndex or fetchLibraryFile",
-  Boolean(onShowSrc) &&
-    !/\bloadLibraryIndex\s*\(/.test(onShowSrc) &&
-    !/\bfetchLibraryFile\s*\(/.test(onShowSrc)
+  "device-import.js: opening the Import sheet calls neither loadLibraryIndex nor fetchLibraryFile",
+  Boolean(openingPathSrc) &&
+    !/\bloadLibraryIndex\s*\(/.test(openingPathSrc) &&
+    !/\bfetchLibraryFile\s*\(/.test(openingPathSrc)
 );
 check(
-  "ir.js: mount does not call loadLibraryIndex or fetchLibraryFile",
+  "device-import.js: mount does not call loadLibraryIndex or fetchLibraryFile",
   Boolean(mountSrc) &&
     !/\bloadLibraryIndex\s*\(/.test(mountSrc) &&
     !/\bfetchLibraryFile\s*\(/.test(mountSrc)
 );
 check(
-  "ir.js: no automatic startup path invokes IRDB fetch helpers",
+  "device-import.js: no automatic startup path invokes IRDB fetch helpers",
   // After stripping the two user-action handlers, fetch helpers must not remain
   // as call sites. previewLibraryEntry( may still appear once as the Preview
   // click arrow inside renderFindResults — that is the intentional click seam.
-  !/\bloadLibraryIndex\s*\(/.test(irViewWithoutUserFetchHandlers) &&
-    !/\bfetchLibraryFile\s*\(/.test(irViewWithoutUserFetchHandlers) &&
-    !/\bdoFindSearch\s*\(/.test(irViewWithoutUserFetchHandlers) &&
-    (irViewWithoutUserFetchHandlers.match(/\bpreviewLibraryEntry\s*\(/g) ?? []).length === 1 &&
+  !/\bloadLibraryIndex\s*\(/.test(findViewWithoutUserFetchHandlers) &&
+    !/\bfetchLibraryFile\s*\(/.test(findViewWithoutUserFetchHandlers) &&
+    !/\bdoFindSearch\s*\(/.test(findViewWithoutUserFetchHandlers) &&
+    (findViewWithoutUserFetchHandlers.match(/\bpreviewLibraryEntry\s*\(/g) ?? []).length === 1 &&
     Boolean(renderFindResultsSrc) &&
     /\bpreviewLibraryEntry\s*\(\s*\w+\s*\)/.test(renderFindResultsSrc) &&
-    !/\bloadLibraryIndex\s*\(|\bfetchLibraryFile\s*\(/.test(onShowSrc ?? "") &&
+    Boolean(openingPathSrc) &&
+    !/\bloadLibraryIndex\s*\(|\bfetchLibraryFile\s*\(/.test(openingPathSrc) &&
     !/\bloadLibraryIndex\s*\(|\bfetchLibraryFile\s*\(/.test(mountSrc ?? "")
 );
 
@@ -780,7 +797,7 @@ check(
 /* Counting direct call sites is not enough: a reference can be handed to a
  * scheduler, stored in an alias, bound, or applied without ever looking like
  * `name(`. These budgets invert the test — every textual occurrence of a
- * guarded identifier in views/ir.js must be accounted for by an explicitly
+ * guarded identifier in views/device-import.js must be accounted for by an explicitly
  * pinned role (its declaration / import specifier, plus the one Search or
  * Preview click seam). Anything else is an unapproved reference and fails,
  * with no need to enumerate bypass shapes. Programmatic activation
@@ -935,26 +952,26 @@ function findSyntheticActivation(src) {
   return out;
 }
 
-for (const budget of irdbReferenceBudgets(irView)) {
-  const report = referenceBudget(irView, budget.name, budget.roles);
+for (const budget of irdbReferenceBudgets(findView)) {
+  const report = referenceBudget(findView, budget.name, budget.roles);
   check(
-    `ir.js: ${budget.name} reference budget — only ${budget.roles.map((r) => r.role).join(" + ")}`,
+    `device-import.js: ${budget.name} reference budget — only ${budget.roles.map((r) => r.role).join(" + ")}`,
     report.ok,
     report.detail
   );
 }
 
-const syntheticActivation = findSyntheticActivation(irView);
+const syntheticActivation = findSyntheticActivation(findView);
 check(
-  "ir.js: no programmatic .click() / dispatchEvent() (clicks originate from the user)",
+  "device-import.js: no programmatic .click() / dispatchEvent() (clicks originate from the user)",
   syntheticActivation.length === 0,
   syntheticActivation.join(", ")
 );
 
-const buttonSrc = extractFunctionSource(irView, "button");
+const buttonSrc = extractFunctionSource(findView, "button");
 const buttonListeners = buttonSrc?.match(/\.addEventListener\(\s*["'`][^"'`]*["'`]/g) ?? [];
 check(
-  "ir.js: button() binds exactly one listener and it is 'click'",
+  "device-import.js: button() binds exactly one listener and it is 'click'",
   Boolean(buttonSrc) &&
     buttonListeners.length === 1 &&
     /\.addEventListener\(\s*["']click["']\s*,\s*onClick\s*\)/.test(buttonSrc) &&
@@ -982,8 +999,8 @@ const irLibraryImporters = listJsFiles(PUBLIC_JS_DIR)
   )
   .map((file) => file.slice(PUBLIC_JS_DIR.length + 1));
 check(
-  "public js: views/ir.js is the only module referencing ir-library.js",
-  irLibraryImporters.length === 1 && irLibraryImporters[0] === "views/ir.js",
+  "public js: views/device-import.js is the only module referencing ir-library.js",
+  irLibraryImporters.length === 1 && irLibraryImporters[0] === "views/device-import.js",
   `referencing modules: ${irLibraryImporters.join(", ") || "none"}`
 );
 
@@ -991,27 +1008,27 @@ check(
  * wiring site and prove the analyzer rejects it. The clean source above is the
  * negative control (no false positives). */
 const MUTATION_ANCHOR = 'refs.findSearchBtn = button("Search IRDB", "btn-secondary", doFindSearch);';
-function mutateIrView(snippet) {
-  return irView.replace(MUTATION_ANCHOR, `${MUTATION_ANCHOR}\n    ${snippet}`);
+function mutateFindView(snippet) {
+  return findView.replace(MUTATION_ANCHOR, `${MUTATION_ANCHOR}\n    ${snippet}`);
 }
 
 function checkBudgetRejects(label, name, snippet) {
-  const mutated = mutateIrView(snippet);
+  const mutated = mutateFindView(snippet);
   const report = budgetReport(mutated, name);
   check(
-    `ir.js budget rejects: ${label}`,
-    mutated !== irView && !report.ok && report.extras.length > 0,
-    mutated === irView ? "mutation anchor not found in ir.js" : report.ok ? "mutation passed the budget" : ""
+    `device-import.js budget rejects: ${label}`,
+    mutated !== findView && !report.ok && report.extras.length > 0,
+    mutated === findView ? "mutation anchor not found in device-import.js" : report.ok ? "mutation passed the budget" : ""
   );
 }
 
 function checkActivationRejects(label, snippet) {
-  const mutated = mutateIrView(snippet);
+  const mutated = mutateFindView(snippet);
   const hits = findSyntheticActivation(mutated);
   check(
-    `ir.js activation ban rejects: ${label}`,
-    mutated !== irView && hits.length > 0,
-    mutated === irView ? "mutation anchor not found in ir.js" : "synthetic activation went undetected"
+    `device-import.js activation ban rejects: ${label}`,
+    mutated !== findView && hits.length > 0,
+    mutated === findView ? "mutation anchor not found in device-import.js" : "synthetic activation went undetected"
   );
 }
 
@@ -1073,10 +1090,11 @@ check("shell.js: no remote photo (no REMOTE_SKIN_SRC, no remote-skin.jpg)",
   !shellJs.includes("REMOTE_SKIN_SRC") && !shellJs.includes("remote-skin"));
 check("shell.js: simulation behavior gated on HARMONY_SIM",
   shellJs.includes("HARMONY_SIM"));
-check("IR view: lab danger guard remains in factory scope for route teardown",
-  irView.includes("let labGuard;") &&
-  irView.includes("labGuard = dangerGuard(labClearBtn, {") &&
-  !irView.includes("const labGuard = dangerGuard(labClearBtn, {"));
+check("IR lab: lab danger guard remains in factory scope for route teardown",
+  labView.includes("let labGuard;") &&
+  labView.includes("labGuard = dangerGuard(labClearBtn, {") &&
+  !labView.includes("const labGuard = dangerGuard(labClearBtn, {") &&
+  /hide\(\)\s*\{[^}]*labGuard\?\.disarm\(\)/.test(labView));
 
 /* -- vendor editor dedup --------------------------------------------------- */
 

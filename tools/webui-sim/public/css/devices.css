@@ -1,0 +1,731 @@
+/* Devices: the Commands tab, the device sheets (Add a device, Edit details,
+   a command's signal, Learn a button, Import codes), the settings page (the
+   app's DeviceSettingsScreen), Send all commands and the IR lab. */
+
+/* -- Shared pieces ------------------------------------------------------------ */
+
+/* Rows that are labels (radios, switches, checkboxes) keep the row's type,
+   not the field label's. */
+label.m-row {
+  margin: 0;
+  color: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+  letter-spacing: 0;
+  cursor: pointer;
+}
+
+label.m-row:hover {
+  background: var(--state-hover);
+}
+
+.m-form {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.m-form .sheet-title,
+.m-form .sheet-text {
+  margin-bottom: 0;
+}
+
+.m-form-fields {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.m-field label {
+  margin-top: 0;
+}
+
+.m-field input {
+  min-height: 52px;
+  border-radius: var(--shape-md);
+}
+
+.m-field-hint {
+  margin: 6px var(--space-1) 0;
+  color: var(--on-surface-variant);
+  font-size: var(--fs-body-sm);
+  line-height: 18px;
+}
+
+.m-fieldset {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.m-fieldset legend {
+  margin-bottom: var(--space-2);
+  padding: 0;
+  color: var(--on-surface-variant);
+  font-size: var(--fs-caption);
+  font-weight: 500;
+  letter-spacing: 0.02em;
+}
+
+.m-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+/* A sheet's or page's status line; empty takes no room. */
+.form-msg {
+  color: var(--on-surface-variant);
+  font-size: var(--fs-body-sm);
+  line-height: 19px;
+}
+
+.form-msg:empty {
+  display: none;
+}
+
+.form-msg[data-kind="error"] {
+  color: var(--error);
+}
+
+.form-msg[data-kind="warn"] {
+  color: var(--warning);
+}
+
+.form-msg[data-kind="ok"] {
+  color: var(--live);
+}
+
+.btn .m-spinner {
+  width: 18px;
+  height: 18px;
+  border-width: 2px;
+  border-color: currentColor;
+  border-right-color: transparent;
+}
+
+.m-details > summary {
+  padding: var(--space-2) var(--space-1);
+  color: var(--primary);
+  font-size: var(--fs-label);
+  font-weight: 500;
+}
+
+.m-kv {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-1) 0;
+}
+
+.m-kv > div {
+  display: grid;
+  gap: 2px;
+}
+
+.m-kv dt {
+  color: var(--on-surface-variant);
+  font-size: var(--fs-caption);
+}
+
+.m-kv dd {
+  overflow-wrap: anywhere;
+  font-size: var(--fs-body-sm);
+}
+
+/* LinearProgressIndicator, indeterminate */
+.m-progress {
+  height: 4px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: var(--primary-container);
+}
+
+.m-progress span {
+  display: block;
+  width: 40%;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--primary);
+  animation: progress-slide 1.4s var(--ease-standard) infinite;
+}
+
+@keyframes progress-slide {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(250%);
+  }
+}
+
+/* Switch (a checkbox with role="switch"), the app's SwitchRow control */
+.m-switch {
+  flex: none;
+  position: relative;
+  width: 52px;
+  min-height: 0;
+  height: 32px;
+  padding: 0;
+  border: 2px solid var(--outline);
+  border-radius: 16px;
+  background: var(--surface-highest);
+  appearance: none;
+  cursor: pointer;
+  transition: background-color var(--dur-short) var(--ease-standard),
+    border-color var(--dur-short) var(--ease-standard);
+}
+
+.m-switch::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 6px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--outline);
+  transform: translateY(-50%);
+  transition: transform var(--dur-short) var(--ease-standard),
+    width var(--dur-short) var(--ease-standard), height var(--dur-short) var(--ease-standard);
+}
+
+.m-switch:checked {
+  border-color: var(--primary);
+  background: var(--primary);
+}
+
+.m-switch:checked::before {
+  width: 24px;
+  height: 24px;
+  background: var(--on-primary);
+  transform: translate(18px, -50%);
+}
+
+.m-switch:focus-visible {
+  box-shadow: var(--ring-focus);
+}
+
+/* -- Commands tab ------------------------------------------------------------- */
+
+.cmd-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.cmd-head .list-note {
+  margin-top: var(--space-1);
+  margin-bottom: var(--space-1);
+}
+
+.cmd-item {
+  display: flex;
+  align-items: center;
+  border-bottom: 1px solid var(--divider);
+}
+
+.cmd-item > .cmd-row {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+  border-bottom: 0;
+  padding-right: var(--space-2);
+}
+
+.cmd-name {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.cmd-tag {
+  flex: none;
+  color: var(--on-surface-variant);
+  font-size: var(--fs-caption);
+}
+
+.cmd-more {
+  width: 44px;
+  height: 44px;
+  margin-right: var(--space-1);
+}
+
+/* -- Learn a button ------------------------------------------------------------- */
+
+.learn-heard {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  margin: 0 var(--space-1) var(--space-4);
+  color: var(--live);
+  font-size: var(--fs-body);
+}
+
+.learn-heard .ic {
+  margin-top: 1px;
+}
+
+.learn-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: var(--space-4);
+}
+
+.learn-actions .btn {
+  min-height: 52px;
+}
+
+.learn-actions .btn-outlined {
+  flex: 1;
+}
+
+.learn-actions .btn-filled {
+  flex: 2;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.learn-again {
+  margin-top: var(--space-2);
+}
+
+.learn-note {
+  margin: 0 var(--space-1) var(--space-4);
+}
+
+.sheet-content .m-progress {
+  margin: var(--space-2) var(--space-1) var(--space-4);
+}
+
+/* -- Import codes ---------------------------------------------------------------- */
+
+.import-sheet .sheet-title:focus {
+  box-shadow: none;
+}
+
+.import-tabs {
+  margin-bottom: var(--space-4);
+}
+
+.import-panel {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.import-panel .sheet-text {
+  margin-bottom: 0;
+}
+
+.import-panel .m-section {
+  margin-top: var(--space-4);
+  margin-bottom: 0;
+}
+
+.import-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.import-results .m-row-title {
+  font-size: var(--fs-body-sm);
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.import-file {
+  display: grid;
+  justify-items: start;
+  gap: var(--space-1);
+}
+
+.import-file label.btn {
+  margin: 0;
+  color: var(--primary);
+  font-size: var(--fs-label);
+  letter-spacing: 0.01em;
+  cursor: pointer;
+}
+
+.import-file:focus-within label.btn {
+  box-shadow: var(--ring-focus);
+}
+
+/* The file input stays focusable and in the tab order behind its label. */
+.import-file-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  min-height: 0;
+  padding: 0;
+  opacity: 0;
+}
+
+.import-preview {
+  display: grid;
+  gap: var(--space-2);
+  font-size: var(--fs-body-sm);
+}
+
+.import-source {
+  color: var(--on-surface-variant);
+  overflow-wrap: anywhere;
+}
+
+.import-rows {
+  max-height: 180px;
+  overflow: auto;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--shape-sm);
+  background: var(--surface-lowest);
+  font-size: var(--fs-caption);
+  white-space: pre-wrap;
+}
+
+.import-paste {
+  min-height: 160px;
+  max-height: 280px;
+  border-radius: var(--shape-md);
+}
+
+.import-sources a {
+  color: var(--primary);
+  text-decoration: underline;
+}
+
+/* -- Device settings (DeviceSettingsScreen) --------------------------------------- */
+
+.ds {
+  padding-bottom: var(--space-2);
+}
+
+.ds > .m-list + .m-list {
+  margin-top: var(--space-3);
+}
+
+.ds-note {
+  margin: var(--space-4) var(--space-1) 0;
+  color: var(--warning);
+  font-size: var(--fs-label);
+  line-height: 20px;
+}
+
+.ds-note a {
+  color: var(--primary);
+  text-decoration: underline;
+}
+
+.ds-hint {
+  margin: 0 var(--space-1) var(--space-2);
+  color: var(--on-surface-variant);
+  font-size: var(--fs-body-sm);
+  line-height: 19px;
+}
+
+.ds-sub {
+  margin: var(--space-4) var(--space-1) var(--space-2);
+  color: var(--on-surface-variant);
+  font-size: var(--fs-body-sm);
+  font-weight: 500;
+}
+
+.ds-title {
+  font-size: var(--fs-body);
+}
+
+.ds-choice {
+  min-height: 56px;
+  padding-left: var(--space-3);
+}
+
+.ds-choice input {
+  width: 20px;
+  height: 20px;
+}
+
+.ds-choice-text {
+  flex: 1;
+  font-size: var(--fs-body);
+}
+
+.ds-pick {
+  min-height: 60px;
+  gap: var(--space-2);
+}
+
+.ds-pick .ds-title {
+  flex: 1;
+}
+
+.ds-pick-value {
+  min-width: 0;
+  max-width: 55%;
+  overflow: hidden;
+  color: var(--on-surface-variant);
+  font-size: var(--fs-label);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ds-pick-value.is-empty {
+  color: var(--primary);
+}
+
+.ds-caret {
+  color: var(--outline);
+}
+
+.ds-switch {
+  gap: var(--space-3);
+}
+
+.ds-stepper {
+  gap: var(--space-2);
+  padding-right: var(--space-2);
+}
+
+.ds-stepper .m-row-sub {
+  font-size: var(--fs-caption);
+}
+
+.ds-stepper-ctl {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 2px;
+}
+
+.ds-stepper-ctl .icon-btn {
+  width: 40px;
+  height: 40px;
+  color: var(--primary);
+}
+
+.ds-stepper-value {
+  width: 5.5ch;
+  min-height: 40px;
+  padding: 0 2px;
+  border-color: transparent;
+  border-radius: var(--shape-xs);
+  font-size: var(--fs-label);
+  font-weight: 500;
+  text-align: center;
+}
+
+.ds-stepper-value:hover {
+  border-color: var(--outline-variant);
+}
+
+.ds-unit {
+  margin-right: 2px;
+  color: var(--on-surface-variant);
+  font-size: var(--fs-label);
+}
+
+.ds-inputs {
+  padding: var(--space-1) 0;
+}
+
+.ds-input {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  padding: var(--space-2) var(--space-2) var(--space-2) var(--space-4);
+}
+
+.ds-input + .ds-input {
+  border-top: 1px solid var(--divider);
+}
+
+/* Basis 0: the field takes what the command and the menu leave. */
+.ds-input-name {
+  flex: 1 1 0;
+  width: 0;
+  min-width: 0;
+  min-height: 44px;
+}
+
+.ds-input-cmd {
+  display: inline-flex;
+  flex: 0 1 auto;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  max-width: 48%;
+  min-height: 44px;
+  padding: 0 var(--space-2) 0 var(--space-3);
+  border-radius: var(--shape-sm);
+  background: var(--key);
+  color: var(--on-surface);
+  font-size: var(--fs-body-sm);
+}
+
+.ds-input-cmd span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ds-input-cmd:hover {
+  background: var(--key-raised);
+}
+
+.ds-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin: var(--space-2) 0 var(--space-3) calc(var(--space-1) - var(--space-3));
+}
+
+/* The app's bottom Save bar */
+.ds-foot {
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+  display: grid;
+  gap: var(--space-2);
+  margin-top: var(--space-6);
+  padding: var(--space-3) 0 calc(var(--space-3) + env(safe-area-inset-bottom, 0px));
+  background: var(--canvas);
+}
+
+.ds-problem {
+  color: var(--error);
+  font-size: var(--fs-body-sm);
+}
+
+.ds-problem:empty {
+  display: none;
+}
+
+/* -- Send all commands ------------------------------------------------------------- */
+
+.sw-intro {
+  margin-top: var(--space-4);
+  margin-bottom: var(--space-4);
+}
+
+.sw .ds-note {
+  margin: 0 var(--space-1) var(--space-4);
+}
+
+.sw-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.sw-actions .btn {
+  min-height: 52px;
+}
+
+.sw-actions .btn-outlined {
+  flex: 1;
+}
+
+.sw-actions .btn-filled {
+  flex: 2;
+}
+
+.sw > .btn-block,
+.sw-actions {
+  margin-top: var(--space-4);
+}
+
+.sw-meter {
+  height: 6px;
+  margin-top: var(--space-4);
+  overflow: hidden;
+  border-radius: 3px;
+  background: var(--surface-highest);
+}
+
+.sw-meter span {
+  display: block;
+  height: 100%;
+  background: var(--live);
+  transform-origin: left;
+  transition: transform var(--dur-medium) var(--ease-standard);
+}
+
+.sw-meter-label {
+  margin: var(--space-2) var(--space-1) 0;
+  color: var(--on-surface-variant);
+  font-size: var(--fs-body-sm);
+}
+
+.sw .form-msg {
+  margin: var(--space-2) var(--space-1) 0;
+}
+
+.sw-log {
+  margin-top: var(--space-3);
+}
+
+.sw-log ol {
+  display: grid;
+  gap: 2px;
+  max-height: 220px;
+  overflow: auto;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--shape-sm);
+  background: var(--surface-lowest);
+  font-size: var(--fs-caption);
+  font-style: normal;
+}
+
+.sw-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.sw-head .btn {
+  margin-bottom: 2px;
+}
+
+.sw-command {
+  min-height: 48px;
+  gap: var(--space-3);
+}
+
+.sw-command span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: var(--fs-label);
+}
+
+/* -- IR lab ---------------------------------------------------------------------------- */
+
+.lab > .ds-hint {
+  margin-top: var(--space-4);
+}
+
+.lab-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--space-3);
+  margin: var(--space-4) 0 var(--space-2);
+}
+
+.lab-actions .danger-guard-consequence {
+  flex-basis: 100%;
+  margin-top: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .m-progress span {
+    animation-duration: 4s;
+  }
+
+  .m-switch,
+  .m-switch::before,
+  .sw-meter span {
+    transition: none;
+  }
+}

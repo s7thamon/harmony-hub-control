@@ -18,6 +18,7 @@ import {
   inputsInUse,
   validateDeviceSettings,
 } from "./public/js/views/device-settings-model.js";
+import { LIMITS, isSafeLabel } from "./public/js/views/ir-model.js";
 
 const SIM_DIR = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(SIM_DIR, "public");
@@ -370,10 +371,10 @@ function handleInventory(res) {
     ok: true,
     deviceCount: devices.length,
     totalCommandCount,
-    displayDeviceLimit: 64,
-    displayCommandLimit: 20000,
-    storageCommandLimit: 20000,
-    batchCommandLimit: 500,
+    displayDeviceLimit: LIMITS.devices,
+    displayCommandLimit: MAX_IR_COMMANDS,
+    storageCommandLimit: LIMITS.storedCommands,
+    batchCommandLimit: LIMITS.batchCommands,
     requestBodyLimit: MAX_BODY,
     resourceFileLimit: 4 * 1024 * 1024,
     devices,
@@ -406,6 +407,553 @@ function handleIrSend(res, params) {
   }
   logEvent({ kind: "ir", deviceId, command });
   sendJson(res, 200, { ok: true, deviceId, command, reply: "sim sent" });
+}
+
+/* -- IR setup: codex_webui.c's /ir/* forms and IR JSON routes -------------
+   The /ir/* forms answer with the hub's legacy page: HTTP 200 with the result
+   in <div class='msg'>, refusals included; only delete-device answers 409 or
+   404. Messages and checks follow the C. Nothing is ever transmitted. */
+
+// The hub's limits are the client's (ir-model.js mirrors codex_webui.c);
+// MAX_IR_COMMANDS is the one the client never needs.
+const MAX_IR_COMMANDS = 160;
+const LAB_DEVICE_NAME = "Temporary IR Test"; // ensure_lab_target_device()
+const MAX_CANCELED_RUNS = 64;
+const canceledRuns = new Set();
+let captureArmed = false;
+
+// safe_label(): non-empty, no control characters, no '"' or backslash. It
+// has no length limit of its own: form_value() already cut the field to its
+// buffer (formFields below).
+const safeLabel = (value) => isSafeLabel(value, Infinity);
+
+// The /ir/* and test-learned buffers in codex_webui.c (form_value copies at
+// most size - 1 bytes).
+const FORM_SIZES = {
+  deviceId: 64,
+  name: 128,
+  oldName: 128,
+  command: 128,
+  manufacturer: 128,
+  model: 128,
+  type: 80,
+  mode: 32,
+  protocol: 32,
+  nec: 64,
+  keycode: 512,
+  raw: 2048
+};
+
+function formFields(params) {
+  const out = { ...params };
+  for (const [key, size] of Object.entries(FORM_SIZES)) {
+    if (key in out) out[key] = String(out[key] ?? "").slice(0, size - 1);
+  }
+  return out;
+}
+
+// DevicesWithFeatures as the array the hub appends to.
+function deviceEntries() {
+  if (!Array.isArray(state.deviceList.DevicesWithFeatures)) state.deviceList.DevicesWithFeatures = [];
+  return state.deviceList.DevicesWithFeatures;
+}
+
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>"']/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+}
+
+function sendMsgPage(res, status, message) {
+  const body = "<!doctype html><html><head><title>Harmony Hub Control</title></head><body>" +
+    `<div class='msg'>${escapeHtml(message)}</div></body></html>\n`;
+  res.writeHead(status, {
+    "Content-Type": "text/html; charset=utf-8",
+    "Content-Length": Buffer.byteLength(body),
+    "Cache-Control": "no-store"
+  });
+  res.end(body);
+}
+
+function deviceCommands(entry) {
+  if (!Array.isArray(entry.Commands)) entry.Commands = [];
+  return entry.Commands;
+}
+
+function hasCommand(entry, name) {
+  return deviceCommands(entry).some((c) => String(c?.Name ?? "") === name);
+}
+
+// New ids continue after the largest one in use, from the hub's floor.
+function nextId(values, floor) {
+  const max = values.reduce((m, v) => Math.max(m, Number(v) || 0), 0);
+  return Math.max(max + 1, floor);
+}
+
+function nextCommandId() {
+  return nextId(devicesWithFeatures().flatMap((e) => deviceCommands(e).map((c) => c?.["Id-"])), 39000000);
+}
+
+// build_nec_keycode()
+function necKeycode(hex, protocolId) {
+  const clean = String(hex ?? "").trim().replace(/^0x/i, "");
+  if (!/^[0-9a-fA-F]{1,8}$/.test(clean)) return null;
+  const value = parseInt(clean, 16).toString(16).toUpperCase().padStart(8, "0");
+  return protocolId === 679
+    ? `G:MemorexO1 32 Bit:()(0x${value})():3`
+    : `G:Toshiba 32 Bit:(0x${value})(Repeat)():3`;
+}
+
+/* The signal of /ir/command, /ir/update-command and /api/ir-test-learned:
+   { mode, protocolId, code, raw } or { error }. "auto" keeps the first of
+   keycode, NEC and raw that was given (analyze_capture_storage). */
+function irSignal(params, defaultMode) {
+  let mode = String(params.mode ?? "").trim() || defaultMode;
+  let protocolId = parseInt(params.protocol, 10);
+  if (!(protocolId > 0)) protocolId = 2;
+  const keycode = String(params.keycode ?? "").trim();
+  const nec = String(params.nec ?? "").trim();
+  const raw = String(params.raw ?? "").trim();
+  if (mode === "auto") mode = keycode ? "keycode" : nec ? "nec" : "raw";
+  if (mode === "raw") return raw ? { mode, protocolId, code: "", raw } : { error: "Raw command data is required." };
+  if (mode === "nec") {
+    const code = necKeycode(nec, protocolId);
+    return code ? { mode: "keycode", protocolId, code, raw: "" } : { error: "NEC value must be 1-8 hex digits." };
+  }
+  return keycode
+    ? { mode: "keycode", protocolId, code: keycode, raw: "" }
+    : { error: defaultMode === "auto" ? "KeyCode is required." : "Harmony compact code is required." };
+}
+
+// build_ir_command_json()
+function irCommand(id, name, signal) {
+  const raw = signal.mode === "raw";
+  return {
+    Raw: raw ? signal.raw : null,
+    "Id-": id,
+    KeyCode: raw ? "" : signal.code,
+    DateTaught: `/Date(${Math.floor(Date.now() / 1000)}000+0000)/`,
+    FunctionId: null,
+    Parameters: null,
+    Name: name,
+    FunctionGroupId: 0,
+    TransportType: 1,
+    ProtocolId: raw ? null : signal.protocolId,
+    CommandTypeId: "",
+    IsLearned: true
+  };
+}
+
+// add_ir_command(): returns { ok, msg }.
+function addIrCommand(deviceId, name, params) {
+  if (!safeLabel(deviceId) || !safeLabel(name)) return { ok: false, msg: "Device and command name are required." };
+  const signal = irSignal(params, "auto");
+  if (signal.error) return { ok: false, msg: signal.error };
+  const entry = findDeviceEntry(deviceId);
+  if (!entry) return { ok: false, msg: `Device ${deviceId} not found.` };
+  if (deviceCommands(entry).length >= LIMITS.storedCommands) {
+    return { ok: false, msg: `Device ${deviceId} already has the local storage limit of ${LIMITS.storedCommands} commands.` };
+  }
+  if (hasCommand(entry, name)) return { ok: false, msg: `Command ${name} already exists on device ${deviceId}.` };
+  deviceCommands(entry).push(irCommand(nextCommandId(), name, signal));
+  return { ok: true, msg: `Saved command ${name} on device ${deviceId}.` };
+}
+
+function deleteIrCommand(deviceId, name) {
+  const entry = findDeviceEntry(deviceId);
+  if (!entry) return { ok: false, msg: `Device ${deviceId} not found.` };
+  const list = deviceCommands(entry);
+  const index = list.findIndex((c) => String(c?.Name ?? "") === name);
+  if (index < 0) return { ok: false, msg: `Command ${name} not found on device ${deviceId}.` };
+  list.splice(index, 1);
+  return { ok: true, msg: `Deleted command ${name} from device ${deviceId}.` };
+}
+
+// harmony_device_type_id()
+function deviceTypeId(type) {
+  const t = String(type).toLowerCase();
+  if (t === "amplifier") return 19;
+  if (t === "television" || t === "tv") return 2;
+  if (t === "media player") return 22;
+  if (t === "game console") return 32;
+  return 44;
+}
+
+// create_ir_device_ex(): returns { ok, msg, id }.
+function createIrDevice({ name, manufacturer, model, type }) {
+  if (![name, manufacturer, model, type].every(safeLabel)) {
+    return { ok: false, msg: "Device fields cannot be empty or contain control characters." };
+  }
+  const id = nextId(devicesWithFeatures().map((e) => e?.Device?.["Id-"]), 90000000);
+  const typeId = deviceTypeId(type);
+  deviceEntries().push({
+    Device: {
+      "Id-": id,
+      Name: name,
+      Manufacturer: manufacturer,
+      Model: model,
+      DeviceType: typeId,
+      DeviceTypeDisplayName: type,
+      Icon: typeId,
+      Transport: 1,
+      ControlPort: 7,
+      InterKeyDelay: 300,
+      InterDeviceDelay: 500,
+      PressMinRepeats: 3,
+      DeviceAddedDate: `/Date(${Math.floor(Date.now() / 1000)}000+0000)/`
+    },
+    Commands: [],
+    DeviceFeatures: []
+  });
+  return { ok: true, msg: `Created IR device ${name} (${id}).`, id: String(id) };
+}
+
+function labDevice() {
+  return devicesWithFeatures().find((e) => e?.Device?.Name === LAB_DEVICE_NAME) ?? null;
+}
+
+// ensure_lab_target_device()
+function ensureLabDevice() {
+  const found = labDevice();
+  if (found) {
+    const id = String(found.Device["Id-"]);
+    return { ok: true, id, created: false, msg: `Using existing ${LAB_DEVICE_NAME} (${id}).` };
+  }
+  const made = createIrDevice({ name: LAB_DEVICE_NAME, manufacturer: "Local", model: "Command Sweep", type: "HomeAppliance" });
+  return { ...made, created: made.ok };
+}
+
+// resource_references_device(): any "DeviceId-" naming it, in activities or maps.
+function referencesDevice(value, id) {
+  if (Array.isArray(value)) return value.some((item) => referencesDevice(item, id));
+  if (!value || typeof value !== "object") return false;
+  return Object.entries(value).some(([key, item]) =>
+    key === "DeviceId-" ? String(item) === id : referencesDevice(item, id));
+}
+
+function handleIrForm(res, pathname, body) {
+  const params = formFields(body);
+  const deviceId = String(params.deviceId ?? "");
+  let result;
+  switch (pathname) {
+    case "/ir/new-device":
+      result = createIrDevice(params);
+      break;
+    case "/ir/device": {
+      const fields = ["name", "manufacturer", "model", "type"].map((k) => String(params[k] ?? ""));
+      const entry = findDeviceEntry(deviceId);
+      if (!safeLabel(deviceId) || !fields.every(safeLabel)) {
+        result = { ok: false, msg: "Device fields cannot be empty or contain control characters." };
+      } else if (!entry) {
+        result = { ok: false, msg: `Failed to update device ${deviceId}.` };
+      } else {
+        [entry.Device.Name, entry.Device.Manufacturer, entry.Device.Model, entry.Device.DeviceTypeDisplayName] = fields;
+        result = { ok: true, msg: `Updated device ${deviceId}.` };
+      }
+      break;
+    }
+    case "/ir/delete-device": {
+      const id = /^\d+$/.test(deviceId) && Number(deviceId) > 0 ? deviceId : "";
+      const index = devicesWithFeatures().findIndex((e) => String(e?.Device?.["Id-"]) === id);
+      if (!id || index < 0) {
+        sendMsgPage(res, 404, `Device ${deviceId} not found.`);
+        return;
+      }
+      if ([state.activityList, state.mapList, state.functionList].some((list) => referencesDevice(list, id))) {
+        sendMsgPage(res, 409,
+          `Device ${deviceId} is still used by an activity or a remote button map. Remove it from those first, then delete it.`);
+        return;
+      }
+      devicesWithFeatures().splice(index, 1);
+      result = { ok: true, msg: `Deleted device ${deviceId}.` };
+      break;
+    }
+    case "/ir/command":
+      result = addIrCommand(deviceId, String(params.name ?? ""), params);
+      break;
+    case "/ir/update-command": {
+      const oldName = String(params.oldName ?? "");
+      const name = String(params.name ?? "");
+      const entry = findDeviceEntry(deviceId);
+      const list = entry ? deviceCommands(entry) : [];
+      const index = list.findIndex((c) => String(c?.Name ?? "") === oldName);
+      const signal = irSignal(params, "keycode");
+      if (!safeLabel(deviceId) || !safeLabel(oldName) || !safeLabel(name)) {
+        result = { ok: false, msg: "Device, current command name, and new command name are required." };
+      } else if (index < 0) {
+        result = { ok: false, msg: `Command ${oldName} was not found on device ${deviceId}.` };
+      } else if (name !== oldName && hasCommand(entry, name)) {
+        result = { ok: false, msg: `Command ${name} already exists on device ${deviceId}.` };
+      } else if (signal.error) {
+        result = { ok: false, msg: signal.error };
+      } else {
+        list[index] = irCommand(Number(list[index]["Id-"]) || nextCommandId(), name, signal);
+        result = { ok: true, msg: `Updated command ${name} on device ${deviceId}.` };
+      }
+      break;
+    }
+    case "/ir/delete-command":
+      result = deleteIrCommand(deviceId, String(params.command ?? ""));
+      break;
+    default:
+      sendError(res, 404, "not found");
+      return;
+  }
+  if (result.ok) logEvent({ kind: "ir-setup", route: pathname, deviceId: result.id ?? deviceId });
+  sendMsgPage(res, 200, result.msg);
+}
+
+/* /api/capture hears nothing (the sim has no IR receiver) unless
+   POST /api/sim/capture-next armed one sample NEC frame for the next call. */
+function handleCapture(res) {
+  if (captureArmed) {
+    captureArmed = false;
+    sendJson(res, 200, {
+      ok: true,
+      raw: "",
+      mode: "nec",
+      protocolId: 2,
+      keycode: "",
+      nec: "0x00FF02FD",
+      analysis: "NEC 32-bit frame (simulated sample)"
+    });
+    return;
+  }
+  sendJson(res, 200, {
+    ok: true,
+    raw: "",
+    mode: "",
+    protocolId: 0,
+    keycode: "",
+    nec: "",
+    analysis: "SIMULATED HUB — no IR receiver"
+  });
+}
+
+// render_ir_test_learned_json(): add a temporary command, "send" it, remove it.
+function handleIrTestLearned(res, body) {
+  const params = formFields(body);
+  const deviceId = String(params.deviceId ?? "");
+  if (!safeLabel(deviceId)) {
+    sendError(res, 400, "choose a device before testing");
+    return;
+  }
+  if (!params.raw && !params.keycode && !params.nec) {
+    sendError(res, 400, "learn or enter a signal before testing");
+    return;
+  }
+  const temp = `Signal Test ${Math.floor(Date.now() / 1000)} ${process.pid % 10000}`;
+  const added = addIrCommand(deviceId, temp, { protocol: "2", ...params, mode: params.mode || "auto" });
+  const cleanup = added.ok ? deleteIrCommand(deviceId, temp) : { ok: false, msg: "" };
+  if (added.ok) logEvent({ kind: "ir-test", deviceId, command: temp });
+  sendJson(res, added.ok ? 200 : 400, {
+    ok: added.ok,
+    deviceId,
+    tempCommand: added.ok ? temp : "",
+    addMessage: added.msg,
+    reply: added.ok ? "sim sent" : "",
+    cleanupOk: cleanup.ok,
+    cleanupMessage: cleanup.msg
+  });
+}
+
+// render_ir_batch_send_json(): one request sends a chunk, newline-separated.
+async function handleIrBatchSend(res, params) {
+  const deviceId = String(params.deviceId ?? "");
+  const runId = String(params.runId ?? "");
+  if (!safeLabel(deviceId)) {
+    sendError(res, 400, "invalid IR batch device");
+    return;
+  }
+  if (runId && !/^[A-Za-z0-9_.-]{1,96}$/.test(runId)) {
+    sendError(res, 400, "invalid IR run id");
+    return;
+  }
+  const dryRun = params.dryRun === "1" || String(params.dryRun).toLowerCase() === "true";
+  const delayMs = Math.min(10000, Math.max(40, parseInt(params.delayMs, 10) || 0));
+  const started = Date.now();
+  const lines = String(params.commands ?? "").split("\n");
+  let sent = 0;
+  let skipped = 0;
+  let attempted = 0;
+  let canceled = false;
+  let lastReply = "";
+  let i = 0;
+  for (; i < lines.length && attempted < LIMITS.batchCommands; i += 1) {
+    if (runId && canceledRuns.has(runId)) {
+      // The client sends no further chunk of a canceled run.
+      canceledRuns.delete(runId);
+      canceled = true;
+      break;
+    }
+    const name = lines[i].trim();
+    if (!name || !safeLabel(name)) {
+      skipped += 1;
+      continue;
+    }
+    attempted += 1;
+    if (!dryRun) {
+      logEvent({ kind: "ir", deviceId, command: name, runId });
+      lastReply = "sim sent";
+      // A short real wait per command so a sweep can be watched and stopped.
+      await new Promise((resolve) => setTimeout(resolve, Math.min(delayMs, 250)));
+    }
+    sent += 1;
+  }
+  skipped += lines.length - i;
+  if (sent === 0 && !canceled) {
+    sendError(res, 400, "no valid commands selected");
+    return;
+  }
+  sendJson(res, 200, {
+    ok: true,
+    deviceId,
+    runId,
+    dryRun,
+    canceled,
+    sent,
+    skipped,
+    attempted,
+    failed: 0,
+    delayMs,
+    elapsedMs: Date.now() - started,
+    lastReply
+  });
+}
+
+function handleIrCancel(res, params) {
+  const runId = String(params.runId ?? "");
+  if (!/^[A-Za-z0-9_.-]{1,96}$/.test(runId)) {
+    sendError(res, 400, "invalid IR run id");
+    return;
+  }
+  canceledRuns.add(runId);
+  // A cancel that came after its run finished is never collected: keep the newest.
+  if (canceledRuns.size > MAX_CANCELED_RUNS) canceledRuns.delete(canceledRuns.values().next().value);
+  sendJson(res, 200, { ok: true, runId, canceled: true });
+}
+
+function handleIrLabTarget(res) {
+  const lab = ensureLabDevice();
+  sendJson(res, lab.ok ? 200 : 500, {
+    ok: lab.ok,
+    deviceId: lab.ok ? lab.id : "",
+    name: LAB_DEVICE_NAME,
+    created: Boolean(lab.created),
+    message: lab.msg
+  });
+}
+
+function handleIrLabClear(res, params) {
+  const lab = ensureLabDevice();
+  if (!lab.ok) {
+    sendError(res, 500, lab.msg);
+    return;
+  }
+  const deviceId = String(params.deviceId ?? "") || lab.id;
+  if (deviceId !== lab.id) {
+    sendError(res, 400, "clear only supports the temporary sweep device");
+    return;
+  }
+  const entry = findDeviceEntry(deviceId);
+  if (!entry) {
+    sendError(res, 500, `Device ${deviceId} not found.`);
+    return;
+  }
+  const count = deviceCommands(entry).length;
+  entry.Commands = [];
+  sendJson(res, 200, { ok: true, deviceId, message: `Cleared ${count} commands from device ${deviceId}.` });
+}
+
+// build_irdb_nec_keycode(): IRDB's NEC/Pioneer rows, each byte bit-reversed.
+function irdbKeycode(protocol, device, subdevice, fn) {
+  if (!/^(nec|pioneer)/i.test(protocol)) return null;
+  const d = parseInt(device, 10) || 0;
+  const s = !subdevice || subdevice === "-1" ? d ^ 0xff : parseInt(subdevice, 10) || 0;
+  const f = parseInt(fn, 10) || 0;
+  // strtoul() wraps a negative value past 255, so the C refuses it too.
+  if (![d, s, f].every((n) => n >= 0 && n <= 255)) return null;
+  const rev = (n) => parseInt(n.toString(2).padStart(8, "0").split("").reverse().join(""), 2);
+  const byte = (n) => rev(n).toString(16).toUpperCase().padStart(2, "0");
+  return `G:Toshiba 32 Bit:(0x${byte(d)}${byte(s)}${byte(f)}${byte(~f & 0xff)})(Repeat)():3`;
+}
+
+// bulk_import_irdb_commands(): name|keycode, name|keycode|code, name|raw|data, or IRDB CSV.
+function handleIrdbImport(res, params) {
+  const deviceId = String(params.deviceId ?? "");
+  const entry = safeLabel(deviceId) ? findDeviceEntry(deviceId) : null;
+  if (!entry) {
+    sendError(res, 400, safeLabel(deviceId) ? "Failed to locate device command list." : "Invalid device for IRDB import.");
+    return;
+  }
+  const remaining = LIMITS.storedCommands - deviceCommands(entry).length;
+  if (remaining <= 0) {
+    sendError(res, 400, `Device ${deviceId} already has the local storage limit of ${LIMITS.storedCommands} commands.`);
+    return;
+  }
+  const staged = [];
+  const taken = new Set(deviceCommands(entry).map((c) => String(c?.Name ?? "")));
+  const firstId = nextCommandId();
+  let submitted = 0;
+  let skippedExisting = 0;
+  let rejected = 0;
+  for (const rawLine of String(params.payload ?? "").split("\n")) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    let name = "";
+    let signal = null;
+    if (line.includes("|")) {
+      const f = line.split("|").map((v) => v.trim());
+      name = f[0];
+      if (f.length >= 3 && f[1].toLowerCase() === "raw") signal = { mode: "raw", raw: f[2] };
+      else if (f.length >= 3 && f[1].toLowerCase() === "keycode") signal = { mode: "keycode", code: f[2] };
+      else if (f.length >= 2) signal = { mode: "keycode", code: f[1] };
+    } else {
+      const f = line.split(",").map((v) => v.trim());
+      if (f.length >= 5 && f[0].toLowerCase() !== "functionname") {
+        name = f[0];
+        signal = { mode: "keycode", code: irdbKeycode(f[1], f[2], f[3], f[4]) ?? "" };
+      }
+    }
+    if (!name) continue;
+    submitted += 1;
+    if (!safeLabel(name)) {
+      rejected += 1;
+    } else if (taken.has(name)) {
+      skippedExisting += 1;
+    } else if (signal.mode === "raw"
+      ? !signal.raw || signal.raw.length > 4096 || /[\u0000-\u001f\u007f]/.test(signal.raw)
+      : !signal.code) {
+      rejected += 1;
+    } else if (staged.length >= remaining) {
+      rejected += 1;
+    } else {
+      staged.push(irCommand(firstId + staged.length, name, { protocolId: 2, ...signal }));
+      taken.add(name);
+    }
+  }
+  const counts = `Submitted: ${submitted}  Imported: ${staged.length}  Skipped existing: ${skippedExisting}  Rejected: ${rejected}`;
+  if (!staged.length) {
+    const message = !submitted ? "IRDB import payload was empty."
+      : skippedExisting === submitted ? `All submitted names already exist. ${counts}`
+      : !skippedExisting ? `Backend rejected malformed/raw commands. ${counts}`
+      : `No supported new IRDB commands were selected. ${counts}`;
+    sendError(res, 400, message);
+    return;
+  }
+  deviceCommands(entry).push(...staged);
+  logEvent({ kind: "ir-import", deviceId, imported: staged.length });
+  sendJson(res, 200, { ok: true, message: counts });
+}
+
+/* The hub fetches remotecentral.com itself; the sim never goes online and
+   answers like a hub without internet access. */
+function handleRemoteCentralFetch(res, params) {
+  const path = String(params.path ?? "").trim();
+  if (!path.startsWith("/cgi-bin/codes/") || path.includes("..")) {
+    sendJson(res, 400, { ok: false, source: "remotecentral", error: "invalid RemoteCentral path" });
+    return;
+  }
+  sendJson(res, 200, { ok: false, source: "remotecentral", path, error: "SIMULATED HUB — no internet access" });
 }
 
 function buttonIdentity(button) {
@@ -568,6 +1116,8 @@ async function handleApi(req, res, pathname, url) {
       try {
         loadFixture();
         state.events.length = 0;
+        captureArmed = false;
+        canceledRuns.clear();
         sendJson(res, 200, { ok: true, revision: state.revision, currentActivityId: state.currentActivityId });
       } catch (error) {
         sendError(res, 500, `fixture reload failed: ${error.message}`);
@@ -589,15 +1139,33 @@ async function handleApi(req, res, pathname, url) {
       return;
     case "GET /api/capture":
     case "POST /api/capture":
-      sendJson(res, 200, {
-        ok: true,
-        raw: "",
-        mode: "",
-        protocolId: 0,
-        keycode: "",
-        nec: "",
-        analysis: "SIMULATED HUB — no IR receiver"
-      });
+      handleCapture(res);
+      return;
+    case "POST /api/sim/capture-next":
+      captureArmed = true;
+      sendJson(res, 200, { ok: true, armed: true });
+      return;
+    case "POST /api/ir-test-learned":
+      handleIrTestLearned(res, params);
+      return;
+    case "POST /api/ir-batch-send":
+      await handleIrBatchSend(res, params);
+      return;
+    case "POST /api/ir-cancel":
+      handleIrCancel(res, params);
+      return;
+    case "POST /api/ir-lab-target":
+      handleIrLabTarget(res);
+      return;
+    case "POST /api/ir-lab-clear":
+      handleIrLabClear(res, params);
+      return;
+    case "POST /api/irdb-import":
+      handleIrdbImport(res, params);
+      return;
+    case "GET /api/remotecentral-fetch":
+    case "POST /api/remotecentral-fetch":
+      handleRemoteCentralFetch(res, params);
       return;
     case "GET /api/update-status":
       sendJson(res, 200, {
@@ -708,6 +1276,15 @@ const server = http.createServer((req, res) => {
         return;
       }
       handleExport(res, pathname);
+      return;
+    }
+    if (pathname.startsWith("/ir/") && req.method === "POST") {
+      parseParams(req, url)
+        .then((params) => handleIrForm(res, pathname, params))
+        .catch((error) => {
+          if (!res.headersSent) sendError(res, error.status || 413, error.message || "bad request body");
+          else res.end();
+        });
       return;
     }
     if (req.method !== "GET" && req.method !== "HEAD") {

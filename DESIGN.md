@@ -121,6 +121,13 @@ Segoe on Windows. No web fonts are shipped.
 | Keys | `.rk`, `.dpad-*`, `.rocker`, `.rk-captioned`, `.rk-color` |
 | Running card, activity row | `.run-card` (on `--running-card`), `.act-row` (Start on `--key-raised`, then ⋮) |
 | ActivityEditor steps | `.wiz-progress`, `.wiz-intro`, `.wiz-choice`, `.wiz-job`, `.wiz-card` with `.chip`s, `.wiz-key` rows, the `.pick-*` sheet, `.wiz-foot` |
+| OutlinedTextField, FilterChip group | `.m-field` (label, input, `.m-field-hint`), `.m-chips` of `.chip`s with `aria-pressed` |
+| SwitchRow | `label.m-row` with `<input type="checkbox" role="switch" class="m-switch">` |
+| RadioButton rows | `label.m-row.ds-choice` with a native radio, in a `role="radiogroup"` list |
+| Stepper (device settings) | `.ds-stepper`: − and + icon buttons around a value you can also type |
+| CommandSheet | `openCommandPicker()`: the `.pick-*` sheet with search and a check on the current command |
+| LinearProgressIndicator | `.m-progress` (indeterminate), `.sw-meter` (a run's progress) |
+| Device pages | Commands tab `.cmd-item` rows with ⋮; Learn and Import sheets (`.learn-*`, `.import-*`); settings page `.ds-*` with the `.ds-foot` Save bar; Send all `.sw-*`; IR lab `.lab-*` |
 
 Unported setup pages keep their own classes (`.panel`, `.btn-primary`,
 `.notice-*`, …), restyled to these tokens.
@@ -161,6 +168,23 @@ should too:
   ("Next: inputs"), and the last step says what it does ("Save activity").
 - Closing asks "Discard changes?" only when something changed. Saving goes
   to the hub first; the flow closes once the hub has accepted it.
+
+A settings page (a device's settings, the app's DeviceSettingsScreen) is a
+list instead of steps:
+- Blue section labels over list groups: radio rows for one choice, rows
+  that open the command picker, switches, and steppers.
+- A Save bar stays at the bottom. It stays off until something changes
+  (or the hub has nothing saved yet and shows suggestions), and it shows
+  the first problem above the button.
+- Leaving with unsaved changes asks "Discard changes?"; a save goes back
+  to the page it came from.
+
+Sheets do one job each (Learn a button, Import codes, Edit command). They
+check what they can before they send, and they close once the hub has
+the change, except Learn a button, which starts over for the next button.
+The hub answers its `/ir/*` forms with HTTP 200 even when it refuses, so a
+change only counts once the re-read setup shows it; otherwise the hub's own
+message is shown as the error.
 
 ## 8. Motion
 

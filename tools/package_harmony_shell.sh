@@ -9,7 +9,7 @@
 # What it does, in order:
 #   1. bun build js/app.js  -> one minified IIFE  -> harmony-shell.js
 #   2. bun bundling of an @import entry over tokens/app/remote/wizard/
-#      activity-overrides CSS -> one minified     -> harmony-shell.css
+#      devices/activity-overrides CSS -> one minified     -> harmony-shell.css
 #   3. awk transform of index.html -> production HTML:
 #        - Google Fonts preconnect/stylesheet stripped (hub is offline)
 #        - one stylesheet (/assets/harmony-shell.css) + one classic script
@@ -62,6 +62,7 @@ for css in \
   "$SIM_PUBLIC/css/app.css" \
   "$SIM_PUBLIC/css/remote.css" \
   "$SIM_PUBLIC/css/wizard.css" \
+  "$SIM_PUBLIC/css/devices.css" \
   "$SIM_PUBLIC/css/activity-overrides.css"
 do
   printf '@import "%s";\n' "$css" >> "$TMP/shell-entry.css"
@@ -76,7 +77,7 @@ done
 # through untouched so the validated markup is preserved byte-for-byte.
 awk '
   /fonts\.googleapis\.com|fonts\.gstatic\.com/ { next }
-  /css\/app\.css|css\/remote\.css|css\/wizard\.css/ { next }
+  /css\/app\.css|css\/remote\.css|css\/wizard\.css|css\/devices\.css/ { next }
   /css\/tokens\.css/ {
     print "  <link rel=\"stylesheet\" href=\"/assets/harmony-shell.css\">"
     next

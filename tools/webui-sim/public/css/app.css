@@ -794,16 +794,14 @@ button.m-row:focus-visible {
 }
 
 /* Text (TextButton) */
-.btn-text,
-.btn-ghost {
+.btn-text {
   padding: 0 var(--space-3);
   color: var(--primary);
 }
 
 .btn-outlined:hover:not(:disabled),
 .btn-quiet:hover:not(:disabled),
-.btn-text:hover:not(:disabled),
-.btn-ghost:hover:not(:disabled) {
+.btn-text:hover:not(:disabled) {
   background: rgba(157, 184, 255, 0.08);
 }
 
@@ -1447,11 +1445,6 @@ select option {
   white-space: nowrap;
 }
 
-.pill-sim {
-  background: var(--primary-container);
-  color: var(--on-primary-container);
-}
-
 .pill-live {
   background: rgba(111, 211, 168, 0.14);
   color: var(--live);
@@ -1656,27 +1649,6 @@ select option {
   width: 28px;
   height: 28px;
   border-width: 3px;
-}
-
-/* Event log (IR batch sweep) */
-.event-log {
-  display: grid;
-  gap: 2px;
-  max-height: 340px;
-  overflow-y: auto;
-}
-
-.event-log li {
-  display: grid;
-  grid-template-columns: auto auto minmax(0, 1fr);
-  align-items: baseline;
-  gap: var(--space-3);
-  padding: 6px var(--space-2);
-  border-radius: var(--shape-xs);
-}
-
-.event-log li:nth-child(odd) {
-  background: var(--surface-high);
 }
 
 /* Setup page fields, actions and key/value lists */

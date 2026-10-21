@@ -154,8 +154,6 @@
   --border-error: rgba(255, 180, 171, 0.4);
   --radius-btn: var(--shape-full);
   --text-body-sm: var(--fs-body-sm);
-  --ease-out: var(--ease-standard);
-  --dur-med: var(--dur-medium);
   --topbar-h: 0px;
 }
 

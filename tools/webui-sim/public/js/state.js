@@ -27,31 +27,92 @@ function emit() {
 // concurrent asks merge into one GET so the hub is never double-fetched.
 let configInflight = null;
 
+/* Config reads are numbered. An answer shows only if no read started after
+   it has shown one already, so an older setup never replaces a newer one,
+   and a read that lost out can rely on the newer answer: it started later.
+   A reload blanks the page and sets aside every read already on its way. */
+let configReads = 0;
+let configShown = 0;
+let latestRead = Promise.resolve();
+const settle = () => {};
+
+// Resolves once the newest read so far has answered.
+async function newestRead() {
+  let seen;
+  do {
+    seen = configReads;
+    await latestRead;
+  } while (seen !== configReads);
+  return state;
+}
+
+function showConfig(read, config) {
+  if (read <= configShown) return false;
+  configShown = read;
+  state.config = config;
+  state.configError = null;
+  state.configLoaded = true;
+  emit();
+  return true;
+}
+
+// An error shows only when there is no setup on screen to keep.
+function showConfigError(read, error) {
+  if (read <= configShown || state.config) return false;
+  state.configError = error;
+  state.configLoaded = true;
+  emit();
+  return true;
+}
+
 export function ensureConfig() {
   if (state.config || state.configError) return Promise.resolve(state);
   if (configInflight) return configInflight;
-  configInflight = (async () => {
+  const read = ++configReads;
+  const pending = (async () => {
     try {
-      state.config = await api.getConfig();
-      state.configError = null;
+      if (showConfig(read, await api.getConfig())) return state;
     } catch (error) {
-      state.configError = error;
+      if (showConfigError(read, error)) return state;
     }
-    state.configLoaded = true;
-    emit();
-    return state;
+    return newestRead();
   })().finally(() => {
-    configInflight = null;
+    if (configInflight === pending) configInflight = null;
   });
-  return configInflight;
+  configInflight = pending;
+  latestRead = pending.then(settle, settle);
+  return pending;
 }
 
 export async function reloadConfig() {
   state.config = null;
   state.configError = null;
   state.configLoaded = false;
+  configShown = configReads;
+  configInflight = null;
   emit();
   return ensureConfig();
+}
+
+/* Read the config again after a change to it, keeping the current one on
+   screen until the answer arrives (reloadConfig blanks it first). Rejects
+   when the hub can't be read; the config on screen then stays. */
+export function refreshConfig() {
+  const read = ++configReads;
+  const done = (async () => {
+    let config;
+    try {
+      config = await api.getConfig();
+    } catch (error) {
+      showConfigError(read, error);
+      throw error;
+    }
+    if (showConfig(read, config) || state.config) return state;
+    // A reload blanked the page meanwhile: its answer is the newer one.
+    return newestRead();
+  })();
+  latestRead = done.then(settle, settle);
+  return done;
 }
 
 function extractCurrentActivity(payload) {
@@ -269,6 +330,12 @@ export function devices() {
         name: c.Name,
         functionId: c["FunctionId-"],
         keyCode: c.KeyCode,
+        // The hub marks every command added on it as learned; a raw one
+        // keeps its timings in Raw and has no KeyCode.
+        learned: Boolean(c.IsLearned),
+        raw: c.Raw != null && !c.KeyCode,
+        rawData: typeof c.Raw === "string" ? c.Raw : "",
+        protocolId: Number(c.ProtocolId) || 0,
       })),
     };
   });

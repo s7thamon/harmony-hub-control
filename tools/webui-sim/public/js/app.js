@@ -6,7 +6,6 @@ import { createActivitiesHomeView } from "./views/activities-home.js";
 import { createActivitiesView } from "./views/activities.js";
 import { createWizardView } from "./views/wizard.js";
 import { createDevicesView } from "./views/devices.js";
-import { createIrView } from "./views/ir.js";
 import { createSettingsView } from "./views/settings.js";
 import { createBluetoothView } from "./views/bluetooth.js";
 import { createMqttView } from "./views/mqtt.js";
@@ -29,7 +28,6 @@ const ROUTES = {
   wizard: { parent: "activities", section: "view-wizard", factory: createWizardView, title: "Activity setup" },
   editor: { parent: "activities", section: "view-activities", factory: createActivitiesView, title: "Advanced editor" },
   devices: { section: "view-devices", factory: createDevicesView, title: "Devices" },
-  ir: { parent: "devices", section: "view-ir", factory: createIrView, title: "IR setup" },
   settings: { section: "view-settings", factory: createSettingsView, title: "Settings" },
   bluetooth: { parent: "settings", section: "view-bluetooth", factory: createBluetoothView, title: "Bluetooth" },
   mqtt: { parent: "settings", section: "view-mqtt", factory: createMqttView, title: "MQTT" },
@@ -38,8 +36,9 @@ const ROUTES = {
   system: { parent: "settings", section: "view-system", factory: createSystemView, title: "System" },
 };
 
-/* Older hashes keep working: Home and Control became the Remote tab. */
-const ALIASES = { control: "remote", home: "remote" };
+/* Older hashes keep working: Home and Control became the Remote tab, and IR
+   setup moved into the Devices tab. */
+const ALIASES = { control: "remote", home: "remote", ir: "devices" };
 
 const views = new Map();
 let current = null;

@@ -1,23 +1,37 @@
-/* Devices tab (#devices, #devices/<id>): the app's DevicesScreen.
-   The list searches devices and their commands; a device opens its own page
-   with the same keypad as the activity remote (sending straight to that
-   device, outside any activity) and every command it has. Learning,
-   importing and the device's settings live in IR setup (#ir) until the
-   Devices slice moves them here. */
+/* Devices tab, the app's DevicesScreen and its device pages:
+     #devices                 the list: search, + (Add a device), Tools
+     #devices/lab             the IR lab (ir-lab.js)
+     #devices/<id>            a device: Remote and Commands tabs; ⋮ holds
+                              Edit details and Delete device
+     #devices/<id>/settings   power, inputs and timing (device-settings.js)
+     #devices/<id>/sweep      send all commands (device-sweep.js)
+   On the Commands tab, Learn a button and Import codes open sheets, and a
+   command's ⋮ edits or deletes it. The remote sends straight to the device,
+   outside any activity. */
 
+import { getConfig, postHubForm, saveActivity } from "../api.js";
 import * as hub from "../state.js";
 import {
+  confirmDialog,
   escapeHtml,
   icon,
   iconTile,
   listRow,
+  openMenu,
   openSheet,
   screenTitle,
+  sectionLabel,
   setAppBar,
   snackbar,
   spinner,
 } from "../ui/shell.js";
 import { resolveSkinPowerAction } from "./control-power.js";
+import { openImportSheet } from "./device-import.js";
+import { createDeviceSettings } from "./device-settings.js";
+import { changeNote, hubChange, openCommandSheet, openDeviceSheet, openLearnSheet, storedCommand } from "./device-sheets.js";
+import { createDeviceSweep } from "./device-sweep.js";
+import { createIrLab, labNote } from "./ir-lab.js";
+import { LIMITS, deviceUsage, withoutDeviceMaps } from "./ir-model.js";
 import { deviceIconName, deviceKeys } from "./remote-model.js";
 import {
   describe,
@@ -30,17 +44,43 @@ import {
 } from "./remote-pad.js";
 
 export function createDevicesView(section) {
+  let page = "list"; // list · lab · device · settings · sweep
   let deviceId = "";
   let query = "";
   let tab = "remote";
   let commandQuery = "";
   let device = null;
   let keys = new Map();
-  let sheet = null;
-  let shown = "";
+  let shownKey = "";
+  let shownData = null;
+  let pageShown = false; // the sweep or lab page has drawn itself
+  const sheets = new Set();
 
   section.innerHTML = `<div class="devices-root" id="devicesRoot"></div>`;
   const root = section.querySelector("#devicesRoot");
+
+  /* Every sheet a page opens closes when the page goes. A change often
+     redraws the page under the sheet, so focus goes back to the control
+     that opened it as it is now (`selector`), not to the one it replaced. */
+  function track(opened, selector = "") {
+    sheets.add(opened);
+    opened.dialog.addEventListener("close", () => {
+      sheets.delete(opened);
+      if (!selector || section.hidden || sheets.size) return;
+      const lost = !document.activeElement || document.activeElement === document.body;
+      if (lost) document.querySelector(selector)?.focus();
+    });
+    return opened;
+  }
+
+  function closeSheets() {
+    for (const opened of sheets) opened.close();
+    sheets.clear();
+  }
+
+  const settings = createDeviceSettings({ root, track });
+  const sweep = createDeviceSweep({ root });
+  const lab = createIrLab({ root });
 
   /* -- list ------------------------------------------------------------------- */
 
@@ -89,18 +129,23 @@ export function createDevicesView(section) {
         <button type="button" class="btn btn-filled" data-act="retry">Try again</button>`;
       return;
     }
+    const all = hub.devices();
+    const commands = all.reduce((n, d) => n + d.commands.length, 0);
+    const add = `<button type="button" class="icon-btn icon-btn-secondary" data-act="add-device" aria-haspopup="dialog" aria-label="Add a device" title="Add a device">${icon("add")}</button>`;
     root.innerHTML = `<div class="page">
-        ${screenTitle("Devices")}
+        ${screenTitle("Devices", { action: add })}
         <label class="search-field">${icon("search", { size: 22 })}<input type="search" id="deviceSearch" value="${escapeHtml(query)}" placeholder="Search devices or commands" aria-label="Search devices or commands"></label>
         <div id="deviceRows">${rowsMarkup()}</div>
-        <p class="list-note">Open a device to control it directly, outside any activity.</p>
+        <p class="list-note">Open a device to control it directly, outside any activity. Each device also has Learn a button and Import codes.</p>
+        ${sectionLabel("Tools")}
         <div class="m-list">${listRow({
-          title: "IR setup",
-          subtitle: "Add devices, learn buttons, import codes, test commands",
-          leading: iconTile("settings_remote"),
+          title: "IR lab",
+          subtitle: "A scratch device for trying codes",
+          leading: iconTile("build_outlined"),
           chevron: true,
-          href: "#ir",
+          href: "#devices/lab",
         })}</div>
+        <p class="list-note">${all.length} of ${LIMITS.devices} devices · ${commands} command${commands === 1 ? "" : "s"} in all</p>
       </div>`;
   }
 
@@ -131,9 +176,16 @@ export function createDevicesView(section) {
     const list = device.commands
       .map((c, i) => ({ c, i }))
       .filter(({ c }) => !q || c.name.toLowerCase().includes(q));
-    if (!list.length) return `<p class="list-note">Nothing matches “${escapeHtml(commandQuery.trim())}”.</p>`;
+    if (!list.length) {
+      return `<p class="list-note">${q ? `Nothing matches “${escapeHtml(commandQuery.trim())}”.` : "No commands yet. Learn a button or import codes."}</p>`;
+    }
     return `<div class="cmd-list">${list
-      .map(({ c, i }) => `<button type="button" class="cmd-row" data-cmd-device="${escapeHtml(device.id)}" data-cmd="${i}">${escapeHtml(c.name)}</button>`)
+      .map(({ c, i }) => `<div class="cmd-item">
+          <button type="button" class="cmd-row" data-cmd-device="${escapeHtml(device.id)}" data-cmd="${i}">
+            <span class="cmd-name">${escapeHtml(c.name)}</span>${c.learned ? `<span class="cmd-tag">Learned</span>` : ""}
+          </button>
+          <button type="button" class="icon-btn cmd-more" data-cmd-menu="${i}" aria-haspopup="menu" aria-label="More for ${escapeHtml(c.name)}">${icon("more_vert")}</button>
+        </div>`)
       .join("")}</div>`;
   }
 
@@ -141,6 +193,12 @@ export function createDevicesView(section) {
     const s = hub.state;
     if (!s.configLoaded) {
       root.innerHTML = `<div class="m-center">${spinner("Loading the device")}</div>`;
+      return;
+    }
+    if (s.configError) {
+      setAppBar({ title: "Device", back: "devices" });
+      root.innerHTML = `<div class="page"><p class="list-note">Couldn't load the hub's devices: ${escapeHtml(s.configError.message)}</p>
+        <button type="button" class="btn btn-filled" data-act="retry">Try again</button></div>`;
       return;
     }
     device = hub.deviceById(deviceId);
@@ -152,11 +210,13 @@ export function createDevicesView(section) {
     keys = deviceKeys(device);
     const power = powerAction();
     const powerLabel = power.kind === "device-power" ? `Send ${power.command} to ${device.name}` : `${device.name} has no power command`;
+    const id = encodeURIComponent(device.id);
     setAppBar({
       title: device.name,
       back: "devices",
-      actions: `<a class="icon-btn" href="#ir" aria-label="IR setup for ${escapeHtml(device.name)}" title="IR setup">${icon("tune_outlined")}</a>
-        <button type="button" class="icon-btn icon-btn-power" data-act="device-power" aria-label="${escapeHtml(powerLabel)}" title="${escapeHtml(powerLabel)}"${power.kind === "device-power" ? "" : " disabled"}>${icon("power_settings_new")}</button>`,
+      actions: `<a class="icon-btn" href="#devices/${id}/settings" aria-label="${escapeHtml(device.name)} settings" title="Settings">${icon("tune_outlined")}</a>
+        <button type="button" class="icon-btn icon-btn-power" data-act="device-power" aria-label="${escapeHtml(powerLabel)}" title="${escapeHtml(powerLabel)}"${power.kind === "device-power" ? "" : " disabled"}>${icon("power_settings_new")}</button>
+        <button type="button" class="icon-btn" data-act="device-menu" aria-haspopup="menu" aria-expanded="false" aria-label="More options for ${escapeHtml(device.name)}" title="More options">${icon("more_vert")}</button>`,
     });
     const tabs = `<div class="seg-tabs" role="tablist" aria-label="${escapeHtml(device.name)}">
         <button type="button" role="tab" class="seg-tab" data-tab="remote" aria-selected="${tab === "remote"}">Remote</button>
@@ -175,11 +235,15 @@ export function createDevicesView(section) {
           <p class="remote-status" id="deviceStatus" role="status" aria-live="polite"></p>
           ${tabs}
           <div class="cmd-tools">
-            <a class="btn btn-outlined" href="#ir">${icon("settings_remote_outlined", { size: 18 })}Learn a button</a>
-            <a class="btn btn-outlined" href="#ir">${icon("content_paste_outlined", { size: 18 })}Import codes</a>
+            <button type="button" class="btn btn-outlined" data-act="learn" aria-haspopup="dialog">${icon("settings_remote_outlined", { size: 18 })}Learn a button</button>
+            <button type="button" class="btn btn-outlined" data-act="import" aria-haspopup="dialog">${icon("content_paste_outlined", { size: 18 })}Import codes</button>
           </div>
+          ${labNote(device)}
           <label class="search-field">${icon("search", { size: 22 })}<input type="search" id="commandSearch" value="${escapeHtml(commandQuery)}" placeholder="Search ${device.commands.length} commands" aria-label="Search ${device.commands.length} commands"></label>
-          <p class="list-note">Tap a command to send it.</p>
+          <div class="cmd-head">
+            <p class="list-note">Tap a command to send it.</p>
+            ${device.commands.length ? `<a class="btn btn-text" href="#devices/${id}/sweep">Send all…</a>` : ""}
+          </div>
           <div id="commandRows">${commandRows()}</div>
         </div>`;
     root.innerHTML = body;
@@ -187,31 +251,59 @@ export function createDevicesView(section) {
     if (side) wireMoreKeys(side, { source: panelSource, send: sendAction, keyEvents: false });
   }
 
+  /* What a page shows of the setup: a redraw only when it changes, so a
+     refresh for something else leaves the page (and its search) alone. */
+  function pageData() {
+    if (page === "list") {
+      return JSON.stringify(hub.devices().map((d) => [d.id, d.name, d.model, d.manufacturer, d.isBluetooth, d.commands.length]));
+    }
+    if (page === "device") return JSON.stringify(hub.deviceById(deviceId)?.entry ?? null);
+    return hub.state.config;
+  }
+
   function render() {
-    const key = JSON.stringify([deviceId, tab, hub.state.configLoaded, Boolean(hub.state.configError)]);
-    const configChanged = root.dataset.config !== String(hub.state.config?.revision ?? "");
-    if (key === shown && !configChanged) return;
-    shown = key;
-    root.dataset.config = String(hub.state.config?.revision ?? "");
-    if (deviceId) renderDevice();
-    else {
+    const s = hub.state;
+    if (page === "settings") return; // it keeps its own copy and unsaved edits
+    const key = JSON.stringify([page, deviceId, tab, s.configLoaded, Boolean(s.configError)]);
+    const data = pageData();
+    if (key === shownKey && data === shownData) return;
+    shownKey = key;
+    shownData = data;
+    if (page === "list") {
       setAppBar(null);
       renderList();
+      return;
+    }
+    if (page === "device") {
+      renderDevice();
+      return;
+    }
+    // The sweep and the lab draw themselves once the setup is in.
+    if (!s.configLoaded) {
+      root.innerHTML = `<div class="m-center">${spinner("Loading")}</div>`;
+      return;
+    }
+    if (s.configError) {
+      root.innerHTML = `<div class="page"><p class="list-note">Couldn't load the hub's devices: ${escapeHtml(s.configError.message)}</p>
+        <button type="button" class="btn btn-filled" data-act="retry">Try again</button></div>`;
+      return;
+    }
+    const pageView = page === "sweep" ? sweep : lab;
+    if (pageShown) pageView.refresh();
+    else {
+      pageShown = true;
+      pageView.show(deviceId);
     }
   }
 
   function openMoreKeys() {
-    sheet?.close();
-    const opened = openSheet({
+    track(openSheet({
       label: "More keys",
-      // close fires asynchronously: only forget this sheet, not a newer one.
-      onClose: () => { if (sheet === opened) sheet = null; },
       render: (content) => {
         content.innerHTML = moreKeysMarkup(keys, { title: device.name });
         wireMoreKeys(content, { source: panelSource, send: sendAction, onPress: pressKey });
       },
-    });
-    sheet = opened;
+    }));
   }
 
   /* The device's first power command by name (PowerOff, standby, a toggle),
@@ -235,10 +327,132 @@ export function createDevicesView(section) {
     sendAction({ deviceId: action.deviceId, command: action.command, functionId: action.functionId }, "Power");
   }
 
+  /* -- delete ---------------------------------------------------------------------- */
+
+  function stillUsed(d, uses) {
+    return confirmDialog({
+      title: `${d.name} is still in use`,
+      text: `This device is still used by ${uses.join(", ")}. Remove it from there first, then delete it.`,
+      confirmLabel: "OK",
+      cancel: false,
+    });
+  }
+
+  /* The hub refuses to delete a device that activities or button maps still
+     name (their later saves would fail validation). Say where it is used, or
+     first drop the device's own remote screens through the activity save. */
+  async function deleteDevice(d) {
+    const early = deviceUsage(hub.state.config, d.id);
+    if (early.uses.length) {
+      await stillUsed(d, early.uses);
+      return;
+    }
+    const ok = await confirmDialog({
+      title: `Delete ${d.name}?`,
+      text: `Permanently removes “${d.name}”, all of its learned commands and its device screen on the remote from the hub.`,
+      confirmLabel: "Delete",
+      destructive: true,
+    });
+    if (!ok) return;
+    snackbar(`Deleting ${d.name}…`);
+    try {
+      // The hub's own copy decides, not the one on screen.
+      const config = await getConfig();
+      const usage = deviceUsage(config, d.id);
+      if (usage.uses.length) {
+        await stillUsed(d, usage.uses);
+        return;
+      }
+      let saved = null;
+      if (usage.ownMaps) {
+        const { mapList, functionList } = withoutDeviceMaps(config, d.id);
+        saved = await saveActivity({
+          baseRevision: config.revision,
+          activityList: config.activityList,
+          mapList,
+          functionList,
+        });
+      }
+      try {
+        await postHubForm("/ir/delete-device", { deviceId: d.id });
+      } catch (error) {
+        // The device stays: give it back the remote screens taken off it.
+        if (saved) {
+          const back = await saveActivity({
+            baseRevision: saved.revision,
+            activityList: config.activityList,
+            mapList: config.mapList,
+            functionList: config.functionList,
+          }).then(() => true, () => false);
+          error.message = `${error.message} ${back
+            ? "Its remote screens are back as they were."
+            : "Its remote screens were removed and couldn't be put back."}`;
+        }
+        throw error;
+      } finally {
+        await hub.refreshConfig().catch(() => {});
+      }
+      snackbar(`Deleted ${d.name}`);
+      if (!section.hidden && page === "device" && deviceId === d.id) location.hash = "#devices";
+    } catch (error) {
+      snackbar(error.message || "Delete failed.", { error: true });
+    }
+  }
+
+  async function deleteCommand(d, name) {
+    const ok = await confirmDialog({
+      title: `Delete “${name}”?`,
+      text: `Removes the “${name}” command from ${d.name}.`,
+      confirmLabel: "Delete",
+      destructive: true,
+    });
+    if (!ok) return;
+    try {
+      const result = await hubChange("/ir/delete-command", { deviceId: d.id, command: name }, () => !storedCommand(d.id, name));
+      snackbar(changeNote(result, `Deleted “${name}”`));
+    } catch (error) {
+      snackbar(error.message || "Delete failed.", { error: true });
+    }
+  }
+
+  /* -- menus ------------------------------------------------------------------------- */
+
+  function openDeviceMenu(anchor) {
+    const d = device;
+    openMenu({
+      anchor,
+      label: `${d.name} options`,
+      items: [
+        { id: "edit", label: "Edit details", icon: "edit_outlined" },
+        { id: "delete", label: "Delete device", icon: "delete_outlined", destructive: true },
+      ],
+      onSelect: (choice) => {
+        if (choice === "edit") track(openDeviceSheet({ device: d }), "[data-act='device-menu']");
+        else if (choice === "delete") deleteDevice(d);
+      },
+    });
+  }
+
+  function openCommandMenu(anchor, command) {
+    const d = device;
+    openMenu({
+      anchor,
+      label: command.name,
+      items: [
+        { id: "edit", label: "Edit", icon: "edit_outlined" },
+        { id: "delete", label: "Delete", icon: "delete_outlined", destructive: true },
+      ],
+      onSelect: (choice) => {
+        if (choice === "edit") track(openCommandSheet({ device: d, command }), "#commandSearch");
+        else if (choice === "delete") deleteCommand(d, command.name);
+      },
+    });
+  }
+
   /* -- events ------------------------------------------------------------------- */
 
   wireKeys(root, {
-    keyFor: (k) => keys.get(k) ?? null,
+    keyFor: (k) => (page === "device" ? keys.get(k) ?? null : null),
     onPress: pressKey,
     onPreview: (entry) => {
       if (entry) setStatus(describe(entry.label, entry.press), "preview");
@@ -246,23 +460,46 @@ export function createDevicesView(section) {
   });
 
   root.addEventListener("click", (event) => {
-    if (event.target.closest(".remote-side")) return;
+    if (page !== "settings" && event.target.closest("[data-act='retry']")) {
+      hub.reloadConfig();
+      return;
+    }
+    if (page === "list") {
+      const act = event.target.closest("[data-act]")?.dataset.act;
+      if (act === "add-device") {
+        track(openDeviceSheet({
+          onDone: (added) => {
+            if (added && !section.hidden) location.hash = `#devices/${encodeURIComponent(added.id)}`;
+          },
+        }), "[data-act='add-device']");
+      }
+      return;
+    }
+    if (page !== "device" || !device || event.target.closest(".remote-side")) return;
     const tabBtn = event.target.closest("[data-tab]");
     if (tabBtn && tabBtn.dataset.tab !== tab) {
       tab = tabBtn.dataset.tab;
+      shownKey = "";
       render();
       root.querySelector(`[data-tab="${tab}"]`)?.focus();
       return;
     }
+    const menuBtn = event.target.closest("[data-cmd-menu]");
+    if (menuBtn) {
+      const c = device.commands[Number(menuBtn.dataset.cmdMenu)];
+      if (c) openCommandMenu(menuBtn, c);
+      return;
+    }
     const cmd = event.target.closest("[data-cmd]");
-    if (cmd && device) {
+    if (cmd) {
       const c = device.commands[Number(cmd.dataset.cmd)];
       if (c) sendAction({ deviceId: device.id, command: c.name, functionId: c.functionId }, c.name, cmd);
       return;
     }
     const act = event.target.closest("[data-act]")?.dataset.act;
     if (act === "more") openMoreKeys();
-    else if (act === "retry") hub.reloadConfig();
+    else if (act === "learn") track(openLearnSheet({ device }), "[data-act='learn']");
+    else if (act === "import") track(openImportSheet({ device }), "[data-act='import']");
   });
 
   root.addEventListener("input", (event) => {
@@ -276,13 +513,21 @@ export function createDevicesView(section) {
   });
 
   document.getElementById("appbar")?.addEventListener("click", (event) => {
-    if (section.hidden || !deviceId) return;
+    if (section.hidden || page !== "device" || !device) return;
     if (event.target.closest("[data-act='device-power']")) powerDevice();
+    const menu = event.target.closest("[data-act='device-menu']");
+    if (menu) openDeviceMenu(menu);
   });
 
   hub.subscribe(() => {
     if (!section.hidden) render();
   });
+
+  function leavePage() {
+    if (page === "settings") settings.hide();
+    else if (page === "sweep") sweep.hide();
+    else if (page === "lab") lab.hide();
+  }
 
   return {
     onShow({ args = [] } = {}) {
@@ -292,18 +537,33 @@ export function createDevicesView(section) {
       } catch (_) {
         // A malformed escape is just an unknown device.
       }
-      if (next !== deviceId) {
+      const nextPage = !next ? "list"
+        : next === "lab" ? "lab"
+        : args[1] === "settings" ? "settings"
+        : args[1] === "sweep" ? "sweep"
+        : "device";
+      closeSheets();
+      leavePage();
+      if (next !== deviceId && nextPage !== "lab") {
         tab = "remote";
         commandQuery = "";
       }
-      deviceId = next;
-      shown = "";
+      page = nextPage;
+      if (page !== "list" && page !== "lab") deviceId = next;
+      shownKey = "";
+      pageShown = false;
       hub.ensureConfig();
+      if (page === "settings") settings.show(deviceId);
       render();
     },
     onHide() {
-      sheet?.close();
-      shown = "";
+      closeSheets();
+      leavePage();
+      shownKey = "";
+      pageShown = false;
+    },
+    confirmLeave() {
+      return page === "settings" ? settings.confirmLeave() : true;
     },
   };
 }
