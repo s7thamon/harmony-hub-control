@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="NotifButton">
+        <item name="android:layout_width">0dp</item>
+        <item name="android:layout_height">48dp</item>
+        <item name="android:layout_weight">1</item>
+        <item name="android:background">@drawable/notif_button_bg</item>
+        <item name="android:scaleType">center</item>
+        <item name="android:tint">?android:attr/textColorPrimary</item>
+    </style>
+</resources>

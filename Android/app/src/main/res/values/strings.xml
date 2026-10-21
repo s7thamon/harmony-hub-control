@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Melodious</string>
+    <string name="quick_tile_label">Melodious: Turn off</string>
+    <string name="widget_description">Start an activity or turn everything off</string>
+</resources>
