@@ -37,7 +37,7 @@ EXACT_PAYLOADS = {
         "cb07cd5483028c5fd4ac7a090d32b87776b9308b0115ab157fe63b3ffe6afce6",
         0o755),
     "payload/scripts/init.sh": (
-        "098bd99d265260bfa953c9be05941733274fcd54f4d9f86d1b1b463471a5bbc1",
+        "f4cb10033653f6861bb7f1a18fe17369ad57e09d447ee63dbbde41f533ff2cc5",
         0o755),
     "payload/scripts/offline_egress_guard.sh": (
         "72f3ba67f492f51284509b029a5c38c2edccd21e334581438acd4c14708ceb42",
@@ -137,7 +137,7 @@ class TestExactReconstruction(unittest.TestCase):
     def test_sizes_match_live_manifest(self):
         expected_sizes = {
             "payload/scripts/dropbear": 52,
-            "payload/scripts/init.sh": 3569,
+            "payload/scripts/init.sh": 3707,
             "payload/scripts/offline_egress_guard.sh": 1753,
             "payload/scripts/netservicestarter.lua": 29583,
             "payload/activity/codexactivity.lua": 20886,

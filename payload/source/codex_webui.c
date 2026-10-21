@@ -50,6 +50,10 @@
 #define BT_DEVICE_STORE "/data/codex/bt-devices.json"
 #define BT_PAIR_AGENT_PID "/var/run/codex-bt-pair-agent.pid"
 #define BT_HID_CONTROL_PID "/var/run/codex-bt-hid-control.pid"
+/* The agents log to RAM: a launch redirect into a full /cache (jffs2) fails
+ * before the agent ever runs, which left Bluetooth HID control down. */
+#define BT_PAIR_AGENT_LOG "/var/volatile/codex-bt-pair-agent.log"
+#define BT_HID_CONTROL_LOG "/var/volatile/codex-bt-hid-control.log"
 #define CODEX_BIN_DIR "/data/codex/bin"
 #define BT_PAIR_AGENT_BIN CODEX_BIN_DIR "/codex_bt_pair_agent"
 #ifndef CODEX_HBUS_BIN
@@ -7004,7 +7008,7 @@ static void ensure_bt_hid_control_runtime(void) {
         "if [ \"$running\" != 1 ]; then "
         "rm -f " BT_HID_CONTROL_PID "; "
         BT_PAIR_AGENT_BIN " btkeyboard 600 --hid-control-daemon </dev/null "
-        "> /cache/codex-bt-hid-control.log 2>&1 & "
+        "> " BT_HID_CONTROL_LOG " 2>&1 & "
         "echo $! > " BT_HID_CONTROL_PID "; "
         "fi; "
         "fi",
@@ -7037,7 +7041,7 @@ static int start_bt_pair_agent(const char *type, char *reply, size_t replylen) {
         "if [ -n \"$oldpid\" ]; then kill \"$oldpid\" 2>/dev/null; fi; "
         "rm -f " BT_PAIR_AGENT_PID "; "
         BT_PAIR_AGENT_BIN " '%s' 600 </dev/null "
-        ">> /cache/codex-bt-pair-agent.log 2>&1 & "
+        ">> " BT_PAIR_AGENT_LOG " 2>&1 & "
         "newpid=$!; echo $newpid > " BT_PAIR_AGENT_PID "; "
         "sleep 1; kill -0 \"$newpid\" 2>/dev/null",
         type);
@@ -8049,7 +8053,7 @@ static void render_update_apply_json(int fd, const struct request *req) {
                   "killall codex_bt_pair_agent 2>/dev/null; "
                   "rm -f " BT_HID_CONTROL_PID " " BT_PAIR_AGENT_PID "; "
                   BT_PAIR_AGENT_BIN " btkeyboard 600 --hid-control-daemon </dev/null "
-                  "> /cache/codex-bt-hid-control.log 2>&1 & "
+                  "> " BT_HID_CONTROL_LOG " 2>&1 & "
                   "echo $! > " BT_HID_CONTROL_PID "; "
                   "killall codex_bthid_keyboard 2>/dev/null; "
                   "/data/codex/bin/codex_bthid_keyboard >> /cache/codex-bthid-keyboard.log 2>&1 & "
