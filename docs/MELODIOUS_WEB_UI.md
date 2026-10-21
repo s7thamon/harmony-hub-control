@@ -1,8 +1,8 @@
 # Melodious web UI: porting the Android app's interface
 
 Status: plan approved by the owner, 2026-10-21 (decisions at the end).
-Slices 1 (shell and remote, PR #21) and 2 (Activities, PR #22) are done; slices 3
-(Devices) and 4 (Settings) follow, one PR at a time.
+Slices 1 (shell and remote, PR #21), 2 (Activities, PR #22) and 3 (Devices,
+PR #23) are done; slice 4 (Settings) follows.
 
 The owner's native Android app (`Android/`, Kotlin + Jetpack Compose,
 Material 3, dark) has the better interface. This port makes the hub web UI
@@ -58,8 +58,9 @@ content centred.
 - Sub-pages get the app's top bar (back arrow and title). Back returns to
   the tab they belong to.
 - Old hashes keep working, so bookmarks survive.
-- The router gains path arguments (`#devices/<id>`, `#devices/<id>/settings`,
-  `#remote/<activityId>`). Today it only matches exact names.
+- The router has path arguments: `#devices/<id>`, `#devices/<id>/settings`,
+  `#devices/<id>/sweep`, `#devices/lab`, `#remote/<activityId>`,
+  `#wizard/<id>`.
 
 ## Screen map
 
@@ -76,8 +77,8 @@ content centred.
 | SleepTimerPill/Sheet | — | Android-only (see below) |
 | `devices/DevicesScreen` DevicesTab | Devices tab: search devices or commands; grouped list with icon, model, command count and IR/Bluetooth badge | 1 |
 | DeviceDetailScreen | Device page with Remote and Commands tabs (tap a command to send it; search) | 1 |
-| Learn and Import sheets | Learn a button, Import codes | 3 |
-| `devices/DeviceSettingsScreen` | Device settings page: Power, Inputs (web-only), Timing | 3 |
+| Learn and Import sheets | Learn a button, Import codes (Find codes, Paste, Type a code) | 3 |
+| `devices/DeviceSettingsScreen` | Device settings page: Power, Turning on, Inputs (web-only), Timing | 3 |
 | `activities/ActivitiesScreen` | Activities tab: running card, rows with Start and a ⋮ menu (Edit, Set up buttons, Try the buttons, Advanced editor, Move up / down, Delete) | 2 |
 | ActivityEditor (5 steps) | Wizard restyled as the app's step screens: Name, Devices, Inputs, Buttons, Review. The app's "Start & end" step is parity item P2, not part of the port. | 2 |
 | TouchScreenEditor | — (parity item P3; the advanced editor still covers on-screen buttons) | later |
@@ -242,6 +243,8 @@ on Apple, Segoe on Windows. That costs 0 bytes. Sizes follow the app:
 3. **Devices:** the IR setup functions move into the device pages (settings,
    learn, import, Find codes, batch sweep, lab, add/edit/delete). The old
    `#ir` page goes.
+
+   Done: PR #23; see "Slice 3 notes" below.
 4. **Settings:** Hub, Bluetooth, MQTT, Wi-Fi, Backup and System pages.
    Leftover old CSS goes.
 
@@ -277,18 +280,25 @@ and should shrink the bundle.
 
 After each slice (bytes):
 
-| Item | `main` before | Slice 1 (PR #21) | Slice 2 |
-| --- | --- | --- | --- |
-| Shell JS | 240,199 | 265,965 | 275,827 |
-| Shell CSS | 47,070 | 53,388 | 54,274 |
-| Page HTML per load | 10,045 + 79,856 photo | 28,916 + 79,856 photo | 28,842, no photo |
-| All three per load | 377,170 | 428,125 | 358,943 |
-| `codex_webui` | 992,740 | 1,043,700 | 1,054,340 |
+| Item | `main` before | Slice 1 (PR #21) | Slice 2 (PR #22) | Slice 3 (PR #23) |
+| --- | --- | --- | --- | --- |
+| Shell JS | 240,199 | 265,965 | 275,827 | 288,922 |
+| Shell CSS | 47,070 | 53,388 | 54,274 | 63,114 |
+| Page HTML per load | 10,045 + 79,856 photo | 28,916 + 79,856 photo | 28,842, no photo | 28,746 |
+| All three per load | 377,170 | 428,125 | 358,943 | 380,782 |
+| `codex_webui` | 992,740 | 1,043,700 | 1,054,340 | 1,076,180 |
 
 Slice 2 serves 69,182 bytes less per page load than slice 1: the photo's
 79,856 base64 bytes go, while the new wizard, the menu and the dialog add
 10,748 bytes of script and style. The binary still carries the photo for
 the legacy page, so it grows by 10,640 bytes.
+
+Slice 3 serves 21,839 bytes more per page load than slice 2, and the binary
+grows by 21,840 bytes. The old IR page and the Devices view minified to
+about 50 KB of script; the device pages, sheets and the settings page that
+replace them, with the app's components and every web-only tool, to about
+66 KB, and `devices.css` adds about 9 KB. Slice 4 removes the old setup-page
+CSS that only the unported Settings pages still use.
 
 ## Owner decisions (2026-10-21)
 
@@ -321,6 +331,15 @@ the legacy page, so it grows by 10,640 bytes.
    and its Back found "PreviousTrack". This applies to the device remote and
    the wizard's suggestions; the C legacy page and the Android app keep the
    first match.
+8. **Slice 3: the placement of the IR tools** is the table in "Slice 3
+   notes", approved as proposed with two choices:
+   - the IR lab is a Tools row on the Devices tab (`#devices/lab`);
+   - Edit details and Delete device are in a ⋮ menu on the device page's
+     top bar, so the settings page keeps to Power, Inputs and Timing.
+9. **Slice 3: the simulator answers the IR write routes** (the `/ir/*`
+   forms, import, the lab, test, batch send and cancel) from memory, so the
+   new pages can be tried end to end. It is test tooling; the hub's routes
+   and request shapes don't change.
 
 ## Slice 2 notes
 
@@ -370,3 +389,56 @@ the legacy page, so it grows by 10,640 bytes.
   generated page whole, the packager no longer splits it at a base64 seam,
   and the photo CSS, the sim's copy of the JPEG and the hotspot geometry in
   `remote-layout.js` are removed. The legacy page keeps its photo.
+
+## Slice 3 notes
+
+Every function of the old `#ir` page and where it is now (`#ir` itself opens
+the Devices tab):
+
+| `#ir` | Now |
+| --- | --- |
+| Device list (maker, model, type, count; id on hover) | Devices tab list. The id, maker, model and type are in Edit details. |
+| Counts: devices of the limit, all commands, the per-device and per-request limits | A line under the list ("4 of 32 devices · 215 commands in all"); the two limits in the Import sheet |
+| Add device | Devices tab: + in the title (like New activity) opens "Add a device"; the new device's page opens once the hub has it |
+| Edit device | Device page ⋮ → Edit details (same fields and route) |
+| Delete device, with the in-use guard and the removal of its own remote screens | Device page ⋮ → Delete device: "still in use" names the activities and maps, otherwise the app's confirm dialog |
+| Refresh | No button: every page reads the hub when it opens and after each change; errors offer Try again |
+| Settings: power type, On/Off or toggle command | `#devices/<id>/settings` (tune icon): radio rows and the app's command picker |
+| Wait after power-on, Always on, Leave on between activities | "Turning on": warm-up stepper and two switches, hidden for "No power control" as in the app (still sent unchanged) |
+| Inputs, all of it | "Inputs" section (web-only): switching type, wait, the list with names, commands and a ⋮ (Move up, Move down, Remove), Add input, Fill from commands, the cycling commands and the input after power-on, the in-use hint and check |
+| Timing | The app's three steppers; the number can be typed, so any value still works |
+| Save settings | The app's bottom Save bar; leaving with changes asks "Discard changes?" |
+| Command list, badges, Send | Commands tab: tap sends; "Learned" as in the app |
+| Edit command (signal details), Delete command | ⋮ on each command: Edit (same fields; a raw command's timings are filled in) and Delete (confirm dialog) |
+| Add command by code | Import codes → Type a code (the same form) |
+| Learn: capture, signal, name, Test, Save | Commands tab → Learn a button: the app's sheet; Signal details are a web extra |
+| Batch sweep | Commands tab → Send all… (`#devices/<id>/sweep`): gap, commands per request, the command list, Dry run, Send, Stop, progress and log |
+| Find codes (IRDB search, Preview, file, Import) | Import codes → Find codes; nothing is fetched until Search IRDB or Preview |
+| Paste codes | Import codes → Paste |
+| RemoteCentral | Import codes → Paste → Fetch from RemoteCentral; Add puts a code in the paste box |
+| IR lab | Devices tab → Tools → IR lab (`#devices/lab`): set up the scratch device, open it, clear it with the same two-step guard |
+| A device select on every panel | Gone: each tool works on the page's device |
+
+Behaviour:
+- **Faster on the hub.** The pages read the setup from
+  `/api/activity-config` (about 0.2 s on the hub, and it holds the whole
+  device list) instead of `/api/inventory` (about 10 s) and
+  `/api/device-commands` (1.5–3 s per device). The limits are the hub's
+  constants, the same as `ir-model.js`'s `LIMITS`.
+- **A refusal reads as one.** The hub answers its `/ir/*` forms with HTTP
+  200 even when it refuses. The old page showed such a refusal as a green
+  "ok"; now a change only counts once the re-read setup has it, and the
+  hub's message is shown as the error otherwise.
+- **Learn a button** starts over after a save, ready for the next button,
+  as the app does. A capture that heard nothing says so under Start.
+- **Import codes** closes once the hub has the codes and says how many it
+  imported, skipped or rejected.
+- **Device settings** keep Save off until something changes, except on a
+  device the hub has no power settings for yet: its suggestions can be
+  saved as they are. Inputs are sent only when they change, as before, so
+  saving power alone never rewrites a cloud-made input feature. A save goes
+  back to the device.
+- **Send all commands** goes on while the page is closed; coming back
+  shows the run, and Stop cancels it on the hub. One run at a time.
+- **Delete device** checks the setup on screen first, then the hub's own
+  copy, before it removes the device's own remote screens and the device.

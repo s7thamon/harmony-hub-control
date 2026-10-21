@@ -48,7 +48,7 @@ describe("hub routes", () => {
     const routes = calledRoutes();
     assert.ok(routes.has("/api/system-status"));
     assert.ok(routes.has("/api/state"));
-    assert.ok(routes.has("/api/device-commands"));
+    assert.ok(routes.has("/api/remotecentral-fetch"));
     assert.ok(routes.has("/ir/delete-device"));
   });
 });

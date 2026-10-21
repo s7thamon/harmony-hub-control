@@ -31,12 +31,16 @@ The UI is **Melodious**, the same interface as the Android app (see
   tries an activity's keys without starting it.
 - **Activities** (`#activities`): the list, the setup wizard (`#wizard`) and
   the full offline editor (`#editor`, `vendor/activity-ui.js`).
-- **Devices** (`#devices`): each device's own remote and commands
-  (`#devices/<id>`), and IR setup (`#ir`).
+- **Devices** (`#devices`): add a device, each device's own remote and
+  commands (`#devices/<id>`: Learn a button, Import codes, edit or delete a
+  command, Edit details and Delete device in ⋮), its settings
+  (`#devices/<id>/settings`), Send all commands (`#devices/<id>/sweep`) and
+  the IR lab (`#devices/lab`).
 - **Settings** (`#settings`): Bluetooth, MQTT, Wi-Fi, Backup, System, and
   the simulator's recent events.
 
-The old `#control` and `#home` hashes open the Remote tab.
+The old `#control` and `#home` hashes open the Remote tab, and `#ir` opens
+Devices.
 
 Fixture: `tools/webui-sim/fixtures/activity-config.json` (genuine Logitech
 shape).
@@ -53,13 +57,22 @@ Set `PORT=<n>` to change the port (default 8787).
   `POST /api/activity-sync`.
 - Inventory/IR: `GET /api/inventory`, `GET /api/device-commands?deviceId=`,
   `POST /api/ir-send` (form or JSON).
+- IR setup, with the hub's own checks and messages: the `/ir/*` forms
+  (`new-device`, `device`, `delete-device`, `command`, `update-command`,
+  `delete-command`) answer like the hub's legacy page (HTTP 200 and the
+  result in `<div class='msg'>`, refusals included; delete-device answers
+  `409` while activities or maps still name the device), and the JSON routes
+  `/api/irdb-import`, `/api/ir-test-learned`, `/api/ir-batch-send` (dry or
+  "live", with `/api/ir-cancel`), `/api/ir-lab-target` and `/api/ir-lab-clear`.
+  Nothing is transmitted; `/api/remotecentral-fetch` answers like a hub
+  without internet access.
 - Virtual activity remote: `POST /api/control-button` with
   `{ activityId, buttonKey, pressType? }` (`press`|`long`|`double`) resolves
   the button through the in-memory `ActivityButtonMap`s. Hard buttons match by
   `ButtonKey`; soft buttons (no `ButtonKey`) match by `TextOnRemote` or
   `MenuItem.IndexInMenu`.
 - Stubs: `GET/POST /api/bt-call`, `GET /api/bt-text-status`,
-  `GET/POST /api/capture`, `GET /api/update-status`.
+  `GET/POST /api/capture` (hears nothing; see below), `GET /api/update-status`.
 - Exports: `/export/activities`, `/export/maps`, `/export/functions`,
   `/export/devices`, `/export/bundle`, `/export/automation`, `/export/mqtt`,
   `/export/wifi`, `/export/cloud` — served from the in-memory resources as
@@ -71,6 +84,8 @@ Set `PORT=<n>` to change the port (default 8787).
   virtual button presses).
 - `POST /api/sim/reset` — reloads the fixture from disk, resets the current
   activity to `-1` (PowerOff), and clears the event log.
+- `POST /api/sim/capture-next` — the next `/api/capture` hears one sample
+  NEC frame, so Learn a button can reach its "Got it" step.
 
 ## Production packaging (flash-safe embed)
 

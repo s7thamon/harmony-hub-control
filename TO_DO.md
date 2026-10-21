@@ -129,7 +129,7 @@ Hub stays offline for library fetches. Flipper is **file-drop only** (CDN
 package index permanently 403s on size; GitHub trees are rate-limited). Partial
 source failures surface in the UI. Manual paste and RemoteCentral kept.
 
-- Where: `tools/webui-sim/public/js/ir-library.js`, `views/ir.js`; tests in
+- Where: `tools/webui-sim/public/js/ir-library.js`, `views/device-import.js`; tests in
   `tools/webui-sim/test/ir-library.test.mjs`.
 
 ### B6-follow. Smoke-test library indexes may 403 on jsDelivr /flat  ☐
