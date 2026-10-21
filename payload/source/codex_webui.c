@@ -6074,18 +6074,15 @@ static void system_panel(FILE *f) {
     fprintf(f, "<div class='panel' style='margin-top:12px'><h3>Software update</h3><div class='help'>Check the public release files, copy newer binaries to the hub, verify checksums, and restart the local services. SSH access is not changed. The default public repository tries GitHub and CDN mirrors without a token. Use the token field only for private repositories.</div><form id='updateForm' autocomplete='off' onsubmit='return false'><div class='grid two'><div><label for='updateRepo'>Optional update mirror URL</label><input id='updateRepo' autocomplete='url' value='https://raw.githubusercontent.com/schlambos/harmony-hub-control/main/payload/bin/'></div><div><label for='updateToken'>GitHub token (private repos only)</label><input id='updateToken' type='password' autocomplete='new-password' placeholder='optional; used only by this browser'></div></div><div class='actions'><button id='updateCheck' type='button' class='secondary'>Check for updates</button><button id='updateInstall' type='button'>Install update</button><button id='updateRefresh' type='button' class='secondary'>Show installed versions</button></div></form><pre id='updateLog' class='mini'>Ready. Check the public repo, or paste a token if the repo is private.</pre></div><div class='panel' style='margin-top:12px'><div class='help'>Refresh Home Assistant discovery if new devices or commands do not appear after changes.</div><form method='post' action='/system#system'><div class='actions'><button name='action' value='rediscover' type='submit'>Refresh Home Assistant discovery</button><button name='action' value='reboot' type='submit' class='secondary'>Reboot hub</button></div></form></div></section>");
 }
 
-/* Production shell: tools/package_harmony_shell.sh splits the generated
- * index.html at the base64 seam; REMOTE_SKIN_JPG_B64 (already embedded for
- * the legacy page) is injected between the halves at request time, so the
- * remote JPEG is never embedded or served a second time. */
+/* Production shell: the index.html tools/package_harmony_shell.sh generates,
+ * served whole. It carries no remote photo; REMOTE_SKIN_JPG_B64 is the
+ * legacy page's alone. */
 static void render_harmony_shell(int fd) {
     FILE *f = fdopen(dup(fd), "w");
     if (!f) return;
     fputs("HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\n"
           "Cache-Control: no-store\r\nConnection: close\r\n\r\n", f);
-    fputs((const char *)harmony_index_head, f);
-    fputs(REMOTE_SKIN_JPG_B64, f);
-    fputs((const char *)harmony_index_tail, f);
+    fputs((const char *)harmony_index, f);
     fclose(f);
 }
 

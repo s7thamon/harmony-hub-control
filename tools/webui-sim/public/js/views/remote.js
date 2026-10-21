@@ -257,7 +257,7 @@ export function createRemoteView(section) {
   async function start(id) {
     vibrate();
     previewId = "";
-    if (location.hash !== "#remote") history.replaceState(null, "", "#remote");
+    if (location.hash !== "#remote") history.replaceState(history.state, "", "#remote");
     await hub.setRunning(id);
     const err = hub.state.runError;
     if (err) {

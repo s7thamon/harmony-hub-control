@@ -1,192 +1,283 @@
-/* Activities home: the remote's activity list for everyday use.
-   Cards with run/edit/reorder/delete; setup always goes through the wizard.
-   The vendored editor still exists at #editor for advanced fields. */
+/* Activities tab (#activities): the app's ActivitiesScreen. The running
+   activity sits in a card with Open remote and Turn off; every other
+   activity is a row with Start and a ⋮ menu (edit, set up buttons, try the
+   buttons, the advanced editor, reorder, delete). Setup goes through the
+   wizard (#wizard). */
 
 import * as hub from "../state.js";
 import { deleteActivityGraph, reorderActivityGraph } from "../wizard-model.js";
-import { setWizardEditId } from "./wizard.js";
+import {
+  confirmDialog,
+  escapeHtml,
+  icon,
+  iconTile,
+  openMenu,
+  screenTitle,
+  sectionLabel,
+  snackbar,
+  spinner,
+  statusDot,
+  vibrate,
+} from "../ui/shell.js";
+import { activityIconName, activityKeys, deviceNamesFor } from "./remote-model.js";
 
-const TEMPLATE = `
-  <div class="view-head">
-    <div>
-      <h2 id="title-activities-home">Activities</h2>
-      <p class="view-lead">Everything on the remote's screen. Run one, rework one, or set up a new one — setup is always guided.</p>
-    </div>
-    <div class="view-actions">
-      <a class="btn btn-quiet" href="#editor">Advanced editor</a>
-      <a class="btn btn-primary" href="#wizard">Set up a new activity</a>
-    </div>
-  </div>
-  <p class="wiz-note" id="actNote" role="status" aria-live="polite"></p>
-  <div id="actCards" class="act-list stagger"></div>`;
-
-function escapeHtml(value) {
-  return String(value ?? "").replace(/[&<>"']/g, (c) =>
-    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
-}
+/* Fewer keys than this and the row warns, as the app does. */
+const FEW_BUTTONS = 5;
 
 export function createActivitiesHomeView(section) {
-  let mounted = false;
-  let els;
-  let confirmDeleteId = "";
+  let shown = "";
+  let busy = false; // a delete or reorder is saving
+  let counted = null; // the config the button counts below were made from
+  let counts = new Map();
 
-  function mount() {
-    if (mounted) return;
-    mounted = true;
-    section.innerHTML = TEMPLATE;
-    els = {
-      cards: section.querySelector("#actCards"),
-      note: section.querySelector("#actNote"),
-    };
-    section.addEventListener("click", onClick);
-    hub.subscribe(render);
-  }
+  section.innerHTML = `<div class="page" id="activitiesRoot"></div>`;
+  const root = section.querySelector("#activitiesRoot");
 
-  function setNote(text, isError = false) {
-    els.note.textContent = text;
-    els.note.classList.toggle("is-error", isError);
-  }
+  /* -- markup ------------------------------------------------------------------ */
 
-  function buttonsFor(id) {
-    const maps = hub.buttonMapsForActivity(id);
-    return maps.reduce((count, m) =>
-      count + (m.Buttons ?? []).filter((b) => b.ButtonAction?.CommandName).length, 0);
-  }
-
-  function card(a, index, total) {
-    const id = String(a["Id-"]);
-    const live = hub.state.currentId === id;
-    const name = hub.activityName(a);
-    const kind = hub.activityTypeLabel(a);
-    const deviceCount = new Set((a.Roles ?? []).map((r) => String(r["DeviceId-"]))).size;
-    const buttonCount = buttonsFor(id);
-    const meta = `${kind} · ${deviceCount} device${deviceCount === 1 ? "" : "s"} · ${buttonCount} button${buttonCount === 1 ? "" : "s"}`;
-
-    if (confirmDeleteId === id) {
-      return `<div class="act-card is-confirming" data-card="${id}">
-        <div class="act-confirm">
-          <p><strong>Delete “${escapeHtml(name)}”?</strong> Its button setup goes with it. This can't be undone.</p>
-          <div class="act-confirm-actions">
-            <button type="button" class="btn btn-danger btn-sm" data-del-yes="${id}">Delete it</button>
-            <button type="button" class="btn btn-quiet btn-sm" data-del-no>Keep it</button>
-          </div>
-        </div>
-      </div>`;
+  /* Keys an activity maps, counted once per loaded config: the list redraws
+     on every state change, the maps only change with the config. */
+  function buttonCount(id) {
+    if (counted !== hub.state.config) {
+      counted = hub.state.config;
+      counts = new Map();
     }
-
-    return `<div class="act-card${live ? " is-live" : ""}" data-card="${id}" style="--i:${index}">
-      <button type="button" class="act-main" data-edit="${id}" title="Open “${escapeHtml(name)}” in the setup wizard">
-        <span class="act-name">${escapeHtml(name)}</span>
-        <span class="act-meta">${escapeHtml(meta)}</span>
-      </button>
-      <span class="act-side">
-        ${live
-          ? `<span class="pill pill-live"><span class="live-dot" aria-hidden="true"></span>On air</span>`
-          : `<button type="button" class="btn btn-quiet btn-sm" data-run="${id}">Run</button>`}
-        <button type="button" class="btn btn-quiet btn-sm" data-edit="${id}">Set up</button>
-        <span class="act-order" role="group" aria-label="Reorder ${escapeHtml(name)}">
-          <button type="button" class="act-order-btn" data-move="-1" data-id="${id}" ${index === 0 ? "disabled" : ""} aria-label="Move up">↑</button>
-          <button type="button" class="act-order-btn" data-move="1" data-id="${id}" ${index === total - 1 ? "disabled" : ""} aria-label="Move down">↓</button>
-        </span>
-        <button type="button" class="btn btn-quiet btn-sm act-del" data-del="${id}" ${live ? "disabled title=\"Power off before deleting\"" : ""}>Delete</button>
-      </span>
-    </div>`;
+    if (!counts.has(id)) counts.set(id, activityKeys(hub.state.config, id).size);
+    return counts.get(id);
   }
 
-  function render() {
-    if (!mounted) return;
+  function hubLine() {
     const s = hub.state;
-    if (!s.configLoaded) {
-      els.cards.innerHTML = `<div class="state-block"><div class="skel" style="width:70%"></div><div class="skel"></div><div class="skel" style="width:55%"></div></div>`;
-      return;
-    }
-    if (s.configError) {
-      els.cards.innerHTML = `<div class="state-block">
-        <span class="state-title">Could not load hub config</span>
-        ${escapeHtml(s.configError.message)}
-        <div style="margin-top:var(--space-3)"><button type="button" class="btn btn-secondary btn-sm" data-retry>Retry</button></div>
+    let text = "Hub · connected";
+    if (!s.configLoaded) text = "Hub · connecting…";
+    else if (s.configError) text = "Hub · not connected";
+    else if (!s.reachable) text = "Hub · not answering";
+    const ok = s.configLoaded && !s.configError && s.reachable;
+    return `<p class="m-title-sub">${statusDot(ok)}<span>${text}</span></p>`;
+  }
+
+  function titleMarkup() {
+    return screenTitle("Activities", {
+      subtitle: hubLine(),
+      action: `<a class="icon-btn icon-btn-secondary" href="#wizard" aria-label="New activity" title="New activity">${icon("add")}</a>`,
+    });
+  }
+
+  function runningCard(a, devices) {
+    const id = String(a["Id-"]);
+    const name = hub.activityName(a);
+    const turningOff = hub.state.pendingId === "-1";
+    return `<section class="run-card" aria-label="Running now">
+        <div class="run-card-head">
+          ${iconTile(activityIconName(a), { size: 52, tone: "primary" })}
+          <div class="run-card-text">
+            <p class="run-card-over">Running now</p>
+            <h3 class="run-card-name">${escapeHtml(name)}</h3>
+            <p class="run-card-meta">${escapeHtml(deviceNamesFor(a, devices).join(" · "))}</p>
+          </div>
+          <a class="icon-btn" href="#wizard/${encodeURIComponent(id)}" aria-label="Edit ${escapeHtml(name)}" title="Edit">${icon("edit_outlined")}</a>
+        </div>
+        <div class="run-card-actions">
+          <a class="btn btn-filled" href="#remote">${icon("settings_remote", { size: 20 })}Open remote</a>
+          <button type="button" class="btn btn-danger" data-act="off"${turningOff ? " disabled" : ""}>
+            ${turningOff ? spinner("Turning off") : icon("power_settings_new", { size: 20 })}Turn off
+          </button>
+        </div>
+      </section>`;
+  }
+
+  function row(a, devices) {
+    const id = String(a["Id-"]);
+    const name = hub.activityName(a);
+    const count = buttonCount(id);
+    const meta = count < FEW_BUTTONS
+      ? `<span class="act-row-warn">${icon("info_outlined", { size: 14 })}${count ? `Only ${count} button${count === 1 ? "" : "s"} set up` : "No buttons set up"}</span>`
+      : `<span class="act-row-meta">${escapeHtml(deviceNamesFor(a, devices).join(" · ") || hub.activityTypeLabel(a))}</span>`;
+    const start = hub.state.pendingId === id
+      ? `<span class="act-row-busy">${spinner(`Starting ${name}`)}</span>`
+      : `<button type="button" class="icon-btn icon-btn-raised" data-start="${escapeHtml(id)}" aria-label="Start ${escapeHtml(name)}" title="Start">${icon("play_arrow")}</button>`;
+    return `<div class="act-row">
+        ${iconTile(activityIconName(a), { size: 48, tone: "activity" })}
+        <div class="act-row-text">
+          <span class="act-row-name">${escapeHtml(name)}</span>
+          ${meta}
+        </div>
+        ${start}
+        <button type="button" class="icon-btn" data-menu-for="${escapeHtml(id)}" aria-haspopup="menu" aria-expanded="false" aria-label="More options for ${escapeHtml(name)}"${busy ? " disabled" : ""}>${icon("more_vert")}</button>
       </div>`;
-      return;
+  }
+
+  function markup() {
+    const s = hub.state;
+    if (!s.configLoaded) return `${titleMarkup()}<div class="m-center">${spinner("Loading activities")}</div>`;
+    if (s.configError) {
+      return `${titleMarkup()}<div class="m-empty">
+          ${iconTile("wifi_off", { size: 64, tone: "error" })}
+          <h2 class="m-empty-title">Can't reach your hub</h2>
+          <p class="m-empty-body">${escapeHtml(s.configError.message || "The hub didn't answer.")}</p>
+          <button type="button" class="btn btn-filled" data-act="retry">Try again</button>
+        </div>`;
     }
     const acts = hub.activities();
     if (!acts.length) {
-      els.cards.innerHTML = `<div class="state-block">
-        <span class="state-title">No activities yet</span>
-        Set up your first one — it takes about a minute.
-        <div style="margin-top:var(--space-4)"><a class="btn btn-primary" href="#wizard">Set up a new activity</a></div>
+      return `${titleMarkup()}<div class="m-empty">
+          ${iconTile("play_arrow", { size: 64, tone: "activity" })}
+          <h2 class="m-empty-title">No activities yet</h2>
+          <p class="m-empty-body">An activity turns on the right devices and sets up the remote for you.</p>
+          <a class="btn btn-filled" href="#wizard">Create an activity</a>
+        </div>`;
+    }
+    const devices = hub.devices();
+    const running = acts.find((a) => String(a["Id-"]) === s.currentId) ?? null;
+    const others = acts.filter((a) => a !== running);
+    const stateNote = s.stateError
+      ? `<p class="act-note">${icon("info_outlined", { size: 16 })}<span>Couldn't read what's on: ${escapeHtml(s.stateError.message)}</span></p>`
+      : "";
+    return `${titleMarkup()}
+      ${stateNote}
+      <div class="acts">
+        ${running ? runningCard(running, devices) : ""}
+        ${running && others.length ? sectionLabel("Start something else", { muted: true }) : ""}
+        ${others.map((a) => row(a, devices)).join("")}
       </div>`;
-      return;
-    }
-    els.cards.innerHTML = acts.map((a, i) => card(a, i, acts.length)).join("");
   }
 
-  async function mutate(fn, busyNote) {
-    setNote(busyNote);
+  function render() {
+    if (section.hidden) return;
+    const html = markup();
+    if (html === shown) return;
+    // Rebuilding the list drops focus; put it back on the same control.
+    const focused = document.activeElement;
+    const keep = root.contains(focused)
+      ? ["data-start", "data-menu-for", "data-act"].find((attr) => focused.hasAttribute(attr))
+      : null;
+    const keepValue = keep ? focused.getAttribute(keep) : "";
+    shown = html;
+    root.innerHTML = html;
+    if (keep) root.querySelector(`[${keep}="${CSS.escape(keepValue)}"]`)?.focus();
+  }
+
+  /* -- actions ------------------------------------------------------------------- */
+
+  async function start(id) {
+    vibrate();
+    location.hash = "#remote";
+    await hub.setRunning(id);
+    const err = hub.state.runError;
+    if (err) snackbar(`Couldn't start ${hub.activityName(hub.activityById(id))} — ${err.message || "hub error"}`, { error: true });
+  }
+
+  async function turnOff() {
+    vibrate();
+    await hub.setRunning("-1");
+    const err = hub.state.runError;
+    if (err) snackbar(`Couldn't turn everything off — ${err.message || "hub error"}`, { error: true });
+  }
+
+  /* A delete or reorder writes the hub's whole setup; the latest copy is
+     reloaded either way, so a refused save can simply be tried again. */
+  async function mutate(fn, { done, failed }) {
+    busy = true;
+    render();
     try {
-      await fn({
-        config: hub.state.config,
-        revision: hub.state.config?.revision,
-      });
-      await hub.reloadConfig();
-      setNote("");
+      await fn({ config: hub.state.config, revision: hub.state.config?.revision });
+      if (done) snackbar(done);
     } catch (error) {
-      setNote(`${error.message} — reloaded the latest config; try again.`, true);
-      await hub.reloadConfig();
+      snackbar(`${failed}: ${error.message || "hub error"}. The latest setup is reloaded; try again.`, { error: true });
     }
+    busy = false;
+    await hub.reloadConfig();
   }
 
-  function onClick(e) {
-    const retry = e.target.closest("[data-retry]");
-    if (retry) {
-      hub.reloadConfig();
-      return;
+  /* Reorder among the rows people see: the running activity sits in its card,
+     so the neighbour may be two places away in the hub's order. The two
+     activities swap; the running one keeps its place. */
+  function neighbour(id, step) {
+    const acts = hub.activities();
+    const index = acts.findIndex((a) => String(a["Id-"]) === id);
+    for (let i = index + step; i >= 0 && i < acts.length; i += step) {
+      if (String(acts[i]["Id-"]) !== hub.state.currentId) return i - index;
     }
-    const delNo = e.target.closest("[data-del-no]");
-    if (delNo) {
-      confirmDeleteId = "";
-      render();
-      return;
-    }
-    const delYes = e.target.closest("[data-del-yes]");
-    if (delYes) {
-      const id = delYes.dataset.delYes;
-      confirmDeleteId = "";
-      mutate((ctx) => deleteActivityGraph({ ...ctx, id }), "Deleting…");
-      return;
-    }
-    const del = e.target.closest("[data-del]");
-    if (del && !del.disabled) {
-      confirmDeleteId = del.dataset.del;
-      render();
-      return;
-    }
-    const move = e.target.closest("[data-move]");
-    if (move && !move.disabled) {
-      const { id, move: dir } = move.dataset;
-      mutate((ctx) => reorderActivityGraph({ ...ctx, id, direction: dir }), "Saving order…");
-      return;
-    }
-    const run = e.target.closest("[data-run]");
-    if (run) {
-      hub.setRunning(run.dataset.run);
-      return;
-    }
-    const edit = e.target.closest("[data-edit]");
-    if (edit) {
-      setWizardEditId(edit.dataset.edit);
-      location.hash = "#wizard";
-    }
+    return 0;
   }
 
-  mount();
+  function move(id, step) {
+    const direction = neighbour(id, step);
+    if (!direction) return;
+    mutate((ctx) => reorderActivityGraph({ ...ctx, id, direction }), { failed: "Couldn't save the new order" });
+  }
+
+  async function remove(id) {
+    const name = hub.activityName(hub.activityById(id));
+    const ok = await confirmDialog({
+      title: `Delete “${name}”?`,
+      text: "This removes the activity and its button setup from the hub and your universal remote.",
+      confirmLabel: "Delete",
+      destructive: true,
+    });
+    if (!ok) {
+      root.querySelector(`[data-menu-for="${CSS.escape(id)}"]`)?.focus();
+      return;
+    }
+    mutate((ctx) => deleteActivityGraph({ ...ctx, id }), { done: `Deleted “${name}”`, failed: `Couldn't delete “${name}”` });
+  }
+
+  function openRowMenu(anchor) {
+    const id = anchor.dataset.menuFor;
+    const name = hub.activityName(hub.activityById(id));
+    const path = encodeURIComponent(id);
+    openMenu({
+      anchor,
+      label: `Options for ${name}`,
+      items: [
+        { id: "edit", label: "Edit", icon: "edit_outlined" },
+        { id: "buttons", label: "Set up buttons", icon: "tune_outlined" },
+        { id: "try", label: "Try the buttons", icon: "settings_remote_outlined" },
+        { id: "editor", label: "Advanced editor", icon: "build_outlined" },
+        { id: "up", label: "Move up", icon: "keyboard_arrow_up", disabled: !neighbour(id, -1) },
+        { id: "down", label: "Move down", icon: "keyboard_arrow_down", disabled: !neighbour(id, 1) },
+        { id: "delete", label: "Delete", icon: "delete_outlined", destructive: true },
+      ],
+      onSelect: (choice) => {
+        if (choice === "edit") location.hash = `#wizard/${path}`;
+        else if (choice === "buttons") location.hash = `#wizard/${path}/buttons`;
+        else if (choice === "try") location.hash = `#remote/${path}`;
+        else if (choice === "editor") location.hash = "#editor";
+        else if (choice === "up") move(id, -1);
+        else if (choice === "down") move(id, 1);
+        else if (choice === "delete") remove(id);
+      },
+    });
+  }
+
+  /* -- events -------------------------------------------------------------------- */
+
+  root.addEventListener("click", (event) => {
+    const startBtn = event.target.closest("[data-start]");
+    if (startBtn) {
+      start(startBtn.dataset.start);
+      return;
+    }
+    const menuBtn = event.target.closest("[data-menu-for]");
+    if (menuBtn) {
+      openRowMenu(menuBtn);
+      return;
+    }
+    const act = event.target.closest("[data-act]")?.dataset.act;
+    if (act === "off") turnOff();
+    else if (act === "retry") hub.reloadConfig();
+  });
+
+  hub.subscribe(render);
 
   return {
     onShow() {
-      confirmDeleteId = "";
+      shown = "";
       hub.ensureConfig();
-      hub.refreshState();
       render();
     },
-    onHide() {},
+    onHide() {
+      shown = "";
+    },
   };
 }

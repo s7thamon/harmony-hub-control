@@ -141,9 +141,10 @@ export function activityKeys(config, activityId) {
   return keys;
 }
 
-/* Keypad keys for driving one device directly, matched by command name the
-   same way the hub's own IR page does (remote-layout aliases). */
-const DEVICE_KEY_BY_LABEL = { ...BUTTON_KEY_BY_LABEL, Back: "PrevChannel", Dash: "Dash", Enter: "Enter" };
+/* Keypad keys for driving one device directly, matched by command name
+   through the remote-layout aliases, as the hub's own IR page does, except
+   that an exact name wins (see matchCommand). */
+const DEVICE_KEY_BY_LABEL = { ...BUTTON_KEY_BY_LABEL, Dash: "Dash", Enter: "Enter" };
 
 /** key -> { key, label, press } for a device from state.devices(). */
 export function deviceKeys(device) {

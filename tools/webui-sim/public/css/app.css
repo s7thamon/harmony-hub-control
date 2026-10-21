@@ -280,6 +280,29 @@ ol {
   align-items: center;
 }
 
+/* The wizard's bar: a close button, a smaller title and "Step n of m". */
+.appbar.is-compact .appbar-title {
+  font-size: 18px;
+  font-weight: 500;
+}
+
+.appbar-note {
+  padding: 0 var(--space-3);
+  color: var(--on-surface-variant);
+  font-size: var(--fs-body-sm);
+  white-space: nowrap;
+}
+
+/* The wizard's own Back / Next bar sits at the bottom instead of the page
+   padding, and snackbars rise above it. */
+body[data-route="wizard"] .app.is-subpage .main {
+  padding-bottom: 0;
+}
+
+body[data-route="wizard"] .app.is-subpage ~ .snackbar-host {
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 88px);
+}
+
 /* Connection banner (ConnectionBanner) */
 .banner {
   position: sticky;
@@ -397,6 +420,14 @@ ol {
   font-weight: 500;
   line-height: 36px;
   letter-spacing: 0;
+}
+
+.m-title-sub {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--on-surface-variant);
+  font-size: var(--fs-body-sm);
 }
 
 .m-section {
@@ -652,8 +683,7 @@ button.m-row:focus-visible {
 }
 
 /* Segmented tabs (RemoteModeTabs, device Remote / Commands) */
-.seg-tabs,
-.segmented {
+.seg-tabs {
   display: flex;
   gap: 4px;
   padding: 4px;
@@ -661,8 +691,7 @@ button.m-row:focus-visible {
   background: var(--card);
 }
 
-.seg-tab,
-.segmented button {
+.seg-tab {
   flex: 1;
   min-height: 40px;
   padding: 0 var(--space-3);
@@ -674,13 +703,11 @@ button.m-row:focus-visible {
   transition: background-color var(--dur-short) var(--ease-standard);
 }
 
-.seg-tab:hover,
-.segmented button:hover {
+.seg-tab:hover {
   color: var(--on-surface);
 }
 
-.seg-tab[aria-selected="true"],
-.segmented button[aria-pressed="true"] {
+.seg-tab[aria-selected="true"] {
   background: var(--primary-container);
   color: var(--on-primary-container);
 }
@@ -845,6 +872,32 @@ button.m-row:focus-visible {
   background: var(--key-raised);
 }
 
+/* FilledTonalIconButton (New activity) and the raised Start button */
+.icon-btn-secondary {
+  background: var(--secondary-container);
+  color: var(--on-secondary-container);
+}
+
+.icon-btn-raised {
+  background: var(--key-raised);
+  color: var(--on-surface);
+}
+
+.icon-btn-secondary:hover,
+.icon-btn-raised:hover {
+  box-shadow: inset 0 0 0 100px var(--state-hover);
+}
+
+.icon-btn:disabled {
+  opacity: 0.38;
+  cursor: default;
+}
+
+.icon-btn:disabled:hover {
+  background: transparent;
+  box-shadow: none;
+}
+
 /* PowerButton */
 .power-btn {
   display: grid;
@@ -965,6 +1018,18 @@ dialog::backdrop {
   min-width: 0;
 }
 
+.sheet-row-text {
+  display: grid;
+  flex: 1;
+  gap: 2px;
+  min-width: 0;
+}
+
+.sheet-row-sub {
+  color: var(--on-surface-variant);
+  font-size: var(--fs-body-sm);
+}
+
 .sheet-row-check {
   color: var(--primary);
 }
@@ -1007,6 +1072,115 @@ dialog::backdrop {
     transform: none;
     opacity: 1;
   }
+}
+
+/* ConfirmDialog (AlertDialog) */
+.m-dialog {
+  width: min(320px, calc(100% - 48px));
+  margin: auto;
+  padding: 0;
+  border: 0;
+  border-radius: var(--shape-xl);
+  background: var(--surface-high);
+}
+
+.m-dialog[open] {
+  animation: dialog-in var(--dur-medium) var(--ease-emphasized);
+}
+
+.m-dialog-body {
+  padding: var(--space-6) var(--space-6) var(--space-5);
+}
+
+.m-dialog-title {
+  font-size: var(--fs-headline);
+  font-weight: 400;
+  line-height: 32px;
+}
+
+.m-dialog-text {
+  margin-top: var(--space-4);
+  color: var(--on-surface-variant);
+  font-size: var(--fs-label);
+  line-height: 20px;
+}
+
+.m-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  margin: var(--space-6) calc(-1 * var(--space-2)) 0 0;
+}
+
+/* DropdownMenu: placed by openMenu() under its button */
+.m-menu {
+  inset: auto;
+  min-width: 200px;
+  max-width: min(280px, calc(100vw - 16px));
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--shape-xs);
+  background: var(--surface-high);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+}
+
+.m-menu::backdrop {
+  background: transparent;
+}
+
+.m-menu[open] {
+  animation: menu-in var(--dur-short) var(--ease-standard);
+  transform-origin: top right;
+}
+
+@keyframes menu-in {
+  from {
+    transform: scale(0.94);
+    opacity: 0;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+
+.m-menu-body {
+  display: grid;
+  padding: var(--space-2) 0;
+}
+
+.m-menu-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 48px;
+  padding: 0 var(--space-5) 0 var(--space-3);
+  font-size: var(--fs-body-lg);
+  text-align: left;
+}
+
+.m-menu-item .ic {
+  color: var(--on-surface-variant);
+}
+
+.m-menu-item:hover:not(:disabled),
+.m-menu-item:focus-visible {
+  background: var(--state-hover);
+}
+
+.m-menu-item:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--primary);
+}
+
+.m-menu-item:disabled {
+  opacity: 0.38;
+  cursor: default;
+}
+
+.m-menu-item.is-destructive,
+.m-menu-item.is-destructive .ic {
+  color: var(--error);
 }
 
 /* Snackbar */
@@ -1352,124 +1526,136 @@ select option {
   }
 }
 
-/* Activities list cards (activities-home), like the app's ActivityRow */
-.act-list {
+/* Activities tab (ActivitiesScreen): the running card, then one row per
+   activity with Start and a ⋮ menu. */
+.acts {
   display: grid;
   gap: var(--space-2);
-  max-width: 720px;
 }
 
-.act-card {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+.acts .m-section {
+  margin: var(--space-3) 0 0;
+}
+
+.act-note {
+  display: flex;
   align-items: center;
-  gap: var(--space-3);
-  padding: var(--space-3) var(--space-3) var(--space-3) var(--space-5);
+  gap: var(--space-2);
+  margin: 0 var(--space-1) var(--space-3);
+  color: var(--on-surface-variant);
+  font-size: var(--fs-body-sm);
+}
+
+.run-card {
+  display: grid;
+  gap: var(--space-4);
+  padding: var(--space-5);
+  border-radius: var(--shape-xl);
+  background: var(--running-card);
+}
+
+.run-card-head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.run-card-text,
+.act-row-text {
+  display: grid;
+  flex: 1;
+  gap: 2px;
+  min-width: 0;
+}
+
+.run-card-over {
+  color: var(--primary);
+  font-size: var(--fs-caption);
+  font-weight: 600;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+}
+
+.run-card-name,
+.run-card-meta,
+.act-row-name,
+.act-row-meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.run-card-name {
+  font-size: var(--fs-title-lg);
+  font-weight: 500;
+}
+
+.run-card-meta {
+  color: var(--running-meta);
+  font-size: var(--fs-body-sm);
+}
+
+.run-card-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.run-card-actions .btn {
+  min-height: 48px;
+  padding: 0 var(--space-5);
+  font-size: var(--fs-body);
+}
+
+.run-card-actions .btn-filled {
+  flex: 1;
+}
+
+.run-card-actions .m-spinner {
+  width: 18px;
+  height: 18px;
+  border-color: var(--on-power-container);
+  border-right-color: transparent;
+}
+
+.act-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: var(--space-3) var(--space-1) var(--space-3) 14px;
   border-radius: var(--shape-lg);
   background: var(--card);
 }
 
-.act-card.is-live {
-  background: var(--running-card);
-}
-
-.act-card.is-confirming {
-  box-shadow: inset 0 0 0 1px var(--on-power-container);
-}
-
-.act-main {
-  display: grid;
-  gap: 2px;
-  min-width: 0;
-  text-align: left;
-}
-
-.act-name {
-  overflow: hidden;
-  color: var(--on-surface);
+.act-row-name {
   font-size: var(--fs-title-sm);
   font-weight: 500;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
-.act-main:hover .act-name {
-  color: var(--primary);
-}
-
-.act-meta {
-  overflow: hidden;
+.act-row-meta {
   color: var(--on-surface-variant);
   font-size: var(--fs-body-sm);
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
-.act-side {
+.act-row-warn {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
-  flex-wrap: wrap;
-  gap: var(--space-2);
+  gap: 6px;
+  color: var(--warning);
+  font-size: var(--fs-body-sm);
 }
 
-.act-order {
-  display: inline-flex;
-  overflow: hidden;
-  border-radius: var(--shape-full);
-  background: var(--key);
-}
-
-.act-order-btn {
+.act-row-busy {
   display: grid;
-  place-items: center;
-  width: 36px;
-  height: 36px;
-  color: var(--on-surface-variant);
-}
-
-.act-order-btn:hover:not(:disabled) {
-  background: var(--key-raised);
-  color: var(--on-surface);
-}
-
-.act-order-btn:disabled {
-  opacity: 0.35;
-  cursor: default;
-}
-
-.act-confirm {
-  display: flex;
-  grid-column: 1 / -1;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: var(--space-4);
-}
-
-.act-confirm p {
-  color: var(--on-surface-variant);
-  font-size: var(--fs-body-sm);
-}
-
-.act-confirm p strong {
-  color: var(--on-surface);
-}
-
-.act-confirm-actions {
-  display: flex;
   flex: none;
-  gap: var(--space-2);
+  place-items: center;
+  width: 48px;
+  height: 48px;
 }
 
-@media (max-width: 640px) {
-  .act-card {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .act-side {
-    justify-content: flex-start;
-  }
+.act-row-busy .m-spinner {
+  width: 28px;
+  height: 28px;
+  border-width: 3px;
 }
 
 /* Event log (IR batch sweep) */
@@ -1491,40 +1677,6 @@ select option {
 
 .event-log li:nth-child(odd) {
   background: var(--surface-high);
-}
-
-.ev-time {
-  color: var(--on-surface-variant);
-  font-size: var(--fs-overline);
-}
-
-.ev-type {
-  padding: 1px 7px;
-  border-radius: var(--shape-full);
-  background: var(--primary-container);
-  color: var(--on-primary-container);
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
-
-.ev-type.is-state {
-  background: rgba(111, 211, 168, 0.14);
-  color: var(--live);
-}
-
-.ev-type.is-error {
-  background: var(--power-container);
-  color: var(--on-power-container);
-}
-
-.ev-msg {
-  overflow: hidden;
-  color: var(--on-surface-variant);
-  font-size: var(--fs-body-sm);
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 /* Setup page fields, actions and key/value lists */
@@ -1754,6 +1906,8 @@ details > summary {
   .view.active,
   .stagger > *,
   .sheet[open],
+  .m-dialog[open],
+  .m-menu[open],
   .snackbar,
   .live-dot,
   .skel,

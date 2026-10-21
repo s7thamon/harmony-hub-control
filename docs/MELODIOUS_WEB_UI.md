@@ -1,7 +1,8 @@
 # Melodious web UI: porting the Android app's interface
 
 Status: plan approved by the owner, 2026-10-21 (decisions at the end).
-Branch `feat/melodious-ui` from `main`.
+Slices 1 (shell and remote, PR #21) and 2 (Activities) are done; slices 3
+(Devices) and 4 (Settings) follow, one PR at a time.
 
 The owner's native Android app (`Android/`, Kotlin + Jetpack Compose,
 Material 3, dark) has the better interface. This port makes the hub web UI
@@ -77,7 +78,7 @@ content centred.
 | DeviceDetailScreen | Device page with Remote and Commands tabs (tap a command to send it; search) | 1 |
 | Learn and Import sheets | Learn a button, Import codes | 3 |
 | `devices/DeviceSettingsScreen` | Device settings page: Power, Inputs (web-only), Timing | 3 |
-| `activities/ActivitiesScreen` | Activities tab: running card, rows with Start and a ⋮ menu (Edit, Set up buttons, Advanced editor, Delete); reorder kept | 2 |
+| `activities/ActivitiesScreen` | Activities tab: running card, rows with Start and a ⋮ menu (Edit, Set up buttons, Try the buttons, Advanced editor, Move up / down, Delete) | 2 |
 | ActivityEditor (5 steps) | Wizard restyled as the app's step screens: Name, Devices, Inputs, Buttons, Review. The app's "Start & end" step is parity item P2, not part of the port. | 2 |
 | TouchScreenEditor | — (parity item P3; the advanced editor still covers on-screen buttons) | later |
 | `settings/SettingsScreen` | Settings tab: hub card, then rows for Bluetooth keyboard, MQTT, Wi-Fi, Backup, System | 1 (list), 4 (pages) |
@@ -150,7 +151,8 @@ on Apple, Segoe on Windows. That costs 0 bytes. Sizes follow the app:
 | Buttons: filled, tonal, outlined, text, icon | `.btn` family restyled as pills (40–52 px); the `.btn-primary` etc. class names stay so unported views follow |
 | DetailPage / TopAppBar | shell top bar for sub-pages |
 | ModalBottomSheet | `<dialog class="m-sheet">`: 28 px top corners, drag handle, scrim, Esc and scrim-tap close it; centred card on wide screens |
-| ConfirmDialog | `<dialog class="m-dialog">`. The existing inline danger guards stay where a typed phrase is needed. |
+| ConfirmDialog | `<dialog class="m-dialog">` through `confirmDialog()`; Cancel has focus first. The existing inline danger guards stay where a typed phrase is needed. |
+| DropdownMenu | `<dialog class="m-menu">` through `openMenu()`: dropped from its button, arrow keys move, Esc and a click outside close it |
 | Snackbar | `.m-snackbar` (inverse surface), errors linger |
 | FilterChip / AssistChip | `.m-chip` |
 | EmptyState | `.m-empty` |
@@ -164,6 +166,8 @@ on Apple, Segoe on Windows. That costs 0 bytes. Sizes follow the app:
 - Unmapped keys dim to 35% and do nothing.
 - Keys don't repeat while held (the owner chose not to port that).
 - Menu or Exit is relabelled "Home" when it really sends Home.
+- The remote's Back key is stored as `PrevChannel`, and the wizard lets you
+  set it like any other key, as the app does (approved 2026-10-21).
 - Phones get a short vibration where the browser supports it; desktops get a
   pressed state.
 - Errors show as a snackbar.
@@ -205,13 +209,18 @@ on Apple, Segoe on Windows. That costs 0 bytes. Sizes follow the app:
 - **Bluetooth:** scan, connect, disconnect, adapter status, 30 quick keys
   and custom combos, saved devices with keyboard-script commands.
 - **Activities:**
-  - reorder;
+  - reorder (Move up and Move down in the ⋮ menu);
   - the vendored advanced editor;
   - pressing a non-running activity's keys. This stays as "Try the buttons"
     in the activity menu, which opens `#remote/<id>` without starting it.
 - **Remote:** the send log, the resolved command for every key, and "All
   commands".
-- **Wizard:** the review step and the per-device input choice.
+- **Wizard:**
+  - the review step;
+  - "Don't switch" among a device's inputs;
+  - a key's hold action (a Press / Hold tab in the button picker);
+  - the wait after a device turns on, on the Devices step. The app keeps
+    it in its "Start & end" step, which is parity item P2.
 
 ## Slices (one PR at a time)
 
@@ -223,9 +232,13 @@ on Apple, Segoe on Windows. That costs 0 bytes. Sizes follow the app:
    - Devices list plus device remote and commands (the old Control
      "Devices" mode).
    - Settings list linking the existing pages.
+
+   Done: PR #21.
 2. **Activities:** list, wizard, editor entry points. The photo's last user
    goes, so the hub stops injecting it into the page (the C change in
    `render_harmony_shell`).
+
+   Done; see "Slice 2 notes" below.
 3. **Devices:** the IR setup functions move into the device pages (settings,
    learn, import, Find codes, batch sweep, lab, add/edit/delete). The old
    `#ir` page goes.
@@ -262,6 +275,21 @@ Budget for the additions:
 Slice 1 should stay within +30 KB net. Later slices delete old views and CSS
 and should shrink the bundle.
 
+After each slice (bytes):
+
+| Item | `main` before | Slice 1 (PR #21) | Slice 2 |
+| --- | --- | --- | --- |
+| Shell JS | 240,199 | 265,965 | 275,827 |
+| Shell CSS | 47,070 | 53,388 | 54,274 |
+| Page HTML per load | 10,045 + 79,856 photo | 28,916 + 79,856 photo | 28,842, no photo |
+| All three per load | 377,170 | 428,125 | 358,943 |
+| `codex_webui` | 992,740 | 1,043,700 | 1,054,340 |
+
+Slice 2 serves 69,182 bytes less per page load than slice 1: the photo's
+79,856 base64 bytes go, while the new wizard, the menu and the dialog add
+10,748 bytes of script and style. The binary still carries the photo for
+the legacy page, so it grows by 10,640 bytes.
+
 ## Owner decisions (2026-10-21)
 
 1. **The photo remote goes.** The native keypad replaces it, matching the
@@ -283,3 +311,62 @@ and should shrink the bundle.
 4. **Icons:** the 64 px favicon and the 180 px home-screen icon, together
    about 26 KB per page load.
 5. **The plan is approved; slice 1 starts.**
+6. **Slice 2: the Back key is assignable in the wizard** (`PrevChannel`,
+   suggested from a device's Back, Return or Previous command), as in the
+   app.
+7. **Slice 2: an exact command name wins.** When matching a key to a
+   device's commands, a command named exactly like one of the key's aliases
+   beats an earlier command that only contains one. Before, the fixture
+   amplifier's OK and Enter keys found "CenterDown" (it contains "enter")
+   and its Back found "PreviousTrack". This applies to the device remote and
+   the wizard's suggestions; the C legacy page and the Android app keep the
+   first match.
+
+## Slice 2 notes
+
+- **Activities tab.** The running activity has the "RUNNING NOW" card with
+  Open remote and Turn off; the other activities are rows with Start and a ⋮
+  menu: Edit, Set up buttons (opens the wizard on its Buttons step), Try the
+  buttons (`#remote/<id>`), Advanced editor, Move up, Move down and Delete
+  (with a confirm dialog). Start opens the Remote tab, as in the app. A row
+  with fewer than 5 buttons says so in amber.
+- **Moving past the running activity.** Move up and Move down step over the
+  activity in the running card, so the two activities that swap are the
+  ones you see side by side; the running one keeps its place.
+- **Wizard routes.** `#wizard` (new), `#wizard/<id>` (edit) and
+  `#wizard/<id>/buttons`. Leaving with changes asks "Discard changes?",
+  whether through the close button, the browser's Back or the navigation
+  rail; staying puts history back exactly as it was, and the page also warns
+  before a reload loses changes. While a save is in flight the wizard stays
+  put. Opened on a later step, Next stays off until the earlier steps are
+  filled in, and the step says what is missing.
+- **Jobs, not rows.** As in the app, each job (Screen, Sound / volume, …) is
+  a card with its device, and one device can do several jobs. A new
+  activity starts with the first TV as the screen and the first amplifier
+  as the sound, like the app (a receiver or soundbar counts as well).
+- **A device's input and wait belong to the device.** Every job of a device
+  shares them. A device new to the activity starts on "Don't switch" with no
+  wait (the app picks its first input; the web keeps its earlier
+  behaviour). Changing a job's device no longer keeps the old device's
+  input name, which the old form did.
+- **Power-on order is kept.** Editing loads the roles in the hub's power-on
+  order, so saving keeps it. The old wizard numbered devices in the order
+  the roles were stored and could swap them.
+- **Buttons.** "Check the buttons" lists the 36 keys in the app's groups. A
+  key opens a picker: Press and Hold tabs, the activity's devices as chips,
+  search, and the device's commands. A key's double-press action is kept as
+  it was. A cleared key stays cleared; suggestions don't fill it again. Keys
+  a map spells another way ("DVR" for "Dvr") show on their row and save as
+  one entry. Back is only suggested from a command named Back, Return or
+  Previous, never from "PreviousTrack".
+  "Undo my change" (one key) and "Undo my changes" (every key) put keys back
+  as the wizard opened them: the activity's own mapping, or a new activity's
+  suggestion. The old wizard's resets went to the suggestion even on an
+  edited activity.
+- **A refused save reloads.** If the hub's setup changed elsewhere, the save
+  is refused, the wizard reloads the latest setup and the next try saves
+  onto it.
+- **The photo is gone from the shell.** `render_harmony_shell` serves the
+  generated page whole, the packager no longer splits it at a base64 seam,
+  and the photo CSS, the sim's copy of the JPEG and the hotspot geometry in
+  `remote-layout.js` are removed. The legacy page keeps its photo.

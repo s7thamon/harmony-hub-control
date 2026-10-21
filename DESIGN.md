@@ -114,9 +114,13 @@ Segoe on Windows. No web fonts are shipped.
 | Button, FilledTonalButton, OutlinedButton, TextButton | `.btn-filled`, `.btn-tonal`, `.btn-outlined`, `.btn-text` |
 | PowerButton | `.power-btn` |
 | ModalBottomSheet | `<dialog class="sheet">` (a centred card on wide screens) |
+| ConfirmDialog | `<dialog class="m-dialog">` from `confirmDialog()` |
+| DropdownMenu | `<dialog class="m-menu">` from `openMenu()`, dropped from its ⋮ button |
 | Snackbar | `.snackbar`: inverse surface; errors stay for 8 s |
 | Remote mode tabs | `.seg-tabs` (pill track, primary-container selection) |
 | Keys | `.rk`, `.dpad-*`, `.rocker`, `.rk-captioned`, `.rk-color` |
+| Running card, activity row | `.run-card` (on `--running-card`), `.act-row` (Start on `--key-raised`, then ⋮) |
+| ActivityEditor steps | `.wiz-progress`, `.wiz-intro`, `.wiz-choice`, `.wiz-job`, `.wiz-card` with `.chip`s, `.wiz-key` rows, the `.pick-*` sheet, `.wiz-foot` |
 
 Unported setup pages keep their own classes (`.panel`, `.btn-primary`,
 `.notice-*`, …), restyled to these tokens.
@@ -140,7 +144,25 @@ emoji icons.
   remote. Destructive edits (delete, restore, reboot) keep their
   confirmation guards.
 
-## 7. Motion
+## 7. Setup flows
+
+The activity wizard follows the app's ActivityEditor, and later setup flows
+should too:
+- The top bar has a close button, the flow's title ("New activity",
+  `Edit “Movie night”`) and "Step n of m".
+- A segmented progress bar sits under it: one bar per step, filled up to
+  the current one. A bar opens its step once the steps before it are
+  filled in.
+- Each step opens with a 26 px question and one line of help.
+- Choices are cards (one tap, a check on the chosen one), chips for short
+  options, and sheets for longer lists such as devices or commands. A sheet
+  closes as soon as something is picked.
+- The Back and Next bar stays at the bottom. Next says where it goes
+  ("Next: inputs"), and the last step says what it does ("Save activity").
+- Closing asks "Discard changes?" only when something changed. Saving goes
+  to the hub first; the flow closes once the hub has accepted it.
+
+## 8. Motion
 
 - Easing: standard `cubic-bezier(0.2, 0, 0, 1)`, emphasized
   `cubic-bezier(0.05, 0.7, 0.1, 1)`.
@@ -150,7 +172,7 @@ emoji icons.
 - Sheets rise; on wide screens they scale in from 96%.
 - With `prefers-reduced-motion`, all of that is off and spinners slow down.
 
-## 8. Do and don't
+## 9. Do and don't
 
 ### Do
 

@@ -43,6 +43,27 @@ const ALIASES = { control: "remote", home: "remote" };
 
 const views = new Map();
 let current = null;
+let currentHash = "";
+
+/* Each history entry the app shows carries its position, so a move can be
+   taken back exactly when a view asks to stay (forward after Back, back
+   after a link or a typed address). Rewriting an address keeps the entry's
+   stamp. */
+let position = 0;
+let restoring = false;
+
+function stampEntry() {
+  const stamp = history.state?.melodiousPos;
+  if (typeof stamp === "number") position = stamp;
+  else {
+    position += 1;
+    history.replaceState({ ...(history.state ?? {}), melodiousPos: position }, "");
+  }
+}
+
+function rewriteHash(hash) {
+  history.replaceState(history.state, "", hash);
+}
 
 function viewFor(name) {
   if (!views.has(name)) {
@@ -103,17 +124,46 @@ function show({ name, args }) {
   next.view.onShow?.({ args });
   document.title = `${route.title} · Melodious`;
   current = next;
+  currentHash = location.hash;
+  stampEntry();
 }
 
-function route() {
+let asking = false;
+
+async function route() {
+  if (restoring) {
+    // The move taken back below has landed on the view still on screen;
+    // anything else routes as usual.
+    restoring = false;
+    if (location.hash === currentHash) return;
+  }
+  // A view with unsaved work (the wizard) may ask first. While it asks,
+  // further moves wait, and the answer applies to wherever history is then.
+  if (asking) return;
+  if (current?.view.confirmLeave && location.hash !== currentHash) {
+    asking = true;
+    const leave = await current.view.confirmLeave();
+    asking = false;
+    if (!leave) {
+      const stamp = history.state?.melodiousPos;
+      const delta = position - (typeof stamp === "number" ? stamp : position + 1);
+      if (delta) {
+        restoring = true;
+        history.go(delta);
+      } else {
+        rewriteHash(currentHash);
+      }
+      return;
+    }
+  }
   const parsed = parseHash();
   if (!parsed) {
-    history.replaceState(null, "", "#remote");
+    rewriteHash("#remote");
     show({ name: "remote", args: [] });
     return;
   }
   const head = location.hash.replace(/^#/, "").split("/")[0];
-  if (ALIASES[head]) history.replaceState(null, "", `#${[parsed.name, ...parsed.args].join("/")}`);
+  if (ALIASES[head]) rewriteHash(`#${[parsed.name, ...parsed.args].join("/")}`);
   show(parsed);
 }
 

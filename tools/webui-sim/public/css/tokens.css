@@ -129,7 +129,6 @@
    Melodious layout yet. Each maps onto the palette above; remove them as
    the last users go. */
 :root {
-  --surface-canvas: var(--canvas);
   --surface-primary: var(--surface-low);
   --surface-secondary: var(--card);
   --surface-elevated: var(--key);
@@ -142,50 +141,22 @@
   --border-strong: var(--outline-variant);
   --accent-primary: var(--primary);
   --accent-hover: #b4c8ff;
-  --accent-muted: rgba(157, 184, 255, 0.14);
   --border-accent: rgba(157, 184, 255, 0.4);
   --status-live: var(--live);
   --status-live-glow: rgba(111, 211, 168, 0.28);
   --status-warn: var(--warning);
   --status-error: var(--error);
-  --status-info: var(--secondary);
   --status-live-muted: rgba(111, 211, 168, 0.12);
   --status-warn-muted: rgba(242, 196, 141, 0.12);
   --status-error-muted: rgba(255, 180, 171, 0.12);
-  --status-info-muted: rgba(190, 198, 220, 0.1);
   --border-live: rgba(111, 211, 168, 0.38);
   --border-warn: rgba(242, 196, 141, 0.4);
   --border-error: rgba(255, 180, 171, 0.4);
-  --border-info: rgba(190, 198, 220, 0.3);
-  --key-face: var(--key);
-  --key-face-hover: var(--key-raised);
-  --key-label: var(--on-surface);
-  --key-disabled: var(--dpad-ring);
-  --key-tint-red: var(--key-red);
-  --key-tint-green: var(--key-green);
-  --key-tint-yellow: var(--key-yellow);
-  --key-tint-blue: var(--key-blue);
-  --shadow-remote: 0 16px 40px rgba(0, 0, 0, 0.45);
-  --overlay: rgba(0, 0, 0, 0.6);
   --radius-btn: var(--shape-full);
-  --radius-panel: var(--shape-lg);
-  --radius-remote: var(--shape-xl);
-  --radius-pill: var(--shape-full);
-  --text-display: var(--fs-display);
-  --text-h1: var(--fs-title-lg);
-  --text-h2: var(--fs-title-sm);
-  --text-h3: var(--fs-body-lg);
-  --text-body: var(--fs-body);
   --text-body-sm: var(--fs-body-sm);
-  --text-caption: var(--fs-caption);
-  --text-key: var(--fs-caption);
-  --text-mono: var(--fs-caption);
   --ease-out: var(--ease-standard);
-  --dur-fast: var(--dur-short);
   --dur-med: var(--dur-medium);
-  --dur-slow: var(--dur-long);
   --topbar-h: 0px;
-  --remote-max-w: 320px;
 }
 
 /* Aliases expected by the vendored activity-ui.css (light-era names

@@ -22,8 +22,9 @@
  *   - no routable /sim/ URL in the production bundle (sim-only API)
  *   - vendor editor is NOT copied into the shell bundle or its header;
  *     it stays lazy-loaded from the existing /assets/activity-ui.* routes
- *   - the remote skin JPEG is embedded nowhere; production defines
- *     REMOTE_SKIN_SRC from the pre-existing REMOTE_SKIN_JPG_B64 in C
+ *   - the shell carries no remote photo: no JPEG bytes, no base64 seam, no
+ *     REMOTE_SKIN_SRC; codex_webui.c serves harmony_index whole and only the
+ *     legacy page still embeds REMOTE_SKIN_JPG_B64
  *   - generated C arrays exist and are non-empty
  *   - tools/webui-sim/public/vendor/* stay byte-identical to payload/web/*
  *   - packaging is deterministic (two runs produce identical bytes)
@@ -1061,17 +1062,15 @@ check("index.html: no /sim/ URLs", !/\/sim\//.test(html));
 check("shell.js: no routable /sim/ URLs", !/\/sim\//.test(shellJs));
 check("index.html: no simulated-hub wording left", !/simulated/i.test(html));
 
-/* -- runtime flags + skin injection seam --------------------------------- */
+/* -- runtime flags; no remote photo ---------------------------------------- */
 
 check("sim index.html: explicit simulation flag window.HARMONY_SIM = true", /window\.HARMONY_SIM\s*=\s*true/.test(simIndex));
 check("index.html: production flag HARMONY_SIM=false + HARMONY_PRODUCTION=true",
   html.includes("window.HARMONY_SIM=false") && html.includes("window.HARMONY_PRODUCTION=true"));
-check(
-  "index.html: ends the head seam at globalThis.REMOTE_SKIN_SRC base64 marker (C injects REMOTE_SKIN_JPG_B64 here)",
-  html.includes("<script>globalThis.REMOTE_SKIN_SRC='data:image/jpeg;base64,")
-);
-check("shell.js: remote skin resolved from globalThis.REMOTE_SKIN_SRC with local fallback",
-  shellJs.includes("REMOTE_SKIN_SRC") && shellJs.includes("/assets/remote-skin.jpg"));
+check("index.html: no remote photo (no REMOTE_SKIN_SRC seam, no inline JPEG)",
+  !html.includes("REMOTE_SKIN_SRC") && !/data:image\/jpeg/i.test(html));
+check("shell.js: no remote photo (no REMOTE_SKIN_SRC, no remote-skin.jpg)",
+  !shellJs.includes("REMOTE_SKIN_SRC") && !shellJs.includes("remote-skin"));
 check("shell.js: simulation behavior gated on HARMONY_SIM",
   shellJs.includes("HARMONY_SIM"));
 check("IR view: lab danger guard remains in factory scope for route teardown",
@@ -1093,7 +1092,7 @@ const vendorRoutes = webuiC.match(/strcmp\(req\.path, "\/assets\/activity-ui\.(?
 check("codex_webui.c: exactly one route each for /assets/activity-ui.js and .css",
   vendorRoutes.length === 2, `found ${vendorRoutes.length}`);
 
-/* -- skin JPEG embedded nowhere ------------------------------------------- */
+/* -- one whole page, no JPEG anywhere ------------------------------------- */
 
 function arraysFromHeader(text) {
   const out = {};
@@ -1110,23 +1109,20 @@ function arraysFromHeader(text) {
 }
 
 const arrays = arraysFromHeader(header);
+const SHELL_ARRAYS = ["harmony_index", "harmony_shell_js", "harmony_shell_css"];
 check("harmony_shell_assets.h: generated arrays present and non-empty",
-  ["harmony_index_head", "harmony_index_tail", "harmony_shell_js", "harmony_shell_css"]
-    .every((name) => Array.isArray(arrays[name]) && arrays[name].length > 0),
+  SHELL_ARRAYS.every((name) => Array.isArray(arrays[name]) && arrays[name].length > 0),
   `found ${Object.keys(arrays).join(", ") || "none"}`);
+check("harmony_shell_assets.h: exactly the page, script and stylesheet arrays (no head/tail seam)",
+  Object.keys(arrays).sort().join() === [...SHELL_ARRAYS].sort().join(),
+  `found ${Object.keys(arrays).join(", ")}`);
 
 {
-  // Arrays are NUL-terminated for fputs(); drop the terminator before text checks.
-  const toText = (bytes) => Buffer.from(bytes.filter((b) => b !== 0)).toString("utf8");
-  const headText = toText(arrays.harmony_index_head ?? []);
-  const tailText = toText(arrays.harmony_index_tail ?? []);
-  // No newline may sit between "base64," and the injected B64, or between
-  // the B64 and the closing quote — a newline inside the single-quoted
-  // REMOTE_SKIN_SRC literal is a JS syntax error in the served page.
-  check("harmony_index_head ends exactly at the base64 seam (no trailing newline)",
-    headText.endsWith("data:image/jpeg;base64,"));
-  check("harmony_index_tail opens with the closing quote of the skin literal",
-    tailText.startsWith("';"));
+  // Arrays are NUL-terminated for fputs(); drop the terminator before comparing.
+  const bytes = arrays.harmony_index ?? [];
+  check("harmony_index is NUL-terminated", bytes.at(-1) === 0);
+  check("harmony_index is the production index.html byte for byte",
+    Buffer.from(bytes.slice(0, -1)).toString("utf8") === html);
 }
 
 /* The r.jina.ai reader fallback is legacy form-response UI only. The
@@ -1155,10 +1151,10 @@ for (const [name, bytes] of Object.entries(arrays)) {
       break;
     }
   }
-  check(`harmony_shell_assets.h: ${name} embeds no raw JPEG (skin only via REMOTE_SKIN_JPG_B64)`, !jpeg);
+  check(`harmony_shell_assets.h: ${name} embeds no raw JPEG`, !jpeg);
 }
 
-for (const name of ["harmony_index_head", "harmony_index_tail", "harmony_shell_js", "harmony_shell_css"]) {
+for (const name of SHELL_ARRAYS) {
   const lenMatch = header.match(new RegExp(`static const unsigned int ${name}_len = (\\d+);`));
   check(`harmony_shell_assets.h: ${name}_len declared and > 0`,
     Boolean(lenMatch) && Number(lenMatch?.[1]) > 0);
@@ -1174,14 +1170,21 @@ check("codex_webui.c: routes /assets/harmony-shell.css",
   webuiC.includes('strcmp(req.path, "/assets/harmony-shell.css")'));
 check("codex_webui.c: routes /assets/harmony-shell.js",
   webuiC.includes('strcmp(req.path, "/assets/harmony-shell.js")'));
-check("codex_webui.c: injects REMOTE_SKIN_JPG_B64 between the head and tail arrays",
-  /fputs\(\(const char \*\)harmony_index_head, f\);\s*fputs\(REMOTE_SKIN_JPG_B64, f\);\s*fputs\(\(const char \*\)harmony_index_tail, f\);/.test(webuiC));
+{
+  const shellFn = webuiC.match(/static void render_harmony_shell\(int fd\) \{([\s\S]*?)\n\}/)?.[1] ?? "";
+  check("codex_webui.c: render_harmony_shell streams harmony_index whole",
+    /fputs\(\(const char \*\)harmony_index, f\);\s*fclose\(f\);/.test(shellFn));
+  check("codex_webui.c: render_harmony_shell injects no remote photo",
+    shellFn !== "" && !shellFn.includes("REMOTE_SKIN_JPG_B64"));
+  check("codex_webui.c: the legacy page keeps its embedded remote photo",
+    webuiC.includes('#include "remote_skin_jpg.h"') && /fputs\(REMOTE_SKIN_JPG_B64, f\);/.test(webuiC.replace(shellFn, "")));
+}
 
 /* -- shell content is the validated design, fully concatenated -------------- */
 
-check("shell.css: design tokens present", shellCss.includes("--surface-canvas") && shellCss.includes("--accent-primary"));
-check("shell.css: remote skin styles present", shellCss.includes(".ir-remote-skin"));
-check("shell.css: wizard styles present", shellCss.includes(".wiz-rail"));
+check("shell.css: design tokens present", shellCss.includes("--canvas") && shellCss.includes("--primary"));
+check("shell.css: no photo remote styles", !shellCss.includes(".ir-remote-skin") && !shellCss.includes(".remote-hotspot"));
+check("shell.css: wizard styles present", shellCss.includes(".wiz-progress"));
 check("shell.css: activity-overrides baked in", shellCss.includes("#view-activities .activity-hero"));
 
 /* -- vendor sources untouched and still identical --------------------------- */

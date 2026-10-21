@@ -1,582 +1,907 @@
-/* Guided activity setup: Basics → Devices → Buttons → Review.
-   Writes genuine graph resources via wizard-model; the full editor remains
-   the escape hatch for anything the wizard does not expose. */
+/* Activity setup (#wizard, #wizard/<id>, #wizard/<id>/buttons): the app's
+   ActivityEditor. Name and kind, which device does each job, inputs, what
+   the remote's buttons do, then a review (web-only) and save. Writes genuine
+   graph resources through wizard-model; the advanced editor (#editor) covers
+   the fields the wizard doesn't show. */
 
 import * as hub from "../state.js";
-import { REMOTE_BUTTONS, BUTTON_KEY_BY_LABEL } from "../remote-layout.js";
 import {
   ACTIVITY_TYPES,
-  ROLE_TYPES,
-  roleLabel,
-  inputOptions,
-  saveDraft,
   BUTTON_SOURCE,
+  ROLE_TYPES,
   draftButtonsFromMap,
-  reconcileWizardButtons,
-  resetWizardButtonsToDefaults,
-  revertWizardButtonToDefault,
-  wizardButtonStats,
+  inputOptions,
   mappingSourceLabel,
+  preferredDeviceForButtonKey,
+  reconcileWizardButtons,
+  saveDraft,
 } from "../wizard-model.js";
+import {
+  confirmDialog,
+  escapeHtml,
+  icon,
+  iconTile,
+  listRow,
+  openSheet,
+  sectionLabel,
+  setAppBar,
+  snackbar,
+  spinner,
+} from "../ui/shell.js";
+import { REMOTE_BUTTONS, commandKey } from "../remote-layout.js";
+import { KEY_LABELS, canonicalKey, deviceIconName, roleLabel } from "./remote-model.js";
 
 const STEPS = [
-  { id: "basics", label: "Name it" },
-  { id: "devices", label: "Pick devices" },
-  { id: "buttons", label: "Map buttons" },
-  { id: "review", label: "Review & save" },
+  { label: "Name", next: "Next: devices" },
+  { label: "Devices", next: "Next: inputs" },
+  { label: "Inputs", next: "Next: buttons" },
+  { label: "Buttons", next: "Next: review" },
+  { label: "Review", next: "Save activity" },
 ];
+const BUTTONS_STEP = 3;
 
-const SKIN_SRC = globalThis.REMOTE_SKIN_SRC || "/assets/remote-skin.jpg";
+/* The keys the wizard maps, grouped the way people think about a remote
+   (the app's BUTTON_GROUPS). PrevChannel is the remote's Back key. */
+const BUTTON_GROUPS = [
+  ["Volume & channel", ["VolumeUp", "VolumeDown", "VolumeMute", "ChannelUp", "ChannelDown"]],
+  ["Navigation", ["DirectionUp", "DirectionDown", "DirectionLeft", "DirectionRight", "Select", "PrevChannel", "Menu", "Exit", "Guide", "Info", "Dvr"]],
+  ["Playback", ["Play", "Pause", "Rewind", "FastForward", "Stop", "Record"]],
+  ["Colour keys", ["Red", "Green", "Yellow", "Blue"]],
+  ["Numbers", ["Number1", "Number2", "Number3", "Number4", "Number5", "Number6", "Number7", "Number8", "Number9", "Number0"]],
+];
+const ALL_KEYS = BUTTON_GROUPS.flatMap(([, keys]) => keys);
 
-const TEMPLATE = `
-  <div class="view-head">
-    <div>
-      <h2 id="title-wizard">Activity setup</h2>
-      <p class="view-lead">Four steps to a working activity: what it's called, which devices it uses, what the remote buttons do, then save. The full editor stays available for advanced fields.</p>
-    </div>
-    <div class="view-actions">
-      <a class="btn btn-ghost" href="#activities">All activities</a>
-      <a class="btn btn-ghost" href="#editor">Advanced editor</a>
-    </div>
-  </div>
-  <ol class="wiz-rail" id="wizRail"></ol>
-  <div class="wiz-body" id="wizBody"></div>
-  <div class="wiz-foot" id="wizFoot">
-    <p class="wiz-note" id="wizNote" role="status" aria-live="polite"></p>
-    <div class="wiz-foot-actions">
-      <button type="button" class="btn btn-ghost" id="wizBack">Back</button>
-      <button type="button" class="btn btn-primary" id="wizNext">Continue</button>
-    </div>
-  </div>`;
+/* The wait after a device turns on steps by half a second, up to 30 s. */
+const DELAY_STEP = 500;
+const DELAY_MAX = 30000;
 
-function escapeHtml(value) {
-  return String(value ?? "").replace(/[&<>"']/g, (c) =>
-    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
-}
+const JOB_RANK = new Map(ROLE_TYPES.map((t, i) => [t.type, i]));
+
+/* Back's aliases include "previous", which also matches "PreviousTrack": the
+   wizard only suggests a command named exactly Back, Return or Previous. */
+const BACK_NAMES = new Set(REMOTE_BUTTONS.find((b) => b.label === "Back").aliases.split("|").map(commandKey));
 
 function emptyDraft() {
-  return { name: "", type: 2, roles: [], buttons: {} };
+  return { name: "", type: 1, roles: [], buttons: {} };
 }
 
-let pendingEditId = "";
-
-export function setWizardEditId(id) {
-  pendingEditId = String(id ?? "");
+/* A new activity starts with the jobs most setups share, as the app does:
+   the first TV or projector shows the picture, and the first amplifier,
+   receiver or soundbar plays the sound. */
+function seededRoles(devices) {
+  const first = (pattern) => devices.find((d) => pattern.test(d.typeLabel));
+  return [
+    ["DisplayActivityRole", first(/television|projector/i)],
+    ["VolumeActivityRole", first(/amplifier|receiver|sound|speaker/i)],
+  ]
+    .filter(([, device]) => device)
+    .map(([roleType, device]) => ({ roleType, deviceId: device.id, input: "", powerDelay: "" }));
 }
 
-export function createWizardView(section) {
-  let mounted = false;
-  let els;
-  let step = 0;
-  let draft = emptyDraft();
-  let editId = "";
-  let selectedKey = null; // remote-layout label currently being assigned
-  let panelDeviceId = ""; // device chosen in the assign panel (survives re-renders)
-  let saved = null; // { activityId, name } after a successful save
-
-  function mount() {
-    if (mounted) return;
-    mounted = true;
-    section.innerHTML = TEMPLATE;
-    els = {
-      rail: section.querySelector("#wizRail"),
-      body: section.querySelector("#wizBody"),
-      note: section.querySelector("#wizNote"),
-      back: section.querySelector("#wizBack"),
-      next: section.querySelector("#wizNext"),
-    };
-    els.back.addEventListener("click", () => go(step - 1));
-    els.next.addEventListener("click", onNext);
-    els.body.addEventListener("click", onBodyClick);
-    els.body.addEventListener("change", onBodyChange);
-    els.body.addEventListener("input", onBodyInput);
-  }
-
-  /* -- navigation --------------------------------------------------- */
-
-  function syncButtonDefaults() {
-    draft.buttons = reconcileWizardButtons(
-      draft.buttons,
-      draft.roles,
-      hub.devices(),
-    );
-  }
-
-  function go(next) {
-    const target = Math.max(0, Math.min(STEPS.length - 1, next));
-    /* Entering the map step (or returning to it) always refreshes defaults
-       without clobbering user/existing mappings. */
-    if (target === 2) syncButtonDefaults();
-    step = target;
-    selectedKey = null;
-    render();
-  }
-
-  function onNext() {
-    const problem = validate(step);
-    if (problem) {
-      setNote(problem, true);
-      return;
-    }
-    if (step < STEPS.length - 1) {
-      go(step + 1);
-    } else {
-      save();
-    }
-  }
-
-  function validate(which) {
-    if (which === 0 && !draft.name.trim()) return "Give the activity a name to continue.";
-    if (which === 1 && !draft.roles.length) return "Add at least one device to continue.";
-    if (which === 1 && draft.roles.some((r) => !r.deviceId || !r.roleType)) {
-      return "Every device row needs a device and a job.";
-    }
-    return "";
-  }
-
-  function setNote(text, isError = false) {
-    els.note.textContent = text;
-    els.note.classList.toggle("is-error", isError);
-  }
-
-  /* -- render --------------------------------------------------------- */
-
-  function render() {
-    els.rail.innerHTML = STEPS.map((s, i) => {
-      const state = i < step ? "is-done" : i === step ? "is-current" : "";
-      return `<li class="${state}">
-        <span class="wiz-rail-dot">${i < step ? "✓" : i + 1}</span>
-        <span class="wiz-rail-label">${s.label}</span>
-      </li>`;
-    }).join("");
-
-    els.back.hidden = step === 0;
-    els.next.hidden = false;
-    els.next.textContent = step === STEPS.length - 1 ? "Save to hub" : "Continue";
-    setNote("");
-
-    if (step === 0) renderBasics();
-    else if (step === 1) renderDevices();
-    else if (step === 2) renderButtons();
-    else renderReview();
-  }
-
-  function renderBasics() {
-    els.body.innerHTML = `
-      <section class="panel wiz-panel">
-        <h3>${editId ? `Rework “${escapeHtml(draft.name)}”` : "What is this activity?"}</h3>
-        <p class="help">${editId
-          ? "Name, devices, and buttons below replace its current setup when you save; advanced fields you can't see here are preserved."
-          : "Examples: “Movie night”, “Saturday games”, “Vinyl”. The name shows on the remote's screen."}</p>
-        <label for="wizName">Activity name</label>
-        <input id="wizName" maxlength="96" value="${escapeHtml(draft.name)}" placeholder="Movie night" autocomplete="off">
-        <label>What kind of activity is it?</label>
-        <div class="wiz-kinds" role="group" aria-label="Activity kind">
-          ${ACTIVITY_TYPES.map((t) => `
-            <button type="button" class="wiz-kind ${Number(draft.type) === t.value ? "is-selected" : ""}" data-kind="${t.value}" aria-pressed="${Number(draft.type) === t.value}">
-              ${t.label}
-            </button>`).join("")}
-        </div>
-      </section>`;
-    section.querySelector("#wizName")?.focus();
-  }
-
-  function renderDevices() {
-    const devices = hub.devices();
-    els.body.innerHTML = `
-      <section class="panel wiz-panel">
-        <h3>Which devices take part?</h3>
-        <p class="help">Add each device this activity uses and give it a job. Devices power on in the order you add them — if one is slow to wake, give it a power-on delay.</p>
-        <div class="wiz-roles" id="wizRoles">
-          ${draft.roles.map((role, i) => roleRow(role, i, devices)).join("")}
-        </div>
-        <button type="button" class="btn btn-secondary" data-wiz="add-role" ${draft.roles.length >= devices.length ? "disabled" : ""}>Add a device</button>
-      </section>`;
-  }
-
-  function roleRow(role, i, devices) {
-    const device = devices.find((d) => d.id === role.deviceId);
-    const inputs = inputOptions(device);
-    const usedIds = new Set(draft.roles.map((r) => r.deviceId));
-    return `
-      <div class="wiz-role" data-role-index="${i}">
-        <div class="wiz-role-grid">
-          <div>
-            <label>Device</label>
-            <select data-field="deviceId">
-              <option value="">Choose a device…</option>
-              ${devices.map((d) => `<option value="${d.id}" ${d.id === role.deviceId ? "selected" : ""} ${usedIds.has(d.id) && d.id !== role.deviceId ? "disabled" : ""}>${escapeHtml(d.name)}</option>`).join("")}
-            </select>
-          </div>
-          <div>
-            <label>Its job</label>
-            <select data-field="roleType">
-              <option value="">Choose a job…</option>
-              ${ROLE_TYPES.map((r) => `<option value="${r.type}" ${r.type === role.roleType ? "selected" : ""}>${r.label}</option>`).join("")}
-            </select>
-          </div>
-          <div>
-            <label>Input on start</label>
-            <select data-field="input" ${inputs.length ? "" : "disabled"}>
-              <option value="">${inputs.length ? "No input change" : "No inputs set up (IR → Settings)"}</option>
-              ${inputs.map((o) => `<option value="${escapeHtml(o.value)}" ${o.value === role.input ? "selected" : ""}>${escapeHtml(o.value)}</option>`).join("")}
-            </select>
-          </div>
-          <div>
-            <label>Power-on delay (ms)</label>
-            <input data-field="powerDelay" inputmode="numeric" pattern="[0-9]*" placeholder="0" value="${escapeHtml(role.powerDelay ?? "")}">
-          </div>
-          <button type="button" class="btn btn-quiet btn-sm wiz-role-remove" data-wiz="remove-role" aria-label="Remove this device">Remove</button>
-        </div>
-        ${role.roleType ? `<p class="help">${ROLE_TYPES.find((r) => r.type === role.roleType)?.hint ?? ""}</p>` : ""}
-      </div>`;
-  }
-
-  function buttonCounterText() {
-    const stats = wizardButtonStats(draft.buttons);
-    const parts = [`${stats.mapped} of ${stats.assignable} keys mapped`];
-    if (stats.user) parts.push(`${stats.user} set by you`);
-    if (stats.defaults) parts.push(`${stats.defaults} wizard defaults`);
-    if (stats.existing) parts.push(`${stats.existing} from this activity`);
-    return parts.join(" · ");
-  }
-
-  function renderButtons() {
-    const assignable = REMOTE_BUTTONS.filter((b) => BUTTON_KEY_BY_LABEL[b.label]);
-    const stats = wizardButtonStats(draft.buttons);
-    els.body.innerHTML = `
-      <section class="panel wiz-panel">
-        <h3>What should the buttons do?</h3>
-        <p class="help">Keys start mapped from the devices and jobs you picked — transport on the player, volume on the volume device, channels and digits on the channel device when you have one. Click a key to change it. Soft glow is a wizard default; solid glow is something you set (or that was already on this activity).</p>
-        <p class="mini muted" id="wizMapStats">${escapeHtml(buttonCounterText())}</p>
-        <div class="wiz-map">
-          <div class="ir-remote-shell wiz-remote">
-            <div class="ir-remote-skin" id="wizRemoteBody" role="group" aria-label="Harmony remote — pick a key to map">
-              <img src="${SKIN_SRC}" alt="Harmony remote control layout" width="591" height="1280" draggable="false">
-              ${assignable.map((b) => {
-                const key = BUTTON_KEY_BY_LABEL[b.label];
-                const mapping = draft.buttons[key];
-                const mapped = Boolean(mapping?.command?.name);
-                const source = mapping?.source || "";
-                const sourceClass = !mapped
-                  ? ""
-                  : source === BUTTON_SOURCE.user || source === BUTTON_SOURCE.existing
-                    ? "is-mapped is-mapped-user"
-                    : "is-mapped is-mapped-default";
-                const sourceAria = mapped ? mappingSourceLabel(source) : "not mapped";
-                return `<button type="button"
-                  class="remote-hotspot wiz-key ${sourceClass} ${selectedKey === b.label ? "is-selected" : ""}"
-                  data-key-label="${escapeHtml(b.label)}"
-                  style="left:${b.x}%;top:${b.y}%;width:${b.w}%;height:${b.h}%"
-                  aria-label="${escapeHtml(b.label)} — ${sourceAria}"
-                  aria-pressed="${mapped}"></button>`;
-              }).join("")}
-            </div>
-          </div>
-          <div class="wiz-assign" id="wizAssign">
-            ${selectedKey ? assignPanel() : `
-              <div class="state-block">
-                <span class="state-title">No key selected</span>
-                Pick a key on the remote to change it — ${escapeHtml(buttonCounterText())}.
-              </div>
-              <div class="wiz-assign-actions" style="margin-top:var(--space-3)">
-                <button type="button" class="btn btn-quiet btn-sm" data-wiz="reset-defaults" ${stats.user ? "" : "disabled"}>
-                  Reset my changes to defaults
-                </button>
-              </div>`}
-          </div>
-        </div>
-      </section>`;
-  }
-
-  function defaultAssignDevice() {
-    const playback = draft.roles.find((r) => /Play|Channel/.test(r.roleType));
-    return playback?.deviceId ?? draft.roles[0]?.deviceId ?? hub.devices()[0]?.id ?? "";
-  }
-
-  function assignPanel() {
-    const key = BUTTON_KEY_BY_LABEL[selectedKey];
-    const existing = draft.buttons[key];
-    const devices = hub.devices();
-    const deviceId = panelDeviceId || existing?.deviceId || defaultAssignDevice();
-    const device = devices.find((d) => d.id === deviceId);
-    const source = existing?.source || "";
-    const sourceLine = existing
-      ? `Currently: ${mappingSourceLabel(source)}${existing.command?.name ? ` · ${existing.command.name}` : ""}.`
-      : "Currently unmapped.";
-    const canRevert =
-      existing &&
-      existing.source !== BUTTON_SOURCE.existing &&
-      existing.source === BUTTON_SOURCE.user;
-    return `
-      <div class="wiz-assign-head">
-        <h4>“${escapeHtml(selectedKey)}” sends…</h4>
-        <span class="mono muted">${escapeHtml(buttonCounterText())}</span>
-      </div>
-      <p class="mini muted">${escapeHtml(sourceLine)}</p>
-      <label for="wizAssignDevice">Device</label>
-      <select id="wizAssignDevice">
-        ${devices.map((d) => `<option value="${d.id}" ${d.id === deviceId ? "selected" : ""}>${escapeHtml(d.name)}</option>`).join("")}
-      </select>
-      <label for="wizAssignCommand">Command</label>
-      <input id="wizAssignCommand" list="wizCommandList" placeholder="Type to search commands…" value="${escapeHtml(existing?.command?.name ?? "")}" autocomplete="off">
-      <datalist id="wizCommandList">
-        ${(device?.commands ?? []).map((c) => `<option value="${escapeHtml(c.name)}">`).join("")}
-      </datalist>
-      <div class="wiz-hold">
-        <label class="wiz-hold-toggle" for="wizHoldToggle">
-          <input type="checkbox" id="wizHoldToggle" ${existing?.hold ? "checked" : ""}>
-          Holding the key does something else
-        </label>
-        <div id="wizHoldRow" ${existing?.hold ? "" : "hidden"}>
-          <label for="wizHoldCommand">Hold command (same device)</label>
-          <input id="wizHoldCommand" list="wizCommandList" placeholder="e.g. ${escapeHtml(existing?.command?.name ?? "Play")}" value="${escapeHtml(existing?.hold?.command?.name ?? "")}" autocomplete="off">
-        </div>
-      </div>
-      <div class="wiz-assign-actions">
-        <button type="button" class="btn btn-primary btn-sm" data-wiz="apply-key">Apply to “${escapeHtml(selectedKey)}”</button>
-        ${canRevert ? `<button type="button" class="btn btn-quiet btn-sm" data-wiz="revert-key">Reset this key to default</button>` : ""}
-        ${existing ? `<button type="button" class="btn btn-quiet btn-sm" data-wiz="clear-key">Remove mapping</button>` : ""}
-      </div>
-      <div class="wiz-assign-actions" style="margin-top:var(--space-2)">
-        <button type="button" class="btn btn-quiet btn-sm" data-wiz="reset-defaults">Reset my changes to defaults</button>
-      </div>`;
-  }
-
-  function renderReview() {
-    if (saved) {
-      els.body.innerHTML = `
-        <section class="panel wiz-panel wiz-done">
-          <h3>“${escapeHtml(saved.name)}” is saved</h3>
-          <p class="help">Written to the hub config and reloaded in the activity engine. It appears on the remote and in Control.</p>
-          <div class="actions">
-            <button type="button" class="btn btn-primary" data-wiz="run-saved">Run it now</button>
-            <a class="btn btn-secondary" href="#control">Open remote</a>
-            <a class="btn btn-quiet" href="#activities">All activities</a>
-            <button type="button" class="btn btn-quiet" data-wiz="again">Set up another</button>
-          </div>
-        </section>`;
-      els.next.hidden = true;
-      els.back.hidden = true;
-      setNote("");
-      return;
-    }
-    els.next.hidden = false;
-    const devices = hub.devices();
-    const mapped = Object.entries(draft.buttons);
-    els.body.innerHTML = `
-      <section class="panel wiz-panel">
-        <h3>Review “${escapeHtml(draft.name)}”</h3>
-        <p class="help">${editId ? "Saving replaces this activity's setup in place." : "Saving adds a new activity at the end of the remote's list."}</p>
-        <div class="wiz-review">
-          <div class="wiz-review-card">
-            <span class="eyebrow">Activity</span>
-            <strong>${escapeHtml(draft.name)}</strong>
-            <span class="muted">${ACTIVITY_TYPES.find((t) => t.value === Number(draft.type))?.label ?? "Activity"}</span>
-          </div>
-          <div class="wiz-review-card">
-            <span class="eyebrow">Devices · ${draft.roles.length}</span>
-            ${draft.roles.map((r) => {
-              const d = devices.find((x) => x.id === r.deviceId);
-              return `<span class="wiz-review-line"><strong>${escapeHtml(d?.name ?? r.deviceId)}</strong> — ${roleLabel(r.roleType)}${r.input ? ` · ${escapeHtml(r.input)}` : ""}${r.powerDelay ? ` · ${r.powerDelay}ms delay` : ""}</span>`;
-            }).join("")}
-          </div>
-          <div class="wiz-review-card">
-            <span class="eyebrow">Buttons · ${mapped.length}</span>
-            ${mapped.length ? mapped.map(([key, m]) => {
-              const d = devices.find((x) => x.id === m.deviceId);
-              return `<span class="wiz-review-line"><strong>${escapeHtml(key)}</strong> → ${escapeHtml(d?.name ?? m.deviceId)} · ${escapeHtml(m.command.name)}${m.hold?.command ? ` (hold: ${escapeHtml(m.hold.command.name)})` : ""} <span class="muted">(${escapeHtml(mappingSourceLabel(m.source))})</span></span>`;
-            }).join("") : `<span class="wiz-review-line muted">No buttons mapped — the activity still runs, and you can map keys later in the full editor.</span>`}
-          </div>
-        </div>
-      </section>`;
-  }
-
-  /* -- events --------------------------------------------------------- */
-
-  function onBodyClick(e) {
-    const kindBtn = e.target.closest("[data-kind]");
-    if (kindBtn) {
-      draft.type = Number(kindBtn.dataset.kind);
-      els.body.querySelectorAll(".wiz-kind").forEach((b) => {
-        const on = b === kindBtn;
-        b.classList.toggle("is-selected", on);
-        b.setAttribute("aria-pressed", String(on));
-      });
-      return;
-    }
-    const keyEl = e.target.closest(".wiz-key");
-    if (keyEl) {
-      selectedKey = keyEl.dataset.keyLabel;
-      panelDeviceId = draft.buttons[BUTTON_KEY_BY_LABEL[selectedKey]]?.deviceId ?? defaultAssignDevice();
-      renderButtons();
-      return;
-    }
-    const act = e.target.closest("[data-wiz]")?.dataset.wiz;
-    if (!act) return;
-    if (act === "add-role") {
-      const devices = hub.devices();
-      const free = devices.find((d) => !draft.roles.some((r) => r.deviceId === d.id));
-      draft.roles.push({ deviceId: free?.id ?? "", roleType: "", input: "", powerDelay: "" });
-      renderDevices();
-    } else if (act === "remove-role") {
-      const row = e.target.closest("[data-role-index]");
-      draft.roles.splice(Number(row.dataset.roleIndex), 1);
-      syncButtonDefaults();
-      renderDevices();
-    } else if (act === "apply-key") {
-      applyKey();
-    } else if (act === "clear-key") {
-      delete draft.buttons[BUTTON_KEY_BY_LABEL[selectedKey]];
-      renderButtons();
-    } else if (act === "revert-key") {
-      const key = BUTTON_KEY_BY_LABEL[selectedKey];
-      draft.buttons = revertWizardButtonToDefault(
-        draft.buttons,
-        key,
-        draft.roles,
-        hub.devices(),
-      );
-      renderButtons();
-    } else if (act === "reset-defaults") {
-      draft.buttons = resetWizardButtonsToDefaults(
-        draft.buttons,
-        draft.roles,
-        hub.devices(),
-      );
-      selectedKey = null;
-      renderButtons();
-    } else if (act === "run-saved" && saved) {
-      hub.setRunning(saved.activityId).then(() => { location.hash = "#control"; });
-    } else if (act === "again") {
-      draft = emptyDraft();
-      editId = "";
-      saved = null;
-      go(0);
-    }
-  }
-
-  function onBodyChange(e) {
-    const field = e.target.dataset.field;
-    if (field) {
-      const row = e.target.closest("[data-role-index]");
-      const role = draft.roles[Number(row.dataset.roleIndex)];
-      if (role) {
-        role[field] = e.target.value;
-        if (field === "deviceId" || field === "roleType") {
-          syncButtonDefaults();
-          renderDevices();
-        }
-      }
-      return;
-    }
-    if (e.target.id === "wizHoldToggle") {
-      section.querySelector("#wizHoldRow").hidden = !e.target.checked;
-      return;
-    }
-    if (e.target.id === "wizAssignDevice") {
-      panelDeviceId = e.target.value;
-      renderButtons();
-    }
-  }
-
-  function onBodyInput(e) {
-    if (e.target.id === "wizName") draft.name = e.target.value;
-  }
-
-  function pickStart(id) {
-    if (!id) {
-      editId = "";
-      draft = emptyDraft();
-      renderBasics();
-      return;
-    }
-    const activity = hub.activityById(id);
-    if (!activity) return;
-    editId = id;
-    draft = emptyDraft();
-    draft.name = hub.activityName(activity);
-    draft.type = Number(activity.Type ?? 1);
-    draft.roles = (activity.Roles ?? []).map((r) => ({
-      deviceId: String(r["DeviceId-"]),
+/* Roles in power-on order. Saving numbers the devices by their first role,
+   so loading them in the hub's order keeps that order. */
+function rolesOf(activity) {
+  return (activity.Roles ?? [])
+    .map((r, i) => ({ r, i }))
+    .sort((a, b) => (Number(a.r.PowerOnOrder) || 0) - (Number(b.r.PowerOnOrder) || 0) || a.i - b.i)
+    .map(({ r }) => ({
+      deviceId: r["DeviceId-"] == null ? "" : String(r["DeviceId-"]),
       roleType: String(r.__type ?? ""),
       input: r.SelectedInput?.Name ?? "",
       powerDelay: r.NextDevicePowerOnDelay ?? "",
     }));
-    const maps = hub.buttonMapsForActivity(id);
-    const surface = maps.find((m) => /^16414Activity/.test(String(m?.ButtonMapIdentifier ?? ""))) ?? maps[0];
-    draft.buttons = draftButtonsFromMap(surface);
-    /* Fill only keys the activity left empty — never replace existing. */
-    draft.buttons = reconcileWizardButtons(draft.buttons, draft.roles, hub.devices());
-    renderBasics();
+}
+
+/* Devices in power-on order, each once. */
+function deviceOrder(roles) {
+  return [...new Set(roles.map((r) => r.deviceId).filter(Boolean))];
+}
+
+/* A device's input is shared by all its jobs: the first one set wins. */
+function inputIn(roles, deviceId) {
+  return roles.find((r) => r.deviceId === deviceId && r.input)?.input ?? "";
+}
+
+function seconds(ms) {
+  const s = ms / 1000;
+  return `${Number.isInteger(s) ? s : s.toFixed(1)} s`;
+}
+
+function listNames(names) {
+  return names.length < 2 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
+}
+
+function intro(title, text) {
+  return `<div class="wiz-intro"><h2 tabindex="-1">${escapeHtml(title)}</h2><p>${escapeHtml(text)}</p></div>`;
+}
+
+/* A selector that finds the same control after the step is drawn again. */
+function focusKey(el, scope) {
+  if (!el || !scope.contains(el)) return "";
+  if (el.id) return `#${CSS.escape(el.id)}`;
+  return [...el.attributes]
+    .filter((a) => a.name.startsWith("data-"))
+    .map((a) => `[${a.name}="${CSS.escape(a.value)}"]`)
+    .join("");
+}
+
+export function createWizardView(section) {
+  let step = 0;
+  let draft = emptyDraft();
+  let editId = "";
+  let dirty = false; // something changed since the wizard opened
+  let saving = false;
+  let snapshot = {}; // the keys as the wizard opened them, for Undo
+  let cleared = new Set(); // keys the user cleared: suggestions stay out
+  let blocked = ""; // "error" | "missing" when there is nothing to edit
+  let sheet = null;
+  let showToken = 0;
+  let lastArgs = [];
+
+  section.innerHTML = `<div class="wiz" id="wizRoot"></div>`;
+  const root = section.querySelector("#wizRoot");
+
+  /* -- draft --------------------------------------------------------------- */
+
+  const devicesById = () => new Map(hub.devices().map((d) => [d.id, d]));
+  const deviceLabel = (byId, id) => byId.get(id)?.name ?? "Missing device";
+  const delayOf = (deviceId) => Number(draft.roles.find((r) => r.deviceId === deviceId)?.powerDelay) || 0;
+
+  function setForDevice(deviceId, field, value) {
+    for (const role of draft.roles) if (role.deviceId === deviceId) role[field] = value;
   }
 
-  function applyKey() {
-    const deviceId = section.querySelector("#wizAssignDevice").value || panelDeviceId;
-    const commandName = section.querySelector("#wizAssignCommand").value.trim();
-    const device = hub.deviceById(deviceId);
-    const command = device?.commands.find((c) => c.name === commandName);
-    if (!command) {
-      setNote(`“${commandName || "?"}” is not a command of ${device?.name ?? "that device"} — pick one from the list.`, true);
-      return;
+  function roleDevices() {
+    const byId = devicesById();
+    return deviceOrder(draft.roles).map((id) => byId.get(id)).filter(Boolean);
+  }
+
+  function sortedJobs() {
+    return draft.roles
+      .map((role, index) => ({ role, index }))
+      .sort((a, b) => (JOB_RANK.get(a.role.roleType) ?? 99) - (JOB_RANK.get(b.role.roleType) ?? 99) || a.index - b.index);
+  }
+
+  /* Keys whose device left the activity drop out; empty keys take the
+     suggestion, except keys the user cleared. What people set, or the
+     activity already had, stays. */
+  function syncButtonDefaults() {
+    draft.buttons = reconcileWizardButtons(draft.buttons, draft.roles, hub.devices());
+    for (const key of cleared) delete draft.buttons[key];
+    const back = draft.buttons.PrevChannel;
+    if (back?.source === BUTTON_SOURCE.default && !BACK_NAMES.has(commandKey(back.command.name))) delete draft.buttons.PrevChannel;
+  }
+
+  const changedKeys = () => ALL_KEYS.filter((k) => cleared.has(k) || draft.buttons[k]?.source === BUTTON_SOURCE.user);
+
+  /* Undo puts keys back as the wizard opened them: the activity's own
+     mapping, or the suggestion a new activity started with. */
+  function undoKeys(keys) {
+    for (const key of keys) {
+      cleared.delete(key);
+      if (snapshot[key]) draft.buttons[key] = structuredClone(snapshot[key]);
+      else delete draft.buttons[key];
     }
-    const holdOn = section.querySelector("#wizHoldToggle").checked;
-    const holdName = holdOn ? section.querySelector("#wizHoldCommand").value.trim() : "";
-    let hold = null;
-    if (holdName) {
-      const holdCommand = device.commands.find((c) => c.name === holdName);
-      if (!holdCommand) {
-        setNote(`Hold command “${holdName}” is not a command of ${device.name}.`, true);
-        return;
-      }
-      hold = { deviceId, command: { name: holdCommand.name, functionId: holdCommand.functionId } };
-    }
-    draft.buttons[BUTTON_KEY_BY_LABEL[selectedKey]] = {
+    syncButtonDefaults();
+  }
+
+  function changed() {
+    dirty = true;
+    render();
+  }
+
+  function rolesChanged() {
+    syncButtonDefaults();
+    changed();
+  }
+
+  function assignDevice(roleType, index, deviceId) {
+    const prev = index == null ? null : draft.roles[index];
+    if (prev?.deviceId === deviceId) return;
+    const others = draft.roles.filter((_, i) => i !== index);
+    const sibling = others.find((r) => r.deviceId === deviceId);
+    // The device's input and power-on wait come along from its other jobs;
+    // a device new to the activity starts without either.
+    const role = {
+      roleType,
       deviceId,
+      input: sibling ? inputIn(others, deviceId) : "",
+      powerDelay: sibling ? sibling.powerDelay : "",
+    };
+    if (prev) draft.roles[index] = role;
+    else draft.roles.push(role);
+    rolesChanged();
+  }
+
+  function removeJob(index) {
+    draft.roles.splice(index, 1);
+    rolesChanged();
+  }
+
+  function changeDelay(deviceId, direction) {
+    const ms = delayOf(deviceId);
+    const next = direction > 0
+      ? Math.min(DELAY_MAX, Math.floor(ms / DELAY_STEP) * DELAY_STEP + DELAY_STEP)
+      : Math.max(0, Math.ceil(ms / DELAY_STEP) * DELAY_STEP - DELAY_STEP);
+    setForDevice(deviceId, "powerDelay", next || "");
+    changed();
+    // At either end the pressed button turns off; keep focus on the stepper.
+    const pressed = root.querySelector(`[data-delay="${CSS.escape(deviceId)}"][data-delay-step="${direction}"]`);
+    if (pressed?.disabled) root.querySelector(`[data-delay="${CSS.escape(deviceId)}"][data-delay-step="${-direction}"]`)?.focus();
+  }
+
+  function setPress(key, device, command) {
+    const prev = draft.buttons[key];
+    cleared.delete(key);
+    draft.buttons[key] = {
+      deviceId: device.id,
       command: { name: command.name, functionId: command.functionId },
-      hold,
-      doublePress: draft.buttons[BUTTON_KEY_BY_LABEL[selectedKey]]?.doublePress ?? null,
+      hold: prev?.hold ?? null,
+      // A double-press action has no control here; it rides along untouched.
+      doublePress: prev?.doublePress ?? null,
       source: BUTTON_SOURCE.user,
     };
-    setNote("");
-    renderButtons();
+  }
+
+  function setHold(key, device, command) {
+    const prev = draft.buttons[key];
+    if (!prev) return;
+    draft.buttons[key] = {
+      ...prev,
+      hold: command ? { deviceId: device.id, command: { name: command.name, functionId: command.functionId } } : null,
+      source: BUTTON_SOURCE.user,
+    };
+  }
+
+  function draftFrom(activity) {
+    const next = emptyDraft();
+    next.name = hub.activityName(activity);
+    next.type = Number(activity.Type ?? 1);
+    next.roles = rolesOf(activity);
+    const maps = hub.buttonMapsForActivity(String(activity["Id-"]));
+    const surface = maps.find((m) => /^16414Activity/.test(String(m?.ButtonMapIdentifier ?? ""))) ?? maps[0];
+    // Real maps write some keys in either case ("DVR", "Dvr"): file them under
+    // the wizard's name, so the row shows them and saving writes one entry.
+    for (const [key, mapping] of Object.entries(draftButtonsFromMap(surface))) {
+      const name = canonicalKey(key) ?? key;
+      if (!next.buttons[name]) next.buttons[name] = mapping;
+    }
+    return next;
+  }
+
+  /* -- steps ------------------------------------------------------------------ */
+
+  function canAdvance(at = step) {
+    if (at === 0) return Boolean(draft.name.trim());
+    if (at === 1) return draft.roles.some((r) => r.deviceId);
+    return true;
+  }
+
+  function reachable(target) {
+    for (let i = 0; i < target; i += 1) if (!canAdvance(i)) return false;
+    return true;
+  }
+
+  /* Opened on a later step (Set up buttons), an earlier one can still be
+     missing something: say which, since Next stays off until it's done. */
+  function missingHint() {
+    if (step < 2 || reachable(step)) return "";
+    const at = [0, 1].find((i) => !canAdvance(i));
+    const what = at === 0 ? "give the activity a name" : "pick a device for at least one job";
+    return `<p class="wiz-hint">Go back to ${STEPS[at].label} and ${what} to save this activity.</p>`;
+  }
+
+  function progressMarkup() {
+    return `<nav class="wiz-progress" aria-label="Steps">${STEPS.map((s, i) => `<button type="button"
+        class="wiz-seg${i <= step ? " is-done" : ""}" data-go="${i}" aria-label="Step ${i + 1}: ${s.label}"${i === step ? ' aria-current="step"' : ""}${reachable(i) ? "" : " disabled"}></button>`).join("")}</nav>`;
+  }
+
+  function nameStep() {
+    return `${intro("What's this activity called?", "Pick a short name you'd say out loud, like “Watch TV” or “Xbox”.")}
+      <div class="wiz-field">
+        <label for="wizName">Name</label>
+        <input id="wizName" maxlength="96" autocomplete="off" enterkeyhint="next" value="${escapeHtml(draft.name)}">
+      </div>
+      <fieldset class="wiz-choices">
+        <legend class="wiz-label">What kind of activity is it?</legend>
+        ${ACTIVITY_TYPES.map((t) => {
+          const on = Number(draft.type) === t.value;
+          return `<label class="wiz-choice${on ? " is-selected" : ""}">
+              <input type="radio" name="wizKind" data-kind="${t.value}"${on ? " checked" : ""}>
+              <span class="wiz-choice-text">${escapeHtml(t.label)}</span>${on ? icon("check") : ""}
+            </label>`;
+        }).join("")}
+      </fieldset>`;
+  }
+
+  function powerMarkup(byId) {
+    const ids = deviceOrder(draft.roles);
+    if (ids.length < 2) return "";
+    return `${sectionLabel("Turning on")}
+      <p class="wiz-hint">Devices turn on in this order. Give a slow one time to wake up before the next one turns on.</p>
+      <div class="m-list">${ids.map((id, i) => {
+        const device = byId.get(id);
+        const name = deviceLabel(byId, id);
+        const ms = delayOf(id);
+        const last = i === ids.length - 1;
+        return `<div class="m-row wiz-power">
+            <span class="wiz-power-pos" aria-hidden="true">${i + 1}</span>
+            ${iconTile(device ? deviceIconName(device) : "tv", { size: 36 })}
+            <span class="m-row-text">
+              <span class="m-row-title">${escapeHtml(name)}</span>
+              <span class="m-row-sub">${last ? "Turns on last" : `Then wait ${seconds(ms)}`}</span>
+            </span>
+            ${last ? "" : `<span class="wiz-stepper" role="group" aria-label="${escapeHtml(`Wait after ${name}`)}">
+                <button type="button" class="icon-btn" data-delay="${escapeHtml(id)}" data-delay-step="-1" aria-label="${escapeHtml(`Wait less after ${name}, now ${seconds(ms)}`)}"${ms > 0 ? "" : " disabled"}>${icon("remove")}</button>
+                <button type="button" class="icon-btn" data-delay="${escapeHtml(id)}" data-delay-step="1" aria-label="${escapeHtml(`Wait longer after ${name}, now ${seconds(ms)}`)}"${ms < DELAY_MAX ? "" : " disabled"}>${icon("add")}</button>
+              </span>`}
+          </div>`;
+      }).join("")}</div>`;
+  }
+
+  function devicesStep() {
+    const byId = devicesById();
+    const free = ROLE_TYPES.some((t) => !draft.roles.some((r) => r.roleType === t.type));
+    return `${intro("Which device does what?", "We use this to turn the right things on and set up the buttons for you.")}
+      <div class="wiz-jobs">
+        ${sortedJobs().map(({ role, index }) => {
+          const device = byId.get(role.deviceId);
+          const name = device ? device.name : role.deviceId ? "Device not on this hub" : "Choose a device";
+          return `<button type="button" class="wiz-job" data-job="${index}" aria-haspopup="dialog">
+              ${iconTile(device ? deviceIconName(device) : "add", { size: 40 })}
+              <span class="wiz-job-text">
+                <span class="wiz-job-role">${escapeHtml(roleLabel(role.roleType))}</span>
+                <span class="wiz-job-device${device ? "" : " is-missing"}">${escapeHtml(name)}</span>
+              </span>
+              ${icon("keyboard_arrow_down", { cls: "wiz-job-caret" })}
+            </button>`;
+        }).join("")}
+        ${free ? `<button type="button" class="wiz-add" data-act="add-job" aria-haspopup="dialog">${icon("add")}<span>Add another job</span></button>` : ""}
+      </div>
+      ${canAdvance(1) ? "" : `<p class="wiz-hint">Pick a device for at least one job to continue.</p>`}
+      ${powerMarkup(byId)}`;
+  }
+
+  function inputsStep() {
+    const byId = devicesById();
+    const cards = [];
+    const none = [];
+    for (const id of deviceOrder(draft.roles)) {
+      const device = byId.get(id);
+      if (!device) continue;
+      const current = inputIn(draft.roles, id);
+      const names = inputOptions(device).map((o) => o.value);
+      // An input the device no longer lists still shows, so it can be seen and changed.
+      if (current && !names.includes(current)) names.unshift(current);
+      if (!names.length) {
+        none.push(device.name);
+        continue;
+      }
+      cards.push(`<section class="wiz-card" aria-label="${escapeHtml(device.name)}">
+          <div class="wiz-card-head">${iconTile(deviceIconName(device), { size: 36 })}<h3>${escapeHtml(device.name)}</h3></div>
+          <div class="wiz-chips" role="group" aria-label="${escapeHtml(`Input for ${device.name}`)}">
+            ${["", ...names].map((name) => `<button type="button" class="chip" data-input-device="${escapeHtml(id)}" data-input="${escapeHtml(name)}" aria-pressed="${name === current}">${escapeHtml(name || "Don't switch")}</button>`).join("")}
+          </div>
+        </section>`);
+    }
+    const rest = none.length && cards.length
+      ? `<p class="wiz-hint">${escapeHtml(listNames(none))} ${none.length === 1 ? "has" : "have"} no inputs set up, so ${none.length === 1 ? "it stays" : "they stay"} on whatever input ${none.length === 1 ? "it's" : "they're"} on.</p>`
+      : "";
+    return `${intro("Which input should each device use?", "When this activity starts, the hub switches each device to the input you pick here.")}
+      ${cards.length ? `<div class="wiz-cards">${cards.join("")}</div>${rest}` : `<p class="wiz-hint">Nothing to set. None of these devices need input switching.</p>`}`;
+  }
+
+  function buttonsStep() {
+    const byId = devicesById();
+    const mapped = ALL_KEYS.filter((k) => draft.buttons[k]?.command?.name).length;
+    return `${intro("Check the buttons", `We filled these in from the devices you picked. Tap any button to change what it does. ${mapped} of ${ALL_KEYS.length} set.`)}
+      <button type="button" class="btn btn-text wiz-reset" data-act="undo-buttons"${changedKeys().length ? "" : " disabled"}>Undo my changes</button>
+      ${BUTTON_GROUPS.map(([group, keys]) => `${sectionLabel(group)}
+        <div class="m-list">${keys.map((key) => {
+          const m = draft.buttons[key];
+          const set = Boolean(m?.command?.name);
+          return `<button type="button" class="m-row wiz-key" data-key="${key}" aria-haspopup="dialog">
+              <span class="wiz-key-name">${escapeHtml(KEY_LABELS[key])}</span>
+              <span class="wiz-key-value${set ? "" : " is-unset"}">
+                ${set
+                  ? `<span class="wiz-key-line"><span class="wiz-key-device">${escapeHtml(deviceLabel(byId, m.deviceId))}</span><span class="wiz-key-cmd">&nbsp;· ${escapeHtml(m.command.name)}</span></span>`
+                  : "<span>Not set</span>"}
+                ${set && m.hold?.command?.name ? `<span class="wiz-key-hold">Hold: ${escapeHtml(m.hold.command.name)}</span>` : ""}
+              </span>
+            </button>`;
+        }).join("")}</div>`).join("")}`;
+  }
+
+  function reviewStep() {
+    const byId = devicesById();
+    const name = draft.name.trim();
+    const kind = ACTIVITY_TYPES.find((t) => t.value === Number(draft.type))?.label ?? "Activity";
+    const jobs = sortedJobs().map(({ role }) => `${roleLabel(role.roleType)}: ${deviceLabel(byId, role.deviceId)}`);
+    const order = deviceOrder(draft.roles);
+    const waits = order.slice(0, -1).filter((id) => delayOf(id))
+      .map((id) => `waits ${seconds(delayOf(id))} after ${deviceLabel(byId, id)}`);
+    const inputs = order.filter((id) => inputIn(draft.roles, id))
+      .map((id) => `${deviceLabel(byId, id)} → ${inputIn(draft.roles, id)}`);
+    const mapped = ALL_KEYS.filter((k) => draft.buttons[k]?.command?.name).length;
+    const changedByYou = changedKeys().length;
+    return `${intro(
+        editId ? `Save “${name}”?` : "Ready to save?",
+        editId
+          ? "Saving replaces this activity's name, devices, inputs and buttons on the hub. Everything else about it stays as it is."
+          : `“${name}” goes at the end of the remote's list of activities.`,
+      )}
+      <div class="m-list">
+        ${listRow({ title: "Name", subtitle: `${name} · ${kind}`, chevron: true, attrs: 'data-go="0"' })}
+        ${listRow({ title: "Devices", subtitle: [...jobs, ...waits].join(" · ") || "None yet", chevron: true, attrs: 'data-go="1"' })}
+        ${listRow({ title: "Inputs", subtitle: inputs.join(" · ") || "No input switching", chevron: true, attrs: 'data-go="2"' })}
+        ${listRow({ title: "Buttons", subtitle: `${mapped} of ${ALL_KEYS.length} set${changedByYou ? ` · ${changedByYou} changed by you` : ""}`, chevron: true, attrs: 'data-go="3"' })}
+      </div>`;
+  }
+
+  function footMarkup() {
+    return `<div class="wiz-foot">
+        ${step > 0 ? `<button type="button" class="btn btn-outlined" data-act="back"${saving ? " disabled" : ""}>Back</button>` : ""}
+        <button type="button" class="btn btn-filled${saving ? " is-busy" : ""}" data-act="next"${canAdvance() && reachable(step) ? "" : " disabled"}${saving ? ' aria-busy="true"' : ""}>
+          ${saving ? `${spinner()}Saving to hub…` : STEPS[step].next}
+        </button>
+      </div>`;
+  }
+
+  /* -- drawing ------------------------------------------------------------------ */
+
+  function updateBar() {
+    if (section.hidden) return;
+    setAppBar({
+      title: editId ? `Edit “${draft.name.trim() || "activity"}”` : "New activity",
+      back: "activities",
+      close: true,
+      onBack: requestClose,
+      actions: blocked ? "" : `<span class="appbar-note">Step ${step + 1} of ${STEPS.length}</span>`,
+    });
+  }
+
+  function render() {
+    updateBar();
+    if (blocked) return;
+    const keep = focusKey(document.activeElement, root);
+    const body = [nameStep, devicesStep, inputsStep, buttonsStep, reviewStep][step]();
+    root.innerHTML = `${progressMarkup()}<div class="wiz-body">${body}${missingHint()}</div>${footMarkup()}`;
+    if (keep) root.querySelector(keep)?.focus({ preventScroll: true });
+  }
+
+  function renderBlocked(kind) {
+    blocked = kind;
+    updateBar();
+    root.innerHTML = kind === "missing"
+      ? `<div class="m-empty">
+          ${iconTile("info_outlined", { size: 64 })}
+          <h2 class="m-empty-title">This activity isn't on the hub any more</h2>
+          <p class="m-empty-body">It may have been deleted from another screen.</p>
+          <a class="btn btn-filled" href="#activities">Back to activities</a>
+        </div>`
+      : `<div class="m-empty">
+          ${iconTile("wifi_off", { size: 64, tone: "error" })}
+          <h2 class="m-empty-title">Can't reach your hub</h2>
+          <p class="m-empty-body">${escapeHtml(hub.state.configError?.message || "The hub didn't answer.")}</p>
+          <button type="button" class="btn btn-filled" data-act="retry">Try again</button>
+        </div>`;
+  }
+
+  function go(target) {
+    const next = Math.max(0, Math.min(STEPS.length - 1, target));
+    if (next === step || !reachable(next)) return;
+    if (next === BUTTONS_STEP) syncButtonDefaults();
+    step = next;
+    render();
+    window.scrollTo(0, 0);
+    root.querySelector(".wiz-intro h2")?.focus({ preventScroll: true });
+  }
+
+  function next() {
+    if (saving || !canAdvance() || !reachable(step)) return;
+    if (step < STEPS.length - 1) go(step + 1);
+    else save();
   }
 
   async function save() {
-    els.next.disabled = true;
-    setNote("Saving to the hub…");
+    saving = true;
+    render();
     try {
       const outcome = await saveDraft({
         config: hub.state.config,
         revision: hub.state.config?.revision,
-        draft,
+        // A job must have a device; a broken one from old data is left out.
+        draft: { ...draft, roles: draft.roles.filter((r) => r.deviceId) },
         editId: editId || null,
       });
-      saved = { activityId: outcome.activityId, name: outcome.name };
+      dirty = false;
       await hub.reloadConfig();
-      renderReview();
+      snackbar(`Saved “${outcome.name}”`);
+      if (!section.hidden) location.hash = "#activities";
     } catch (error) {
-      setNote(`Save failed: ${error.message}`, true);
+      // A refused save usually means the setup changed elsewhere: reload it,
+      // so trying again saves onto the latest copy.
+      await hub.reloadConfig();
+      snackbar(`Couldn't save — ${error.message || "hub error"}. The latest setup is reloaded; try again.`, { error: true });
     } finally {
-      els.next.disabled = false;
+      saving = false;
+      if (!section.hidden) render();
     }
   }
 
-  mount();
+  /* Asked by the close button and by the router, so the browser's Back and
+     the navigation rail can't drop changes silently either. */
+  async function confirmDiscard() {
+    if (saving) {
+      snackbar("Saving to the hub… one moment");
+      return false;
+    }
+    if (!dirty) return true;
+    const discard = await confirmDialog({
+      title: "Discard changes?",
+      text: "Nothing has been saved to the hub yet.",
+      confirmLabel: "Discard",
+      destructive: true,
+    });
+    if (discard) dirty = false;
+    return discard;
+  }
 
-  return {
-    async onShow() {
-      await hub.ensureConfig();
+  async function requestClose() {
+    if (saving) return;
+    if (await confirmDiscard()) location.hash = "#activities";
+  }
+
+  /* -- sheets --------------------------------------------------------------------- */
+
+  function closeSheet() {
+    sheet?.close();
+    sheet = null;
+  }
+
+  /* close fires asynchronously: forget only this sheet, and only put focus
+     back when no other sheet has opened in the meantime. */
+  function trackSheet(options, focusSelector) {
+    const opened = openSheet({
+      ...options,
+      onClose: () => {
+        if (sheet === opened) sheet = null;
+        if (!sheet) root.querySelector(focusSelector())?.focus();
+      },
+    });
+    sheet = opened;
+    return opened;
+  }
+
+  function openJobPicker() {
+    closeSheet();
+    const free = ROLE_TYPES.filter((t) => !draft.roles.some((r) => r.roleType === t.type));
+    trackSheet({
+      label: "Add a job",
+      render: (content, close) => {
+        content.innerHTML = `<h2 class="sheet-title">What should it do?</h2>
+          <div class="sheet-rows">${free.map((t) => `<button type="button" class="sheet-row" data-pick-job="${t.type}">
+              <span class="sheet-row-text"><span class="sheet-row-title">${escapeHtml(roleLabel(t.type))}</span><span class="sheet-row-sub">${escapeHtml(t.hint)}</span></span>
+            </button>`).join("")}</div>`;
+        content.addEventListener("click", (event) => {
+          const row = event.target.closest("[data-pick-job]");
+          if (!row) return;
+          close();
+          openDevicePicker(row.dataset.pickJob, null);
+        });
+      },
+    }, () => '[data-act="add-job"]');
+  }
+
+  function openDevicePicker(roleType, index) {
+    closeSheet();
+    const current = index == null ? null : draft.roles[index];
+    const devices = hub.devices();
+    trackSheet({
+      label: roleLabel(roleType),
+      render: (content, close) => {
+        content.innerHTML = `<h2 class="sheet-title">${escapeHtml(roleLabel(roleType))}</h2>
+          ${devices.length ? "" : `<p class="sheet-text">There are no devices on this hub yet. Add one in Devices first.</p>`}
+          <div class="sheet-rows">
+            ${devices.map((d) => {
+              const on = current?.deviceId === d.id;
+              const sub = [d.manufacturer, d.model].filter(Boolean).join(" ");
+              return `<button type="button" class="sheet-row${on ? " is-selected" : ""}" data-pick-device="${escapeHtml(d.id)}">
+                  ${iconTile(deviceIconName(d), { size: 40 })}
+                  <span class="sheet-row-text"><span class="sheet-row-title">${escapeHtml(d.name)}</span>${sub ? `<span class="sheet-row-sub">${escapeHtml(sub)}</span>` : ""}</span>
+                  ${on ? icon("check", { cls: "sheet-row-check", label: "Selected" }) : ""}
+                </button>`;
+            }).join("")}
+            ${current ? `<button type="button" class="sheet-row is-destructive" data-pick-remove><span class="sheet-row-title">Not used in this activity</span></button>` : ""}
+          </div>`;
+        content.addEventListener("click", (event) => {
+          const row = event.target.closest("[data-pick-device]");
+          if (row) {
+            close();
+            assignDevice(roleType, index, row.dataset.pickDevice);
+          } else if (event.target.closest("[data-pick-remove]")) {
+            close();
+            removeJob(index);
+          }
+        });
+      },
+    }, () => {
+      const at = draft.roles.findIndex((r) => r.roleType === roleType);
+      return at >= 0 ? `[data-job="${at}"]` : '[data-act="add-job"]';
+    });
+  }
+
+  /* One key: Press and Hold tabs, the activity's devices as chips, then that
+     device's commands. Picking a command sets it and closes the sheet. */
+  function openKeySheet(key) {
+    closeSheet();
+    const devices = roleDevices();
+    const label = KEY_LABELS[key];
+    const mapping = () => draft.buttons[key] ?? null;
+    let tab = "press";
+    let query = "";
+    const startDevice = () => {
+      const m = mapping();
+      const want = tab === "hold"
+        ? m?.hold?.deviceId || m?.deviceId
+        : m?.deviceId || preferredDeviceForButtonKey(key, draft.roles);
+      return devices.some((d) => d.id === want) ? want : devices[0]?.id ?? "";
+    };
+    let deviceId = startDevice();
+
+    const opened = trackSheet({
+      label: `${label} button`,
+      className: "pick-sheet",
+      render: (content, close) => {
+        content.innerHTML = `<div class="pick-top">
+            <div class="pick-head">
+              <h2 class="sheet-title" tabindex="-1" autofocus>“${escapeHtml(label)}” button</h2>
+              <span data-pick-clear></span>
+            </div>
+            <p class="pick-now" data-pick-now></p>
+            <div class="seg-tabs" role="tablist" aria-label="When the key is">
+              <button type="button" role="tab" class="seg-tab" data-pick-tab="press">Press</button>
+              <button type="button" role="tab" class="seg-tab" data-pick-tab="hold">Hold</button>
+            </div>
+            <div class="pick-chips" role="group" aria-label="Device" data-pick-chips></div>
+            <label class="search-field">${icon("search", { size: 22 })}<input type="search" data-pick-search placeholder="Search commands" aria-label="Search commands" autocomplete="off"></label>
+          </div>
+          <div class="pick-list" data-pick-list></div>
+          <div class="pick-foot" data-pick-foot></div>`;
+        const $ = (selector) => content.querySelector(selector);
+
+        function drawTop() {
+          const m = mapping();
+          const byId = devicesById();
+          $("[data-pick-clear]").innerHTML = m ? `<button type="button" class="btn btn-text is-destructive" data-pick="clear">Clear</button>` : "";
+          $("[data-pick-now]").textContent = m?.command?.name
+            ? `Now: ${deviceLabel(byId, m.deviceId)} · ${m.command.name}${m.hold?.command?.name ? ` · hold: ${m.hold.command.name}` : ""} (${mappingSourceLabel(m.source)})`
+            : "Not set yet.";
+          content.querySelectorAll("[data-pick-tab]").forEach((b) => {
+            b.setAttribute("aria-selected", String(b.dataset.pickTab === tab));
+            if (b.dataset.pickTab === "hold") b.disabled = !m;
+          });
+          $("[data-pick-chips]").innerHTML = devices.map((d) => `<button type="button" class="chip" data-pick-device="${escapeHtml(d.id)}" aria-pressed="${d.id === deviceId}">${escapeHtml(d.name)}</button>`).join("");
+          $("[data-pick-foot]").innerHTML = changedKeys().includes(key)
+            ? `<button type="button" class="btn btn-text" data-pick="undo">Undo my change</button>`
+            : "";
+        }
+
+        function drawList() {
+          const m = mapping();
+          const device = devices.find((d) => d.id === deviceId);
+          const q = query.trim().toLowerCase();
+          const current = tab === "hold" ? m?.hold : m;
+          const check = icon("check", { cls: "pick-check", label: "Current" });
+          const rows = (device?.commands ?? [])
+            .map((c, i) => ({ c, i }))
+            .filter(({ c }) => !q || c.name.toLowerCase().includes(q))
+            .map(({ c, i }) => {
+              const on = current?.deviceId === deviceId && current?.command?.name === c.name;
+              return `<button type="button" class="pick-row${on ? " is-current" : ""}" data-pick-command="${i}"><span>${escapeHtml(c.name)}</span>${on ? check : ""}</button>`;
+            });
+          const none = tab === "hold" && !q
+            ? `<button type="button" class="pick-row${m?.hold ? "" : " is-current"}" data-pick-none><span>No hold action</span>${m?.hold ? "" : check}</button>`
+            : "";
+          $("[data-pick-list]").innerHTML = !device
+            ? `<p class="list-note">Choose the activity's devices first.</p>`
+            : rows.length || none
+              ? none + rows.join("")
+              : `<p class="list-note">Nothing matches “${escapeHtml(query.trim())}”.</p>`;
+        }
+
+        // After a new tab or device, show the command in use, else the top.
+        function showCurrent() {
+          const row = $(".pick-row.is-current");
+          if (row) row.scrollIntoView({ block: "center" });
+          else content.scrollTop = 0;
+        }
+
+        function finish(update) {
+          update();
+          close();
+          changed();
+        }
+
+        content.addEventListener("click", (event) => {
+          const tabBtn = event.target.closest("[data-pick-tab]");
+          if (tabBtn) {
+            if (tabBtn.disabled || tabBtn.dataset.pickTab === tab) return;
+            tab = tabBtn.dataset.pickTab;
+            deviceId = startDevice();
+            drawTop();
+            drawList();
+            showCurrent();
+            return;
+          }
+          const chip = event.target.closest("[data-pick-device]");
+          if (chip) {
+            deviceId = chip.dataset.pickDevice;
+            drawTop();
+            drawList();
+            showCurrent();
+            return;
+          }
+          const row = event.target.closest("[data-pick-command]");
+          if (row) {
+            const device = devices.find((d) => d.id === deviceId);
+            const command = device?.commands[Number(row.dataset.pickCommand)];
+            if (command) finish(() => (tab === "hold" ? setHold(key, device, command) : setPress(key, device, command)));
+            return;
+          }
+          if (event.target.closest("[data-pick-none]")) {
+            finish(() => setHold(key, null, null));
+            return;
+          }
+          const act = event.target.closest("[data-pick]")?.dataset.pick;
+          if (act === "clear") {
+            finish(() => {
+              delete draft.buttons[key];
+              cleared.add(key);
+            });
+          } else if (act === "undo") finish(() => undoKeys([key]));
+        });
+
+        content.addEventListener("input", (event) => {
+          if (!event.target.matches("[data-pick-search]")) return;
+          query = event.target.value;
+          drawList();
+          content.scrollTop = 0;
+        });
+
+        drawTop();
+        drawList();
+      },
+    }, () => `[data-key="${key}"]`);
+    // Open on the command the key sends now, as the app does.
+    opened.content.querySelector(".pick-row.is-current")?.scrollIntoView({ block: "center" });
+  }
+
+  /* -- events ---------------------------------------------------------------------- */
+
+  root.addEventListener("click", (event) => {
+    if (saving) return;
+    const seg = event.target.closest("[data-go]");
+    if (seg) {
+      go(Number(seg.dataset.go));
+      return;
+    }
+    const job = event.target.closest("[data-job]");
+    if (job) {
+      const index = Number(job.dataset.job);
+      openDevicePicker(draft.roles[index].roleType, index);
+      return;
+    }
+    const chip = event.target.closest("[data-input-device]");
+    if (chip) {
+      setForDevice(chip.dataset.inputDevice, "input", chip.dataset.input);
+      changed();
+      return;
+    }
+    const delay = event.target.closest("[data-delay]");
+    if (delay) {
+      changeDelay(delay.dataset.delay, Number(delay.dataset.delayStep));
+      return;
+    }
+    const key = event.target.closest("[data-key]");
+    if (key) {
+      openKeySheet(key.dataset.key);
+      return;
+    }
+    const act = event.target.closest("[data-act]")?.dataset.act;
+    if (act === "next") next();
+    else if (act === "back") go(step - 1);
+    else if (act === "add-job") openJobPicker();
+    else if (act === "undo-buttons") {
+      undoKeys(changedKeys());
+      changed();
+    } else if (act === "retry") hub.reloadConfig().then(() => view.onShow({ args: lastArgs }));
+  });
+
+  root.addEventListener("input", (event) => {
+    if (event.target.id !== "wizName") return;
+    draft.name = event.target.value;
+    dirty = true;
+    // Typing doesn't redraw the step; just follow it in the title and buttons.
+    updateBar();
+    const nextButton = root.querySelector('[data-act="next"]');
+    if (nextButton) nextButton.disabled = !canAdvance() || !reachable(step);
+    root.querySelectorAll("[data-go]").forEach((b) => {
+      b.disabled = !reachable(Number(b.dataset.go));
+    });
+  });
+
+  root.addEventListener("change", (event) => {
+    const kind = event.target.closest("[data-kind]");
+    if (!kind) return;
+    draft.type = Number(kind.dataset.kind);
+    changed();
+  });
+
+  root.addEventListener("keydown", (event) => {
+    if (event.target.id === "wizName" && event.key === "Enter") {
+      event.preventDefault();
+      next();
+    }
+  });
+
+  window.addEventListener("beforeunload", (event) => {
+    if (!dirty || section.hidden) return;
+    event.preventDefault();
+    event.returnValue = "";
+  });
+
+  const view = {
+    async onShow({ args = [] } = {}) {
+      const token = (showToken += 1);
+      lastArgs = args;
+      closeSheet();
+      step = 0;
       draft = emptyDraft();
       editId = "";
-      saved = null;
-      step = 0;
-      if (pendingEditId && hub.activityById(pendingEditId)) {
-        pickStart(pendingEditId);
+      dirty = false;
+      saving = false;
+      blocked = "";
+      cleared = new Set();
+      root.innerHTML = `<div class="m-center">${spinner("Loading")}</div>`;
+      updateBar();
+      await hub.ensureConfig();
+      if (token !== showToken || section.hidden) return;
+      if (hub.state.configError) {
+        renderBlocked("error");
+        return;
       }
-      pendingEditId = "";
+      let id = args[0] ?? "";
+      try {
+        id = decodeURIComponent(id);
+      } catch (_) {
+        // A malformed escape is just an unknown activity.
+      }
+      if (id) {
+        const activity = hub.activityById(id);
+        if (!activity) {
+          renderBlocked("missing");
+          return;
+        }
+        editId = id;
+        draft = draftFrom(activity);
+        if (args[1] === "buttons") step = BUTTONS_STEP;
+      } else {
+        draft.roles = seededRoles(hub.devices());
+      }
+      syncButtonDefaults();
+      snapshot = structuredClone(draft.buttons);
       render();
+      // A new activity starts in the name field, except on touch screens where
+      // that would cover the screen with the keyboard.
+      const typing = !editId && window.matchMedia?.("(pointer: fine)").matches;
+      root.querySelector(typing ? "#wizName" : ".wiz-intro h2")?.focus({ preventScroll: true });
     },
-    onHide() {},
+    onHide() {
+      showToken += 1;
+      closeSheet();
+    },
+    confirmLeave: confirmDiscard,
   };
+  return view;
 }
