@@ -12,6 +12,11 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import crypto from "node:crypto";
+import {
+  applyDeviceSettings,
+  commandNames,
+  validateDeviceSettings,
+} from "./public/js/views/device-settings-model.js";
 
 const SIM_DIR = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(SIM_DIR, "public");
@@ -202,6 +207,36 @@ function handleActivityConfig(res) {
     mapList: state.mapList,
     functionList: state.functionList,
     deviceList: state.deviceList
+  });
+}
+
+// The hub's codexactivity CommitDeviceSettings, against the fixture.
+function handleDeviceSettings(res, params) {
+  const deviceId = String(params.deviceId ?? "");
+  const settings = params.settings;
+  if (!/^\d{1,18}$/.test(deviceId) || !settings || typeof settings !== "object" || Array.isArray(settings)) {
+    sendError(res, 400, "body must contain a numeric deviceId and a settings object");
+    return;
+  }
+  const devices = state.deviceList.DevicesWithFeatures;
+  const index = devices.findIndex((entry) => String(entry?.Device?.["Id-"]) === deviceId);
+  if (index < 0) {
+    sendError(res, 422, `DeviceList has no device ${deviceId}`);
+    return;
+  }
+  const errors = validateDeviceSettings(settings, commandNames(devices[index]));
+  if (errors.length) {
+    sendError(res, 422, errors.join(" "));
+    return;
+  }
+  devices[index] = applyDeviceSettings(devices[index], settings);
+  logEvent({ kind: "device-settings", deviceId });
+  sendJson(res, 200, {
+    ok: true,
+    saved: true,
+    localOnly: true,
+    deviceId,
+    message: "Device settings were saved and reloaded in the Hub engine."
   });
 }
 
@@ -499,6 +534,9 @@ async function handleApi(req, res, pathname, url) {
       return;
     case "POST /api/activity-sync":
       handleActivitySync(res);
+      return;
+    case "POST /api/device-settings":
+      handleDeviceSettings(res, params);
       return;
     case "GET /api/inventory":
       handleInventory(res);

@@ -17,9 +17,9 @@ official Zig 0.16.0 pin:
 The exact source tuples (from the verified webui-repro and
 zig-distribution-sweep pilot reports):
 
-  codex_webui.c          8c2a8a74c4fd9cc9e9ae494b0c2a5ac0c43c6c69 (box 2026-10-20 + LED + state-digest endpoints + system-status, delete guard, RAM agent logs)
+  codex_webui.c          122236f80acf246926775c93bb9eed13731b7815 (box 2026-10-20 + LED + state-digest endpoints + system-status, delete guard, RAM agent logs, device settings)
   activity_ui_assets.h   5dad607f7c09a0d5cc0034969b76e6c5df1eb2bc
-  harmony_shell_assets.h f58871bc2e15c783959f2e2ea178eda7e8acca41 (box 2026-10-20 + state-digest liveness + integrity fixes)
+  harmony_shell_assets.h 5e71cca6d0d2bc1da4b19ce55b4d29ce042394b0 (box 2026-10-20 + state-digest liveness + integrity fixes + device settings)
   remote_skin_jpg.h      419611c5ff0713f1f5de2dd684d699f6d77238d5
   codex_hbus.c           d2bbcdef214369bff3dacf1836d6b5a0057f5ede (309cec3)
 
@@ -76,9 +76,9 @@ BUILD_SCRIPT = os.path.join(REPO_ROOT, "build", "build_harmony_tools_kali.sh")
 #: constants from the verified pilot reports.
 PINNED_SOURCES = {
     "codex_webui.c": (
-        "8c2a8a74c4fd9cc9e9ae494b0c2a5ac0c43c6c69",
-        "e0eb0d16696611fd6c15f515a1f110d85649c9a7416471fa2411e385f1f54af2",
-        536075,
+        "122236f80acf246926775c93bb9eed13731b7815",
+        "728ff20d28fe6dfddae841221d251114cfc6d9684dc03adef6911ee0c72425bb",
+        539571,
     ),
     "activity_ui_assets.h": (
         "5dad607f7c09a0d5cc0034969b76e6c5df1eb2bc",
@@ -86,9 +86,9 @@ PINNED_SOURCES = {
         502204,
     ),
     "harmony_shell_assets.h": (
-        "f58871bc2e15c783959f2e2ea178eda7e8acca41",
-        "4975fd48bcf94184b38443b769cd2b308d7c4e8c5ede912af1d78fe377f92a9a",
-        1430860,
+        "5e71cca6d0d2bc1da4b19ce55b4d29ce042394b0",
+        "a5ea55ca0addd398e6b0a7efae293535f820096ba79db672ac4e701a3faae961",
+        1468019,
     ),
     "remote_skin_jpg.h": (
         "419611c5ff0713f1f5de2dd684d699f6d77238d5",
@@ -105,8 +105,8 @@ PINNED_SOURCES = {
 #: exact live binary targets (verified pilot reports)
 TARGETS = {
     "codex_webui": (
-        "cd5352f1214ab2428e5ee53e3f14a686b421d016c34164a981c8c606933b09fa",
-        976292,
+        "24940b4a3890ac8294261a98e705a3942e8bd5ece2f0d3ef97c0de61339ddbc7",
+        985284,
     ),
     "codex_bt_pair_agent": (
         "563c6c58a3629edfebd7ec30ebcf14e6384a2d84e89669b1d7c3d79c75b619c8",
