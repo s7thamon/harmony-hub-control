@@ -432,6 +432,31 @@ configuration files or credentials, performs no WAN request, and remains below
 64 KiB. When Basic authentication is enabled, this route returns `401` without
 valid credentials.
 
+## LED
+
+Set the hub's front LED to one of the hardware daemon's named states. This drives
+the hardware directly (the same `sys.led` control the firmware uses internally),
+so it is useful for locating a hub, confirming control works, or signalling from
+an automation.
+
+```powershell
+Invoke-RestMethod "http://<hub-ip>:8080/api/led" -Method Post -Body @{
+  action = "pairing_start"
+}
+```
+
+```json
+{ "ok": true, "action": "pairing_start", "code": 200, "reply": "{\"code\":200,...}" }
+```
+
+`action` must be one of the states the hardware daemon accepts:
+`config_success`, `config_failure`, `pairing_start`, `pairing_stop`, `sync_start`,
+`sync_stop`, `fire_command`, `fw_download_start`, `fw_download_stop`,
+`extender_mode`, `non_extender_mode`. Any other value returns `400`. `ok` is true
+only when the hardware daemon replies with code `200`. The LED is a status
+indicator, so the firmware may overwrite the state on its next event (for example
+when an activity starts). See `PROTOCOLS.md` for the `sys.led` command.
+
 ## Exports
 
 ```text
