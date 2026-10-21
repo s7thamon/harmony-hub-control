@@ -6436,6 +6436,53 @@ static void render_ir_send_json(int fd, const struct request *req) {
     fclose(f);
 }
 
+/* Direct front-LED control.  The hub's hardware daemon drives the front LED
+ * through sys.led {action:"<state>"}; the valid states are the exact names the
+ * stock engine uses (confirmed against the hardware daemon).  We validate
+ * against that set so only states the daemon accepts ever reach it. */
+static int led_action_is_valid(const char *action) {
+    static const char *const valid[] = {
+        "config_success", "config_failure",
+        "pairing_start", "pairing_stop",
+        "sync_start", "sync_stop",
+        "fire_command",
+        "fw_download_start", "fw_download_stop",
+        "extender_mode", "non_extender_mode",
+        NULL
+    };
+    int i;
+    if (!action || !action[0]) return 0;
+    for (i = 0; valid[i]; i++) {
+        if (strcmp(action, valid[i]) == 0) return 1;
+    }
+    return 0;
+}
+
+static void render_led_json(int fd, const struct request *req) {
+    char action[64], params[128], reply[1024];
+    int rc, code;
+    FILE *f;
+    form_value(req->body, "action", action, sizeof(action));
+    if (!led_action_is_valid(action)) {
+        f = send_json_start(fd, "400 Bad Request");
+        if (!f) return;
+        fputs("{\"ok\":false,\"error\":\"invalid LED action\"}\n", f);
+        fclose(f);
+        return;
+    }
+    snprintf(params, sizeof(params), "{\"action\":\"%s\"}", action);
+    rc = run_hal_json("sys.led", params, 4, reply, sizeof(reply));
+    code = json_int(reply, "code", -1);
+    f = send_json_start(fd, "200 OK");
+    if (!f) return;
+    fputs("{\"ok\":", f); fputs((rc == 0 && code == 200) ? "true" : "false", f);
+    fputs(",\"action\":", f); json_write_string(f, action);
+    fprintf(f, ",\"code\":%d", code);
+    fputs(",\"reply\":", f); json_write_string(f, reply[0] ? reply : "no response");
+    fputs("}\n", f);
+    fclose(f);
+}
+
 static void render_ir_batch_send_json(int fd, const struct request *req) {
     char device_id[64], delay_text[32], dry_text[16], run_id[128], reply[1024], last_reply[1024];
     char *commands, *line, *save;
@@ -8637,6 +8684,8 @@ static void handle_client(int client) {
         render_capture_json(client);
     } else if (strcmp(req.method, "POST") == 0 && strcmp(req.path, "/api/ir-send") == 0) {
         render_ir_send_json(client, &req);
+    } else if (strcmp(req.method, "POST") == 0 && strcmp(req.path, "/api/led") == 0) {
+        render_led_json(client, &req);
     } else if (strcmp(req.method, "POST") == 0 && strcmp(req.path, "/api/ir-test-learned") == 0) {
         render_ir_test_learned_json(client, &req);
     } else if (strcmp(req.method, "POST") == 0 && strcmp(req.path, "/api/ir-batch-send") == 0) {

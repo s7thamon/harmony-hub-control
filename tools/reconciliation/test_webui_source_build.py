@@ -17,7 +17,7 @@ official Zig 0.16.0 pin:
 The exact source tuples (from the verified webui-repro and
 zig-distribution-sweep pilot reports):
 
-  codex_webui.c          cf2874dd17df31ec9763e2822425b5c63026b871 (box 2026-10-20 + own-repo updater)
+  codex_webui.c          0fd02498e49ee4f20e72592ed3b76b1cc50cd6cd (box 2026-10-20 + LED control endpoint)
   activity_ui_assets.h   5dad607f7c09a0d5cc0034969b76e6c5df1eb2bc
   harmony_shell_assets.h 1903dc70c0cb4071ebc7938aeeb7f68dc43af54b (box 2026-10-20)
   remote_skin_jpg.h      419611c5ff0713f1f5de2dd684d699f6d77238d5
@@ -76,9 +76,9 @@ BUILD_SCRIPT = os.path.join(REPO_ROOT, "build", "build_harmony_tools_kali.sh")
 #: constants from the verified pilot reports.
 PINNED_SOURCES = {
     "codex_webui.c": (
-        "cf2874dd17df31ec9763e2822425b5c63026b871",
-        "67ee3c4acfcff4dfb6d8083b2d9a96af7a8af88d4d63dc5740c8fc4173aafb13",
-        525457,
+        "0fd02498e49ee4f20e72592ed3b76b1cc50cd6cd",
+        "08b9ea50d41d12da9f2bec6050ffb18e4d39783a24f959bc12beb2319e8c392a",
+        527371,
     ),
     "activity_ui_assets.h": (
         "5dad607f7c09a0d5cc0034969b76e6c5df1eb2bc",
@@ -105,8 +105,8 @@ PINNED_SOURCES = {
 #: exact live binary targets (verified pilot reports)
 TARGETS = {
     "codex_webui": (
-        "d503105cbe76c03387807a5176693d0c7276204975b526ab4c515589bf0ee936",
-        969140,
+        "856b4ad3b1460f4c063e3d516cd8398c621691cd2dc7cb9dc21f8e9ca08e981e",
+        970036,
     ),
     "codex_bt_pair_agent": (
         "563c6c58a3629edfebd7ec30ebcf14e6384a2d84e89669b1d7c3d79c75b619c8",
