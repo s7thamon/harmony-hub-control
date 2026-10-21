@@ -1,457 +1,479 @@
-# Harmony Hub Control
+# Melodious
 
-**Own your Logitech Harmony Hub.** A local web remote, activity editor, and
-smart-home bridge that runs on the hub itself — no Logitech app, account, or
-cloud required.
+Melodious keeps a Logitech Harmony Hub working on your own network, with no
+Logitech app, account or cloud. It has three parts:
 
-![The Control view: a photo-real virtual Harmony remote with live activity state, resolved button actions, and a send inspector](docs/screenshots/control.png)
+- **Melodious on the hub**: software you install on a rooted Harmony Hub. It
+  serves the web app and an HTTP API, saves your changes to activities and
+  devices on the hub itself, adds a Bluetooth keyboard, an MQTT bridge and a
+  Wi-Fi recovery network, and blocks the Logitech cloud.
+- **The Melodious web app**: a remote and setup app that the hub serves at
+  `http://<hub-ip>:8080/`, for phones and computers. It works fully offline.
+- **The Melodious Android app**: a native remote for Android 8.0 and later that
+  connects to the same hub.
 
-Logitech ended production of the Harmony line in 2021, leaving every hub
-dependent on a cloud service that can change or disappear. Harmony Hub Control
-replaces that dependency for an **already-rooted** Harmony Hub: it installs a
-self-contained web interface and helper runtime onto the hub over SSH, then
-lets you control activities, edit configurations, learn IR codes, pair
-Bluetooth devices, and integrate with Home Assistant — entirely from a browser
-on your local network.
+Melodious is for owners of a Harmony Hub that is already rooted with
+[harmony-hub-root](https://github.com/Ripthulhu/harmony-hub-root) who want the
+hub, and the Harmony remote paired with it, to run entirely on their local
+network. This repository contains no rooting tools, exploits, private keys or
+personal backups.
 
-Everything lives on the hub. Your activities, device database, button maps,
-and settings are plain JSON files on the hub's own flash storage, editable and
-backed up from the web UI, with the Logitech cloud fully blocked by default.
+## Quick start
 
-> This project is for hubs that have already been rooted with
-> [harmony-hub-root](https://github.com/Ripthulhu/harmony-hub-root). It
-> contains no rooting tools, exploits, private keys, or personal backups.
+1. Root the hub with harmony-hub-root. Keep the SSH key it creates
+   (`harmony_owner_*` in `~/.ssh`) and the numeric Hub ID it prints.
+2. From a computer on the same network, run a clean install:
 
-## Why you might want this
+   ```bash
+   python3 install_webui.py --hub-host <hub-ip> --hub-id <hub-id> --clean-install
+   ```
 
-- **Keep a discontinued product alive** — activities can be created, edited,
-  and synced to the paired physical remote with no cloud allocator at all.
-- **A real remote in your browser** — the actual Harmony remote skin with
-  live button hotspots, on your phone or laptop, for activities *and*
-  individual devices.
-- **Local ownership by default** — the installer blocks Logitech cloud
-  tasks, removes the hub's WAN route, and serves the paired remote's
-  configuration from local storage. Normal operation does not initiate
-  outbound requests; explicit owner actions that may contact external
-  services include browser-side IRDB Search and Preview, hub-side
-  RemoteCentral Fetch, clicked documentation links, and legacy
-  owner-triggered import/update surfaces (see Browser egress policy).
-- **Full IR toolbox** — learn codes from your original remotes, import from
-  IRDB / Flipper-IRDB / RemoteCentral, test in batches, and experiment safely
-  in a scratch "IR Lab" device.
-- **More than Logitech offered** — Bluetooth HID keyboard mode with saved
-  keystroke scripts, an MQTT bridge with Home Assistant discovery, Wi-Fi
-  recovery tooling, and one-click backups of every resource on the hub.
-- **Honest engineering** — the whole stack is open: a static C web server,
-  Lua firmware plugins, and a plain JavaScript front end, plus a simulator
-  and a QEMU emulator so you can try it without touching your hub.
+   On Windows, in PowerShell:
 
-## Feature tour
+   ```powershell
+   .\install_webui.ps1 -HubHost <hub-ip> -HubId <hub-id> -CleanInstall
+   ```
 
-### Dashboard and browser remote
-
-The **Home** view shows what is currently running and offers one-tap activity
-start and power-off. The **Control** view renders the genuine Harmony remote
-image; only keys the running activity actually maps respond, and an optional
-inspector shows exactly which device and command each press resolved to. The same handset drives **Devices** mode for direct,
-per-device control outside any activity.
-
-### Activities: wizard, advanced editor, and remote sync
-
-- A guided four-step **wizard** builds or reworks an activity: name it, pick
-  device roles and inputs, map remote buttons to commands, review, save, run.
-- The **advanced editor** exposes the full activity graph — roles, inputs,
-  power on/off ordering, per-device power-on delays, press / long-press /
-  double-press maps, and a full-fidelity JSON view — with a strict validator
-  and repair pass that enforces the invariants the physical remote requires.
-- The **Activities** roster runs, reorders, edits, and deletes activities;
-  saves are transactional on the hub (validate → back up → write → verify →
-  roll back on failure) and publish fresh configuration to the paired
-  physical remote, entirely offline.
-
-### Device and IR control
-
-Browse every device and command on the hub, send commands directly, and
-manage the IR database:
-
-- **Learning** — capture codes from an original remote (15-second capture
-  window) with automatic classification, then test before saving.
-- **Importing** — search IR codes from IRDB via browser-side Search/Preview
-  (fetches index and code files from public CDN resources only after you
-  click Search or Preview). Flipper-IRDB, LIRC-style, and SmartIR data are
-  imported from user-provided files dropped into the browser. RemoteCentral
-  Pronto hex is fetched after an explicit Fetch click: the redesigned shell
-  validates the path stays under `/cgi-bin/codes/`, calls
-  `GET /api/remotecentral-fetch?path=...` on the hub (the route accepts GET
-  or POST), and on failure warns that nothing was imported with no further
-  browser egress. (The legacy form-response activity editor additionally
-  falls back to a reader service at `https://r.jina.ai/` with a 9-second
-  timeout and a 2-minute cooldown after HTTP 429.) Flipper `RC5`/`RC6`/`SIRC` entries are
-  converted to raw timing replays when possible.
-- **Batch sweeps** — stage large candidate code sets in browser memory,
-  import selected commands, and fire them in cancellable batches with
-  configurable delays — the practical way to find codes for an unknown device.
-- **IR Lab** — a dedicated temporary test device that keeps experiments out
-  of your real configuration and can be cleared in one click.
-
-### Bluetooth pairing and HID keyboard
-
-The hub can pair with Bluetooth targets (Android TV, NVIDIA SHIELD, PCs) using
-a local pairing agent with Secure Simple Pairing and on-hub link-key storage —
-no Harmony app involved. Once paired, the hub presents itself as a Bluetooth
-keyboard: send text, named keys, or saved keystroke scripts from the web UI,
-and mix IR and Bluetooth devices freely in one activity. Direct HID calls are
-guarded so they refuse to run unless the expected target is connected and
-encrypted, which prevents a known firmware crash.
-
-### MQTT and Home Assistant
-
-A hub-side Lua bridge publishes Home Assistant MQTT discovery, current
-activity state, and device availability, and accepts activity and IR commands
-over MQTT topics. Configure the broker, credentials, and topics from the web
-UI or at install time; passwords are kept server-side once set.
-
-### Wi-Fi, recovery, and system tools
-
-- Edit the hub's Wi-Fi configuration from the browser (with an explicit,
-  owner-confirmed reboot to apply).
-- A recovery access point workflow can be triggered from the hub's reset
-  button path if the hub ever drops off the network.
-- The **System** page shows firmware/process status and logs, toggles the
-  cloud blocker, triggers LAN rediscovery or reboot, manages the optional
-  web sign-in, and checks for / applies payload updates from the browser.
-
-### Backup, restore, and updates
-
-Ten one-click exports (devices, activities, button maps, functions,
-protocols, automation, MQTT, Wi-Fi, cloud, Bluetooth) plus a single
-owner-bundle download covering everything. Imports are preflighted and
-danger-confirmed, and the hub takes timestamped resource backups before any
-destructive write. The installer itself creates a hub-side backup first, and
-`restore_backup.ps1` can roll back to it. All hub backup families are kept
-bounded by byte budgets enforced by `codex_webui` itself; see
-[Backup retention on the hub](#backup-retention-on-the-hub).
-
-### Offline ownership
-
-Installed with defaults, the hub becomes a LAN-only appliance:
-
-- Logitech cloudapi, PubNub, and package-manager tasks are prevented from
-  starting.
-- The WAN default route is removed and monitored; LAN and multicast routes
-  are preserved, so local control, MQTT, and discovery keep working.
-- Paired-remote resource reads are served from local storage, and the
-  handset's normal `setup.sync` flow is answered locally so it can never
-  replace your configuration with an older cloud copy.
-- Activity writes are fail-closed: the hub refuses to save unless the cloud
-  blocker is active, so local edits can't race a cloud sync.
-
-### Browser egress policy
-
-Loading the redesigned web UI and navigating between its views makes no
-automatic public-Internet requests. All UI assets (HTML, CSS, JavaScript,
-icons) are served from the hub itself — no external fonts, no
-CDN-hosted scripts, no analytics beacons. The JavaScript may declare IRDB
-endpoint URLs for Search and Preview, but those are used only after an
-explicit user click.
-
-Browser-side egress after explicit owner action:
-
-- **IRDB Search and Preview** — after you click Search or Preview, the
-  browser fetches an IRDB index and individual code files from public CDN
-  resources.
-- **Clicked documentation links** — GitHub and other documentation URLs
-  open in the browser when you follow them.
-- **Legacy import/update surfaces** — the System page's update check and
-  certain import flows may contact their named sources after you trigger
-  them; they do not run automatically. The legacy form-response activity
-  editor also falls back to `https://r.jina.ai/http://www.remotecentral.com<path>`
-  after an explicit Fetch click when the hub request fails or redirects,
-  with a 9-second timeout and a 2-minute cooldown after HTTP 429.
-
-Hub-side egress after explicit owner action:
-
-- **RemoteCentral Fetch** — the hub fetches a RemoteCentral Pronto hex page
-  only after you click Fetch in the IR import view
-  (`GET /api/remotecentral-fetch?path=...`; the route accepts GET or POST).
-
-Normal hub control, configuration, and locally available IR data work
-without any Internet connection.
-
-## Screenshots
-
-Captured from the project's hub emulator — the real hub backend compiled for
-MIPS and running under QEMU with fixture data.
-
-| | |
-|---|---|
-| ![Home dashboard with the running activity, start tiles, and recent events](docs/screenshots/home.png) *Home — now playing and one-tap starts* | ![Activity roster with run, set up, reorder, and delete controls](docs/screenshots/activities.png) *Activities — run, rework, reorder, delete* |
-| ![Guided activity setup wizard, step one of four](docs/screenshots/wizard.png) *Activity wizard — guided four-step setup* | ![IR setup with device inventory, learning, and batch sweep tools](docs/screenshots/ir.png) *IR setup — inventory, learning, imports, sweeps* |
-| ![Bluetooth page showing an authenticated HID link and pairing controls](docs/screenshots/bluetooth.png) *Bluetooth — pairing and HID keyboard control* | ![MQTT broker and Home Assistant discovery configuration](docs/screenshots/mqtt.png) *MQTT — broker setup and HA discovery* |
-| ![Backup page with individual exports and the full owner bundle](docs/screenshots/backup.png) *Backup — ten exports plus a full bundle* | ![System page with status, cloud blocker, sign-in, and updates](docs/screenshots/system.png) *System — status, cloud policy, sign-in, updates* |
+   The installer asks for an MQTT broker (leave it blank to skip MQTT), turns
+   on the cloud blocker and reboots the hub once.
+3. Open `http://<hub-ip>:8080/` on your phone or computer.
 
 ## Requirements
 
 | Requirement | Details |
-|---|---|
-| Harmony Hub | Already **rooted** with [harmony-hub-root](https://github.com/Ripthulhu/harmony-hub-root). This project does not root hubs. |
-| SSH key | The private key produced by the root tool, named `harmony_owner_*`, in `~/.ssh` (or `%USERPROFILE%\.ssh`). |
-| Hub ID | The exact numeric Hub ID printed by the root tool. **Do not guess it** — IR, capture, MQTT, and dashboard calls depend on the real value. |
-| Install machine | Windows (PowerShell), or Linux/macOS (Python 3), or a Docker/Unraid host. Only plain `ssh` is used — no `scp`/`sftp` needed. |
-| Network | A trusted local network. The web UI is plain HTTP with optional sign-in; never expose it to the internet. |
-| Browser | Any modern browser, phone or desktop. The UI is served entirely by the hub. |
+| --- | --- |
+| Harmony Hub | Rooted with [harmony-hub-root](https://github.com/Ripthulhu/harmony-hub-root). Melodious doesn't root hubs. |
+| SSH key | The root tool's private key, `harmony_owner_*`, in `~/.ssh` (`%USERPROFILE%\.ssh` on Windows). |
+| Hub ID | The numeric Hub ID the root tool prints. Don't guess it: Melodious sends it with every command to the hub's engine. |
+| Install computer | Windows with PowerShell, Linux or macOS with Python 3, or a Docker or Unraid host. The installer needs only `ssh`, not `scp` or `sftp`. |
+| Network | A trusted home network. The web app is plain HTTP. |
+| Browser | A current browser on a phone, tablet or computer. |
+| Android app (optional) | A phone with Android 8.0 or later, and a computer with JDK 17 or 21 and the Android SDK to build the app. |
 
-The shipped binaries target the Harmony Hub's MIPS big-endian Linux userspace.
-No build step is required to install the current payload.
+## Install and first run
 
-## Quick start
+### Install
 
-Run after the hub has been rooted. The installer finds your
-`harmony_owner_*` key automatically; if you rooted with `harmony-hub-root`,
-the Hub ID is read from its handoff file, otherwise pass it explicitly.
+Run a clean install the first time, as in the quick start. It writes
+Melodious's configuration on the hub: the Hub ID, the cloud blocker (on) and
+the MQTT settings. Later runs without `--clean-install` upgrade in place and
+keep that configuration.
 
-**Windows** — double-click:
+Each run:
 
-```text
-Install_Harmony_Control.cmd
-```
+1. finds your key (`--key-path`, or the newest `harmony_owner_*` key in
+   `~/.ssh`);
+2. uploads every file to a private folder in the hub's RAM
+   (`/var/volatile/codex-install-*`), checks each MD5 and compares it with the
+   installed copy, so unchanged files aren't written;
+3. copies the files it will change into RAM and writes a handoff backup to
+   `/data/codex-backups/webui-handoff-*`;
+4. writes each changed file next to its target as `<file>.codex-new` and
+   verifies it, then renames the copies into place, `codex_webui` last. If
+   flash runs out, it removes the copies and nothing in use changes; if a
+   later step fails, it puts the originals back;
+5. restarts the web app and the Bluetooth keyboard service, registers the hub
+   plugins and waits for the web app to answer;
+6. reboots the hub if the cloud-blocker files changed, so they take effect.
 
-or run PowerShell directly:
+| Python | PowerShell | What it does |
+| --- | --- | --- |
+| `--preflight-only` | `-PreflightOnly` | Stages and compares in RAM, prints what would change and a verdict, and writes nothing to flash. |
+| `--clean-install` | `-CleanInstall` | Writes the configuration from scratch. |
+| `--hub-id` | `-HubId` | The Hub ID. Without it, the installer reads it from the hub, then from the root tool's files in `~/.harmony-hub/`. |
+| `--no-prompt` | `-NoPrompt` | Fails instead of asking for a missing value. |
+| `--mqtt-broker`, `--mqtt-port`, `--mqtt-user`, `--mqtt-password`, `--mqtt-base-topic`, `--mqtt-discovery-prefix`, `--mqtt-client-id`, `--mqtt-disabled` | `-MqttBroker` … `-MqttDisabled`, same names | Set up the MQTT bridge. Without them, an upgrade keeps the hub's MQTT settings. |
+| `--no-apply-cloud-restart` | `-NoApplyCloudRestart` | Skips the reboot after the cloud-blocker files change. |
+| `--skip-cloud-suppression` | `-SkipCloudSuppression` | Leaves the hub's `netservicestarter.lua` as it is. With a clean install, it also writes the cloud blocker as off. |
 
-```powershell
-.\install_webui.ps1 -HubHost <hub-ip> -HubId <numeric-id>
-```
+`python3 install_webui.py --help` lists every option.
 
-**Linux/macOS:**
+**Updating.** Get the latest copy of this repository and run the installer
+again without `--clean-install`. On Windows you can double-click
+`Install_Harmony_Control.cmd`, which runs `install_webui.ps1` with your
+`harmony_owner_*` key and asks for the rest.
 
-```bash
-python3 install_webui.py --hub-host <hub-ip> --hub-id <numeric-id>
-```
-
-Non-interactive, with MQTT disabled:
-
-```bash
-python3 install_webui.py --hub-host <hub-ip> --key-path ~/.ssh/harmony_owner_<key-name> --mqtt-disabled --no-prompt
-```
-
-The installer uploads every candidate into one private staging folder in
-RAM (`/var/volatile/codex-install-*`), checks each MD5, and compares it with
-what is already on the hub, so unchanged files are never rewritten. It uses
-only commands the hub's BusyBox actually has (`cat`, `cp`, `mv`, `rm`,
-`chmod`, `mkdir`, `ls -l`, `md5sum`); there is no `mktemp`, `stat`, or `df`.
-
-Because flash free space can't be measured, changed files install in two
-phases. First each is written beside its destination as `<file>.codex-new`
-and verified; if flash fills up, every new copy is removed and nothing live
-has changed. Then each copy is renamed into place, `codex_webui` last.
-Before that, the installer copies the originals into RAM and writes a small
-handoff backup to `/data/codex-backups/webui-handoff-*`, so any later failure
-restores the originals with their previous modes.
-
-It then starts the web UI and writes MQTT config if provided. By default it
-enables strict offline ownership (cloud tasks blocked, WAN route removed,
-local-only remote sync) and reboots the hub once when the cloud-blocker files
-change, so the guarded handlers load. To skip that reboot, add
-`-NoApplyCloudRestart` (PowerShell) or `--no-apply-cloud-restart` (Python).
-`--preflight-only` / `-PreflightOnly` stages, compares, and reports without
-writing anything outside the RAM staging folder.
-
-Then open:
-
-```text
-http://<hub-ip>:8080/
-```
-
-**Docker / Unraid** — a one-time installer container plus a persistent web
-proxy, with a Compose example and an Unraid XML template. See
-[UNRAID.md](UNRAID.md) for the full procedure and safety notes.
-
-**Rollback** — restore the newest hub-side backup created by the installer:
+**Rolling back.** In PowerShell, `restore_backup.ps1` restores the boot script,
+`netservicestarter.lua`, the SSH wrappers, the Hub ID and the MQTT settings
+from the newest handoff backup, then tells you to reboot the hub:
 
 ```powershell
-.\restore_backup.ps1 -HubHost <hub-ip> -KeyPath "$env:USERPROFILE\.ssh\<root-key-file>"
+.\restore_backup.ps1 -HubHost <hub-ip> -KeyPath "$env:USERPROFILE\.ssh\<key-file>"
 ```
 
-### Backup retention on the hub
+**Docker and Unraid.** The image runs the same installer, in upgrade mode,
+with settings from environment variables, then stays up as a small proxy to
+the hub's web app. It never runs a clean install, so do the first install
+from a computer. See [UNRAID.md](UNRAID.md) and `compose.yaml`.
 
-Backups are kept by count:
+### First run
 
-| Backups | Directory | Kept | Pruned by |
-| --- | --- | --- | --- |
-| Resource backups (`YYYYMMDD_HHMMSS`) | `/data/codex/resource-backups` | newest 5 | web UI, each time it writes one |
-| Update backups (decimal epoch seconds) | `/data/codex/update-backups` | newest 3 | web UI, during a software update |
-| Installer handoffs (`webui-handoff-YYYYMMDD-HHMMSS`) | `/data/codex-backups` | newest 3 | installer, after writing a new one |
+Open `http://<hub-ip>:8080/`. The web app shows the activities and devices
+already on the hub, including any set up with the Logitech app before rooting.
 
-Only directories with those exact names are ever removed. Anything else in
-those folders, including hand-made backups, is left alone.
+- With nothing running, the Remote tab shows "Everything's off" and a card for
+  each activity. Tap one to start it.
+- To build an activity, open Activities and tap **+** (New activity).
+- To add a device, open Devices and tap **+** (Add a device), then use Learn a
+  button or Import codes on its Commands tab.
+- To type on a TV, pair the hub as a keyboard in Settings → Bluetooth
+  keyboard.
+
+## The web app
+
+The hub serves the web app from `codex_webui` itself: one page, one script and
+one stylesheet, plus the advanced editor's script and stylesheet when you open
+it. Nothing loads from the internet. There are four tabs, Remote, Activities,
+Devices and Settings: a bottom bar on phones and a navigation rail on screens
+840 px and wider. Every screen has its own address, such as `#devices/<id>`,
+so you can bookmark it.
+
+### Remote
+
+- **Nothing running**: "Everything's off" and one card per activity.
+- **An activity running**: its remote. Tap the activity's name to switch to
+  another one or to "Turn everything off". The power button turns everything
+  off at once, without asking, like the physical remote.
+- **Buttons**: the transport row, the D-pad and OK, the VOL and CH rockers,
+  and Back, Menu, Exit and Mute.
+- **Keyboard**: text and keys sent to the TV through the hub's Bluetooth
+  keyboard.
+- **More keys**: the activity's on-screen buttons, Guide, Info, DVR, Record,
+  Stop, the colour keys, the number pad, "All device commands…" and the send
+  log. On screens 1100 px and wider it sits beside the remote.
+- **Fix it** (the wrench): resends a device's power or input command when
+  something didn't turn on or switch input.
+- A status line shows what each key sends, as "key → device · command".
+
+Keys fire when you lift your finger, and sliding off cancels. A key with a
+hold action fires it after 500 ms. Keys the activity doesn't use are dimmed.
+
+### Activities
+
+- The running activity's card, with Open remote and Turn off.
+- A row for each other activity, with Start and a ⋮ menu: Edit, Set up
+  buttons, Try the buttons (its remote, without starting it), Advanced editor,
+  Move up, Move down and Delete.
+- **+** opens the setup wizard: Name, Devices (which device does each job, and
+  how long to wait after each one turns on), Inputs, Buttons (36 keys, each
+  with a press and a hold action) and Review.
+- The advanced editor covers what the wizard doesn't: roles, the button maps
+  for each remote surface, and the activity's JSON.
+
+### Devices
+
+- A list you can search by device or command, **+** (Add a device), and Tools
+  → IR lab, a scratch device for trying codes.
+- A device page with Remote and Commands tabs. Its remote sends straight to the
+  device, outside any activity. The ⋮ menu has Edit details and Delete device;
+  a device that is still in use can't be deleted, and the page says where it's
+  used.
+- On the Commands tab, tap a command to send it, or use its ⋮ to edit or
+  delete it.
+  - **Learn a button**: point the original remote at the hub, press the
+    button, then test and save it.
+  - **Import codes**: Find codes (search IRDB, or open a code file), Paste
+    (IRDB CSV, `name|mode|code` lines or Pronto hex, plus Fetch from
+    RemoteCentral) or Type a code.
+  - **Send all commands**: sends every command in turn to find the ones the
+    device answers to, with a dry run, the gap and commands per request, Stop
+    and a run log.
+- **Device settings** (the tune icon): power (separate On and Off commands,
+  one toggle, or none), turning on (warm-up time, Always on, Keep on between
+  activities), inputs and timing.
+
+### Settings
+
+- **Hub**: whether the hub is connected, and its activity and device counts.
+- **Bluetooth keyboard**: pair the hub with a TV, streaming box or computer as
+  a keyboard, connect, send keys and text, and keep saved devices with
+  keystroke scripts.
+- **MQTT**: the broker, Home Assistant discovery and the topics.
+- **Wi-Fi**: the network the hub joins. Changes take effect after a reboot.
+- **Backup**: the full owner bundle, ten single exports, and restore from a
+  file.
+- **System**: status and logs, the cloud blocker, the time zone, sign-in,
+  software update, Home Assistant discovery and reboot.
+
+## The Android app
+
+The app is in [`Android/`](Android/): Kotlin and Jetpack Compose, package
+`app.melodious`, for Android 8.0 (API 26) and later. You build it from source;
+it isn't in an app store.
+
+```bash
+Android/deploy_to_phone.sh                               # phone on USB, or already paired with adb
+Android/deploy_to_phone.sh --wireless <phone-ip>:<port>  # Android wireless debugging
+Android/deploy_to_phone.sh --build-only                  # build the APK and run the tests only
+```
+
+The script expects macOS with Homebrew: it uses Homebrew's JDK 17 or 21 and
+installs the Android command-line tools and `adb` if they're missing. It runs
+the unit tests, builds a debug APK and installs it.
+
+On first start the app looks for the hub on your network (SSDP, then a scan of
+the phone's subnet on port 8080), or you type the hub's address. It has the
+same four tabs as the web app and uses the same hub API on port 8080. It also
+connects to the hub's own WebSocket on port 8088 for live state, press and
+hold, and the hub's sleep timer and help.
+
+What the app adds:
+
+- **Touchpad**: a remote mode where you swipe to move and tap for OK.
+- **Press and hold**: volume, channel and the D-pad repeat while held, and the
+  hub pushes state changes to the app.
+- **Sleep timer**: the hub turns everything off after 15 minutes to 2 hours,
+  even if the phone is off.
+- **Fix it → Resend everything**: the hub checks each device and resends only
+  the power and input commands it needs.
+- **Phone volume keys**: they control the activity's volume while the app is
+  open.
+- **Start & end**: an activity editor step for the order devices turn on and
+  off, and for commands to send when the activity starts or ends.
+- **On-screen buttons**: an editor for an activity's on-screen buttons and
+  sequences.
+- **Phone extras**: a Quick Settings tile ("Melodious: Turn off"), a
+  home-screen widget that starts activities or turns everything off, and
+  lock-screen controls (volume, play and pause, turn off) while something is
+  on.
+- **Links**: `melodious://hub/poweroff` and `melodious://hub/activity/<id>`,
+  which act when the app is already connected.
+- **SSH recovery** (Settings → Advanced): with your SSH key, check the hub,
+  clear the web sign-in or restart Melodious's services. The key isn't saved.
+
+Only the web app adds and deletes devices and has Edit details, device
+inputs, Find codes, Fetch from RemoteCentral, Type a code, the IR lab, the
+advanced editor, activity reordering, and the Wi-Fi, MQTT, Backup and System
+pages.
+
+## Features
+
+### Offline by default
+
+With the cloud blocker on, as a clean install sets it:
+
+- the hub doesn't start Logitech's cloud tasks (cloudapi, PubNub, the package
+  manager), and requests to Logitech and PubNub hosts fail;
+- the WAN default route is removed and kept off, while LAN and multicast
+  routes stay, so local control, discovery and MQTT keep working;
+- the paired Harmony remote gets its setup from the hub's own files when it
+  syncs, so a cloud copy can't overwrite your changes;
+- the hub still sets its clock over NTP (pool.ntp.org, time.google.com,
+  time.cloudflare.com), through a temporary route for each query;
+- activity and device-settings changes are refused unless the blocker is on,
+  so a local edit can't race a cloud sync.
+
+System → Cloud egress turns the blocker on. The web app has no control to turn
+it off.
+
+### Activities and your Harmony remote
+
+Every change to activities, from the wizard, the advanced editor, a reorder or
+a delete, is one transaction on the hub. It checks the activities, button maps
+and command maps against the hub's devices, backs up the hub's resource files,
+writes the three activity files, reads them back and restores the old ones if
+anything fails. If the setup changed since the page loaded, the hub refuses
+the save and the page loads the latest copy.
+
+Each save is published as a fresh configuration revision for the paired
+Harmony remote, which picks it up the next time it syncs with the hub. The
+advanced editor's "Refresh remote locally" publishes the stored setup again
+without changing it.
+
+### IR codes
+
+- Learn codes from the original remote; import IRDB codes, Flipper `.ir`
+  files, `name|mode|code` lines, Pronto hex or RemoteCentral pages; or type a
+  keycode, NEC or raw code.
+- IRDB search and preview run in your browser and fetch from the jsDelivr CDN
+  only when you click Search IRDB or Preview. The hub fetches a RemoteCentral
+  page only when you click Fetch, and that needs a route to the internet,
+  which the cloud blocker removes.
+- Limits: 32 devices, 2,048 commands per device and 1,024 commands per import.
+  The hub backs up its device list before each write.
+
+### Bluetooth keyboard
+
+The hub pairs with a TV, streaming box or computer as a Bluetooth keyboard,
+with its own pairing agent and the link keys kept on the hub. The web app and
+the Android app then type text and send keys through it, and the Bluetooth
+page runs saved keystroke scripts.
+
+### MQTT and Home Assistant
+
+The MQTT bridge publishes the hub's status, the current activity and device
+counts, and Home Assistant discovery (an activity selector, sensors and a
+power-off button). It takes activity changes, IR commands and raw hub-engine
+commands on its topics, under `harmony/hub` by default. Set it up at install
+time or in Settings → MQTT; the page never shows the stored password.
+
+### Backup and restore
+
+Settings → Backup downloads ten single exports (devices, functions, protocols,
+activities, button maps, automation, MQTT, Wi-Fi, cloud blocker and Bluetooth)
+or one owner bundle with all ten. A restore is checked before it runs and asks
+you to confirm. The hub also keeps its own backups:
+
+| Backups | Folder | Kept |
+| --- | --- | --- |
+| Resource backups (`YYYYMMDD_HHMMSS`), taken before each write | `/data/codex/resource-backups` | Newest 5 |
+| Software-update backups | `/data/codex/update-backups` | Newest 3 |
+| Installer handoffs (`webui-handoff-*`) | `/data/codex-backups` | Newest 3 |
+
+Only folders with those exact names are ever removed.
+
+### Wi-Fi and recovery
+
+Settings → Wi-Fi changes the network the hub joins. If the hub can't join it,
+hold the hub's reset button: the hub starts an open recovery network,
+`Harmony-Recovery-xxxxxx`, with a setup page at `http://192.168.76.1/` where
+you enter the Wi-Fi details again.
+
+### Sign-in
+
+System → Sign-in adds an optional username and password (HTTP Basic) to the
+web app and its API. It's off by default. If you're locked out, the Android
+app's SSH recovery clears it, or you can delete `/data/codex/webui_auth.conf`
+over SSH and restart `codex_webui`.
 
 ## How it works
 
-There is no web framework and the hub backend has no cloud service
-dependency. The entire product is a small set of purpose-built pieces that run
-on the hub's ~62 MB MIPS Linux system:
-
 ```text
-Your browser (LAN)
-  └─ http://<hub-ip>:8080 — codex_webui: a single static C binary
-       ├─ embedded single-page web app (all assets served from hub — no
-       │    external fonts, no CDN scripts; JS may declare IRDB endpoint
-        │    URLs used only after explicit Search/Preview clicks; hub
-        │    backend may fetch RemoteCentral after explicit Fetch)
-       ├─ HBus WebSocket client → the hub's Harmony activity engine
-       │    (start/stop activities, IR send, IR capture)
-       ├─ HAL helper + keyboard daemon → Bluetooth HID radio
-       ├─ Lua plugins → firmware resource manager (transactional
-       │    activity saves) and the MQTT / Home Assistant bridge
-       └─ JSON resources and settings on the hub's flash (/data)
+Phone or computer on your network
+  ├─ web app ───► http://<hub-ip>:8080   codex_webui, one static C binary
+  │                 ├─ the embedded web app and the JSON API
+  │                 ├─ codex_hbus ──► the hub's activity engine (activities, IR, learning)
+  │                 ├─ codexactivity.lua ──► the hub's resource manager (activity and device saves)
+  │                 ├─ codex_hal_ltcp, codex_bthid_keyboard, codex_bt_pair_agent ──► Bluetooth
+  │                 └─ JSON files on the hub's flash (/data)
+  └─ Android app ► the same API on 8080, plus the hub's WebSocket on 8088
+
+Also on the hub: netservicestarter.lua (cloud blocker and local sync),
+offline_egress_guard.sh (WAN route), codexmqtt.lua (MQTT bridge),
+recovery_ap.sh (recovery network)
 ```
 
-- **Frontend** — a dependency-free JavaScript app (hash-routed views, no
-  framework) developed in `tools/webui-sim/`, then minified and embedded
-  into the server binary as C headers. The remote is a keypad drawn in the
-  page (no photo of the physical remote).
-- **Backend** — `payload/source/codex_webui.c`, compiled with Zig as a
-  static, stripped MIPS32 binary (~0.9 MB). It serves the app and a JSON API,
-  and forks per request.
-- **Firmware boundaries** — activity saves go through a fail-closed Lua
-  writer that validates the full activity graph against the live device list,
-  backs up all three resource files, writes, verifies, and rolls back on any
-  failure. Engine commands cross a loopback WebSocket (HBus); Bluetooth HID
-  traffic crosses a local HAL socket with its own connection guards.
-- **Persistence** — everything is plain JSON under `/data` on the hub,
-  which is exactly what the backup exports download.
-- **Development doubles** — `tools/webui-sim/` is a zero-dependency Node
-  mock of the API for UI work, and `tools/hub-emu/` runs the *actual*
-  compiled MIPS backend under QEMU in Docker, so HTTP contracts are tested
-  against the real code without a hub.
+- **Web app**: plain JavaScript modules in `tools/webui-sim/public/`, with no
+  framework. `tools/package_harmony_shell.sh` bundles them with bun into
+  `payload/source/harmony_shell_assets.h`, which is compiled into
+  `codex_webui`.
+- **Server**: `payload/source/codex_webui.c`, built with Zig as a static,
+  stripped MIPS32 big-endian binary. It listens on port 8080 and forks for
+  each request.
+- **Hub plugins**: `codexactivity.lua` writes activities and device settings
+  through the hub's resource manager and reloads its engine; `codexmqtt.lua`
+  runs the MQTT bridge.
+- **Installed files**: `payload/bin/MANIFEST.txt` lists the eight binaries,
+  with their MD5s, that go to `/data/codex/bin/`.
+- **Data**: activities, devices and settings stay in the hub's own JSON files
+  under `/data`; the backups download them.
 
-## Safety and limitations
+## Safety and limits
 
-This is owner-operated software for a rooted device on a trusted network.
-Read this section before installing.
+- **Trusted network only.** The web app is plain HTTP on every interface of
+  the hub. Sign-in is optional and off by default, and the server has no
+  protection against cross-site requests. Never expose the hub to the
+  internet.
+- **Exports contain secrets.** The MQTT, Wi-Fi and owner-bundle exports
+  include your MQTT password and Wi-Fi key. Keep them safe.
+- **MQTT is a control channel.** Anyone who can publish to the bridge's
+  topics can start activities, send IR and run hub-engine commands, and the
+  bridge doesn't use TLS. Use a broker with authentication.
+- **Update with the installer.** System → Software update applies only an
+  update already staged on the hub, and updates aren't signed. Update by
+  running the installer from a copy of this repository you trust.
+- **Some actions interrupt the room.** Wi-Fi changes, reboots, restores and
+  updates can take the hub offline for a while; the web app asks you to
+  confirm them.
+- **The hub is small.** Flash and RAM are limited. Download a backup before a
+  big import.
+- **Offline is the supported mode.** Using the Logitech app or cloud sync
+  alongside Melodious isn't supported and can overwrite local changes.
+- **Hand-edited activity JSON must follow the remote's rules.** For example,
+  an activity button without an action makes the paired remote stop
+  responding until it's power-cycled. The wizard and the advanced editor
+  follow these rules; [docs/API.md](docs/API.md) lists them.
+  `tools/activity_graph_repair.mjs` checks a hub's activities and proposes
+  repairs, and writes only with `--apply`:
 
-- **Trusted LAN only.** The UI is plain HTTP, sign-in is optional Basic
-  auth (off by default), and the server does not yet enforce cross-origin
-  protections. Never port-forward or expose the hub to the internet.
-- **Backups and exports contain secrets.** The Wi-Fi, MQTT, and full-bundle
-  exports include your Wi-Fi password and MQTT credentials so restores are
-  complete. Store downloaded backups accordingly.
-- **The browser updater is a convenience, not a secure channel.** Payload
-  updates fetched from the System page are not cryptographically signed.
-  Apply updates deliberately, on a trusted network, with a backup in hand.
-- **Some operations disrupt the household.** Wi-Fi changes, reboots, cloud
-  toggles, imports, and updates can interrupt TV time or briefly take the
-  hub offline. The UI confirmation-gates them; run them when you're present.
-- **The hub is a small embedded device.** Data partitions are a few
-  megabytes and RAM is limited. The installer and updater stage and verify
-  writes, but keep backups before big imports.
-- **Cloud blocking is the supported mode.** Mixing local editing with the
-  Logitech app or cloud sync is not supported and can overwrite local work.
-
-### Rules the paired physical remote enforces
-
-The hub tolerates configurations that the physical Harmony remote does not.
-The advanced editor's validator and the repair tool enforce these for you,
-but they matter when importing or hand-editing JSON:
-
-- **No action-less buttons in activity button maps.** A single button whose
-  press, long-press, and double-press actions are all null makes the remote
-  freeze after starting that activity until it is power-cycled.
-- **Bluetooth devices driven by the remote need `IsKeyboardAssociated:
-  false`** in the device list, or the remote refuses to transmit for them.
-- **Activity button maps need positive, unique identities**
-  (`ButtonMapId-`, `ButtonId`, `ButtonState: 1`). Offline mode never
-  allocates missing identities later.
-- **Slow devices need an explicit `NextDevicePowerOnDelay`** on their role
-  so their input is selected only after they have powered on.
-
-`tools/activity_graph_repair.mjs` audits and repairs all of this against a
-live hub (read-only by default):
-
-```bash
-node ./tools/activity_graph_repair.mjs --base-url http://<hub-ip>:8080
-```
+  ```bash
+  node tools/activity_graph_repair.mjs --base-url http://<hub-ip>:8080
+  ```
 
 ## Development and testing
 
-You do not need a hub to work on the UI or verify most behavior.
+You don't need a hub to work on the web app.
 
-**UI simulator** (zero dependencies, in-memory mock API, binds loopback only):
+**Simulator**: an in-memory hub with fixture data, on loopback only. It never
+contacts a hub and never sends IR, so Learn a button, Test and sends need the
+real hub.
 
 ```bash
 node tools/webui-sim/server.mjs
-# open http://127.0.0.1:8787/#control
+# then open http://127.0.0.1:8787/#remote
 ```
 
-**Hub emulator** (the real MIPS backend under QEMU, in Docker):
+**Hub emulator**: [`tools/hub-emu/`](tools/hub-emu/README.md) runs the real
+`codex_webui` and `codex_hbus` binaries under QEMU in Docker, against an
+emulated engine.
+
+**Tests**:
 
 ```bash
-tools/hub-emu/run.sh               # seed → build → container
-node tools/hub-emu/dev-proxy.mjs   # UI + API proxy on :8787
+node --test tools/webui-sim/test/                 # web app models and hub contracts
+node tools/harmony_shell_smoke.mjs                # rebuilds the embedded web app and checks it (needs bun)
+node tools/shipped_copy_hygiene.mjs               # no personal names or IDs in shipped files
+python3 tools/installer_contract_smoke.py         # the installers' contract, with a fake hub
+python3 -m unittest discover -s tools/reconciliation -p 'test_*.py'   # provenance; 12 known failures
+(cd Android && ./gradlew :core-protocol:test)    # Android protocol and graph tests
 ```
 
-**Test suites** (all runnable on a host machine):
+The Android tests need JDK 17 or 21 and the Android SDK; `deploy_to_phone.sh`
+sets both up on macOS.
+
+**Rebuilding `codex_webui`**: after changing the web app, bundle it, then
+build the binary with the official Zig 0.16.0 as described in
+[docs/BUILD.md](docs/BUILD.md). The build script,
+`build/build_harmony_tools_kali.sh`, checks the Zig executable and each
+binary against pinned SHA-256 values.
 
 ```bash
-node --test tools/webui-sim/test/*.test.mjs   # UI/model unit tests
-node tools/activity_ui_model_smoke.mjs        # activity editor model
-sh tools/activity_json_semantic_smoke.sh      # save-path JSON semantics
-sh tools/activity_offline_guard.sh            # offline guard packaging
-sh tools/bluetooth_hid_smoke.sh               # Bluetooth HID guards
-node tools/ir_database_smoke_test.mjs --sample=24 --per-device=10 --source=all --dry-run
-python3 docker/tests/test_manager.py          # Docker manager
-node tools/hub-emu/qa.mjs                     # contract QA vs real backend
+sh tools/package_harmony_shell.sh   # writes payload/source/harmony_shell_assets.h
 ```
 
-**Rebuilding the web UI binary** (only when native source or embedded assets
-change):
-
-```bash
-sh tools/package_harmony_shell.sh   # bundle the shell UI into a C header
-sh tools/embed_activity_ui.sh       # embed the advanced editor assets
-zig cc -target mips-linux-musleabi -Os -static -s -I payload/source -o payload/bin/codex_webui payload/source/codex_webui.c
-```
-
-The result must be `ELF 32-bit MSB executable, MIPS, MIPS32 rel2, statically
-linked, stripped`. Update `payload/bin/MANIFEST.txt` after replacing
-binaries, deploy to a test hub, and verify the dashboard, IR import,
-Bluetooth HID, MQTT, and rollback paths. See [docs/BUILD.md](docs/BUILD.md)
-for the full Linux toolchain path.
+When `codex_webui` changes, update its pins in the build script,
+`payload/bin/MANIFEST.txt` and `tools/reconciliation/test_webui_source_build.py`.
 
 ## Documentation
 
-| Document | Contents |
-|---|---|
-| [UNRAID.md](UNRAID.md) | Docker / Unraid deployment procedure and safety notes |
-| [docs/API.md](docs/API.md) | HTTP API for scripts and integrations |
-| [docs/BUILD.md](docs/BUILD.md) | Rebuilding the MIPS binaries |
-| [docs/SECURITY.md](docs/SECURITY.md) | Security policy and pre-sharing checklist |
-| [docs/FULL_FEATURE_ANALYSIS.md](docs/FULL_FEATURE_ANALYSIS.md) | In-depth, evidence-graded feature and architecture analysis |
-| [DESIGN.md](DESIGN.md) | Web UI design system |
-| [tools/webui-sim/README.md](tools/webui-sim/README.md) | UI simulator and production shell packaging |
-| [tools/hub-emu/README.md](tools/hub-emu/README.md) | QEMU hub emulator |
-| [CONTRIBUTING.md](CONTRIBUTING.md) | Contribution guidelines |
+| Document | What it covers |
+| --- | --- |
+| [DESIGN.md](DESIGN.md) | The Melodious design system, shared by the web app and the Android app |
+| [docs/API.md](docs/API.md) | The hub's HTTP API and the activity rules the paired remote needs |
+| [docs/BUILD.md](docs/BUILD.md) | Building the MIPS binaries with the pinned toolchain |
+| [docs/PROTOCOLS.md](docs/PROTOCOLS.md) | The hub's own protocols and ports |
+| [docs/SECURITY.md](docs/SECURITY.md) | Security notes and what never to commit |
+| [UNRAID.md](UNRAID.md) | Docker and Unraid |
+| [tools/webui-sim/README.md](tools/webui-sim/README.md) | The simulator and the web app's packaging |
+| [tools/hub-emu/README.md](tools/hub-emu/README.md) | The QEMU hub emulator |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | How to contribute |
 
-> **Live-box reconciliation.** The provenance derivation ledger at
-> [docs/reconciliation/box-snapshot-20260818.md](docs/reconciliation/box-snapshot-20260818.md)
-> and the machine-readable records under
-> `provenance/box-snapshot-20260818/` document the live
-> `box-snapshot-20260818` evidence snapshot and its binary-reproducibility
-> findings. Those live identities are product truth. The current product
-> build flow is in [docs/BUILD.md](docs/BUILD.md) and
-> [docs/integration/main-product-20260819.md](docs/integration/main-product-20260819.md).
+## Contributing, security, credits and license
 
-## Contributing, security, and credits
+Contributions are welcome. Keep changes small and scoped, add a short test
+note, and never commit SSH keys, MQTT passwords, tokens, hub backups, firmware
+dumps or rooting tools. Read [CONTRIBUTING.md](CONTRIBUTING.md) and
+[docs/SECURITY.md](docs/SECURITY.md) first.
 
-Contributions are welcome — keep changes scoped, prefer small pull requests
-with a short test note, and never commit SSH keys, MQTT passwords, tokens,
-hub backups, firmware dumps, or rooting tools. See
-[CONTRIBUTING.md](CONTRIBUTING.md) and [docs/SECURITY.md](docs/SECURITY.md)
-before sharing changes.
+- Rooting the hub: [harmony-hub-root](https://github.com/Ripthulhu/harmony-hub-root),
+  a separate project.
+- Melodious: [schlambos/harmony-hub-control](https://github.com/schlambos/harmony-hub-control).
+- Third-party code: Material Icons (Apache-2.0) in
+  [`third_party/material-icons/`](third_party/material-icons/), built into the
+  web app, and Dropbear SSH in
+  [`third_party/dropbear-2025.89/`](third_party/dropbear-2025.89/), with its
+  licence.
 
-- Hub rooting: [harmony-hub-root](https://github.com/Ripthulhu/harmony-hub-root)
-- Project: [schlambos/harmony-hub-control](https://github.com/schlambos/harmony-hub-control)
-
-**License:** this repository does not currently include a license file, so
-default copyright applies. Confirm redistribution rights with the author
-before republishing binaries or images built from it.
+**License**: the repository has no license file at its root, so default
+copyright applies. Ask the author before redistributing the code or binaries
+built from it.
