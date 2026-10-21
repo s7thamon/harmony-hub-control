@@ -7,6 +7,9 @@ export const state = {
   configLoaded: false,
   currentId: "", // "" unknown · "-1" everything off · "<id>" running
   stateError: null,
+  reachable: true, // false after repeated failed state polls
+  pendingId: "", // activity being started ("-1" = turning off) until the hub answers
+  runError: null, // the last failed start / turn-off request
 };
 
 const subscribers = new Set();
@@ -144,13 +147,34 @@ export function extractStateVersion(payload) {
   return match ? match[1] : null;
 }
 
+// The hub counts as unreachable after two polls in a row fail, so one
+// dropped request never flashes the "can't reach your hub" banner.
+let pollFailures = 0;
+
+function setReachable(reachable) {
+  if (state.reachable === reachable) return;
+  state.reachable = reachable;
+  emit();
+}
+
 export async function pollStateDigest() {
   let res;
   try {
     res = await api.getStateDigest(lastStateVersion);
-  } catch (_) {
+  } catch (error) {
+    // An HTTP error still means the hub answered; only a failed connection
+    // (status 0) counts towards "unreachable".
+    if (error?.status > 0) {
+      pollFailures = 0;
+      setReachable(true);
+    } else {
+      pollFailures += 1;
+      if (pollFailures >= 2) setReachable(false);
+    }
     return false; // transient; the next tick retries
   }
+  pollFailures = 0;
+  setReachable(true);
   if (!res || !res.changed) return false;
   const version = extractStateVersion(res.reply);
   if (version) lastStateVersion = version;
@@ -170,21 +194,31 @@ export function stopStatePolling() {
   }
 }
 
+/* Start an activity ("-1" turns everything off). pendingId shows the busy
+   state until the hub answers; a later start owns it from then on. A failed
+   request lands in runError, apart from stateError (reading the state). */
 export async function setRunning(id) {
   const target = String(id);
+  state.pendingId = target;
+  state.runError = null;
+  emit();
   try {
     await api.runActivity(target === "-1" ? -1 : Number(target));
-    state.stateError = null;
+    // A poll may have begun reading before the switch: let it finish, then
+    // read again so the answer reflects this start.
+    if (stateInflight) await stateInflight;
+    if (state.pendingId === target) state.pendingId = "";
     await refreshState();
     if (!state.currentId && !state.stateError) {
       state.currentId = target;
       emit();
     }
   } catch (error) {
+    if (state.pendingId === target) state.pendingId = "";
+    state.runError = error;
     try {
       await refreshState();
     } catch (_) {}
-    state.stateError = error;
     emit();
   }
   return state;
@@ -219,12 +253,17 @@ export function devices() {
   const raw = state.config?.deviceList?.DevicesWithFeatures ?? [];
   return raw.map((entry) => {
     const device = entry.Device ?? {};
+    const transport = Number(device.Transport) || 1;
     return {
       id: String(device["Id-"]),
       name: device.Name || device.FriendlyName || `Device ${device["Id-"]}`,
       manufacturer: device.Manufacturer ?? "",
       model: device.Model ?? "",
       type: device.DeviceType ?? "",
+      typeLabel: device.DeviceTypeDisplayName || device.DeviceType || "",
+      // Transport 32 is Bluetooth HID; everything else here is sent as IR.
+      isBluetooth: transport === 32,
+      entry,
       inputs: inputNames(entry),
       commands: (entry.Commands ?? []).map((c) => ({
         name: c.Name,

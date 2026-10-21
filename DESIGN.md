@@ -1,213 +1,167 @@
-# Harmony Hub Control Design System
+# Melodious design system
 
-## 1. Atmosphere & Identity
+The hub web UI and the Melodious Android app share one visual identity. The
+app (Kotlin + Jetpack Compose, Material 3, dark) is the reference: its theme
+is `MelodiousTheme.kt`, and the web tokens below mirror it. The port plan and
+the screen-by-screen mapping are in `docs/MELODIOUS_WEB_UI.md`.
 
-A living-room AV **rack console** — the web surface of a rooted Harmony Hub.
-Dense when operating a remote, calm when idle. Feels like pro AV gear on a
-sideboard: charcoal panels, warm status LEDs, tactile keys. Not a SaaS
-dashboard, not a marketing site, not purple “AI product” chrome.
+## 1. Identity
 
-**Signature:** the virtual remote — the **same Harmony remote JPEG and percent
-hotspot map** already used on the hub IR Control page (`remote_skin_jpg.h` +
-`IR_REMOTE_BUTTONS`). Do not invent a second handset. Everything else (nav,
-editors, system) is subordinate infrastructure around that control surface.
+- **Product name: Melodious.** "Harmony Hub" and "Harmony Touch" stay as the
+  names of the devices. The repo, binaries, paths and API routes keep their
+  technical names.
+- **Icon:** the neon wave-and-remote glyph on a charcoal tile, from the
+  owner's artwork. The web page inlines a 64 px favicon and a 180 px
+  home-screen icon (the hub serves no separate icon files).
+- **Feel:** a calm phone remote. Big, friendly keys; one obvious thing per
+  screen; what is on and what a key will do are always clear. Dark only.
 
-Household members use this on a phone on the couch and a laptop at the desk.
-Clarity of *what is on* and *what this button will do* beats feature density.
+## 2. Colour
 
-## 2. Color
+Tokens live in `tools/webui-sim/public/css/tokens.css`.
 
-Dark-mode native. Cool charcoal base, single warm accent (amber) for action,
-teal reserved for “live / on air” status only.
+### App palette (`MelodiousColors`)
 
-### Palette
+| Token | Value | Use |
+| --- | --- | --- |
+| `--canvas` | `#0e1014` | Page background |
+| `--nav-bar` | `#15181d` | Bottom bar, rail |
+| `--card` | `#171a20` | Cards, list groups, sheets' cards |
+| `--key` | `#1f232b` | Remote keys, rockers |
+| `--key-raised` | `#2a2f39` | Pressed key, OK |
+| `--dpad-ring` | `#1a1e25` | D-pad ring |
+| `--divider` | `#22262e` | Hairlines between rows |
+| `--live` | `#6fd3a8` | Running / connected dot |
+| `--warning` | `#f2c48d` | Warnings |
+| `--power-container` / `--on-power-container` | `#3a1f1f` / `#ffb4ab` | Power and destructive fills |
+| `--running-card` | `#1d2840` | The running activity, info notes |
+| `--key-red` `--key-green` `--key-yellow` `--key-blue` | `#f06a6a` `#5fd08b` `#f2d25c` `#6aa2f5` | Colour keys |
 
-| Role | Token | Dark | Usage |
-|------|-------|------|-------|
-| Surface/canvas | `--surface-canvas` | `#0c0e10` | Page background |
-| Surface/primary | `--surface-primary` | `#12151a` | Main content well |
-| Surface/secondary | `--surface-secondary` | `#181c22` | Cards, side nav |
-| Surface/elevated | `--surface-elevated` | `#1e242c` | Popovers, remote shell |
-| Surface/inset | `--surface-inset` | `#0a0c0f` | Recessed remote body |
-| Text/primary | `--text-primary` | `#e8eaed` | Headlines, body |
-| Text/secondary | `--text-secondary` | `#9aa3ad` | Leads, meta |
-| Text/tertiary | `--text-tertiary` | `#6b7380` | Disabled, captions |
-| Text/inverse | `--text-inverse` | `#0c0e10` | Text on accent fills |
-| Border/default | `--border-default` | `rgba(255,255,255,0.08)` | Dividers |
-| Border/strong | `--border-strong` | `rgba(255,255,255,0.14)` | Focus rings base |
-| Accent/primary | `--accent-primary` | `#e8a54b` | Primary CTAs, active key |
-| Accent/hover | `--accent-hover` | `#f0b862` | Hover on accent |
-| Accent/muted | `--accent-muted` | `rgba(232,165,75,0.14)` | Soft accent fills |
-| Status/live | `--status-live` | `#3dcaa0` | Running activity, connected |
-| Status/live-glow | `--status-live-glow` | `rgba(61,202,160,0.28)` | Pulse ring |
-| Status/warn | `--status-warn` | `#d4a017` | Caution |
-| Status/error | `--status-error` | `#e25c5c` | Errors, destructive |
-| Status/info | `--status-info` | `#6b8caf` | Neutral info |
-| Key/face | `--key-face` | `#252b34` | Remote button face |
-| Key/face-hover | `--key-face-hover` | `#2f3742` | Key hover |
-| Key/label | `--key-label` | `#d5dae0` | Key glyph/label |
-| Key/disabled | `--key-disabled` | `#1a1f26` | Unmapped key |
-| Shadow/remote | `--shadow-remote` | `0 24px 48px rgba(0,0,0,.45), 0 2px 0 rgba(255,255,255,.04) inset` | Remote body |
-| Overlay | `--overlay` | `rgba(0,0,0,0.72)` | Modal scrim |
+### Material 3 dark scheme
 
-### Rules
-- Accent (amber) is **only** for interactive primary actions and pressed keys.
-- Live/on-air is **only** teal — never use amber for “running”.
-- No purple, no blue-violet brand gradients, no pure `#000` canvas.
-- Borders are opacity whites on dark — no muddy gray hex borders.
-
-## 3. Typography
-
-### Scale
-
-| Level | Size | Weight | Line Height | Tracking | Usage |
-|-------|------|--------|-------------|----------|-------|
-| Display | clamp(28px, 4vw, 40px) | 600 | 1.1 | -0.03em | “Now playing” name |
-| H1 | 22px | 600 | 1.25 | -0.02em | Page title |
-| H2 | 17px | 600 | 1.3 | -0.01em | Panel titles |
-| H3 | 14px | 600 | 1.35 | 0 | Card titles |
-| Body | 14px | 400 | 1.5 | 0 | Default |
-| Body/sm | 13px | 400 | 1.45 | 0 | Secondary |
-| Caption | 11px | 500 | 1.35 | 0.04em | Meta, overlines |
-| Key | 11px | 600 | 1.1 | 0.02em | Remote key labels |
-| Mono | 12px | 450 | 1.4 | 0 | IDs, JSON, logs |
-
-### Font Stack
-- Primary: `"IBM Plex Sans", "Segoe UI", system-ui, sans-serif`
-- Mono: `"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace`
-- Load via system fallbacks only — no Google Fonts in sim or hub.
+| Token | Value |
+| --- | --- |
+| `--primary` / `--on-primary` | `#9db8ff` / `#0b1a3a` |
+| `--primary-container` / `--on-primary-container` | `#2b3a5e` / `#d9e2ff` |
+| `--secondary` / `--secondary-container` | `#bec6dc` / `#2b3a5e` |
+| `--tertiary` / `--on-tertiary` | `#8fe0bc` / `#003828` |
+| `--on-surface` / `--on-surface-variant` | `#e7e9ee` / `#a3aab7` |
+| `--surface-lowest` / `--surface-high` / `--surface-highest` | `#0a0b0e` / `#1a1d23` / `#262a33` |
+| `--outline` / `--outline-variant` | `#4a505c` / `#343a46` |
+| `--error` / `--on-error` | `#ffb4ab` / `#690005` |
+| `--inverse-surface` / `--inverse-on-surface` | `#e2e2e9` / `#2f3036` |
 
 ### Rules
-- Sentence case everywhere. No Title Case Headers.
-- Tabular nums for IDs and counters (`font-variant-numeric: tabular-nums`).
-- Body never below 13px on mobile; key labels may be 10–11px.
 
-## 4. Spacing & Layout
+- **Primary blue** is for the main action on a screen (filled buttons), the
+  selected tab, section labels and links.
+- **Green** (`--live`) means running or connected, and nothing else.
+- **Power and destructive** actions use the power container (dark red fill,
+  coral text), never primary.
+- Unmapped remote keys stay visible but dimmed to 35%.
+- Older token names (`--surface-*`, `--accent-*`, `--status-*`) are aliases
+  for pages not ported yet. New code uses the names above.
 
-### Base Unit
-**4px**
+## 3. Type
 
-| Token | Value | Usage |
-|-------|-------|-------|
-| `--space-1` | 4px | Icon gaps |
-| `--space-2` | 8px | Compact stacks |
-| `--space-3` | 12px | Field padding |
-| `--space-4` | 16px | Card padding default |
-| `--space-5` | 20px | Section inner |
-| `--space-6` | 24px | Panel padding |
-| `--space-8` | 32px | Between panels |
-| `--space-10` | 40px | Major breaks |
-| `--space-12` | 48px | Page rhythm |
+The system font stack: Roboto on Android (the app's own font), SF on Apple,
+Segoe on Windows. No web fonts are shipped.
 
-### Grid
-- Max content width: `1280px`
-- Shell: sticky left rail `220px` + fluid main (collapse rail to top chips &lt; 840px)
-- Control view: `minmax(280px, 360px)` remote column + fluid command list
-- Breakpoints: `sm 640`, `md 840`, `lg 1024`, `xl 1280`
+| Use | Size / weight |
+| --- | --- |
+| Screen title, "Everything's off" | 28 / 500 |
+| Remote title | 24 / 500 |
+| Running card, empty-state title | 22 / 500 |
+| Sheet title | 20 / 500 |
+| Card and row titles | 16–18 |
+| Body, buttons | 15 (buttons 14 / 500) |
+| Section labels | 14 / 500, primary |
+| Subtitles | 13 |
+| Key captions, badges | 12 |
+| Overlines ("VOL", "CH") | 11 / 600, +1px tracking |
 
-### Rules
-- No magic spacing. Every gap maps to a token.
-- Remote column is optically centered in its panel, not full-bleed edge-to-edge.
+- Sentence case everywhere.
+- Body text never goes below 13 px.
+
+## 4. Shape, spacing, layout
+
+- **Shapes:** 8, 12, 16, 24 and 28 px (`--shape-xs` … `--shape-xl`) and full
+  pills.
+  - List groups and cards use 24.
+  - Sheets and dialogs use 28.
+  - Keys use 16–20; the D-pad, OK and the power button are circles.
+- **Spacing:** a 4 px grid (`--space-1` … `--space-12`). Page gutters are
+  16 px on phones.
+- **Navigation:** four tabs (Remote, Activities, Devices, Settings).
+  - Phones get a bottom navigation bar, 80 px tall, with a pill indicator.
+  - From 840 px there is a navigation rail (88 px) with the brand mark.
+  - Sub-pages get a top bar with a back arrow and hide the bottom bar on
+    phones, as the app's full-screen pages do.
+- **Remote layout:**
+  - On phones the remote fills the screen above the bar, up to 780 px tall;
+    the D-pad takes the spare height (up to 320 px).
+  - From 1100 px, "More keys" sits in a panel beside the remote instead of a
+    sheet.
+- Lists are capped at 720 px wide.
 
 ## 5. Components
 
-### App shell
-- Top bar: brand mark + product name + offline/sim pill + live activity chip
-- Side nav: icon + label + one-line purpose; active = amber left hairline + elevated surface
-- Content: single active view; hash routing (`#control`, `#activities`, …)
+| App (Compose) | Web |
+| --- | --- |
+| ScreenTitle, SectionLabel | `.m-title`, `.m-section` |
+| ListGroup, ListRow | `.m-list`, `.m-row` (min 64 px, chevron for navigation) |
+| IconTile, StatusDot | `.m-tile`, `.m-dot` |
+| Button, FilledTonalButton, OutlinedButton, TextButton | `.btn-filled`, `.btn-tonal`, `.btn-outlined`, `.btn-text` |
+| PowerButton | `.power-btn` |
+| ModalBottomSheet | `<dialog class="sheet">` (a centred card on wide screens) |
+| Snackbar | `.snackbar`: inverse surface; errors stay for 8 s |
+| Remote mode tabs | `.seg-tabs` (pill track, primary-container selection) |
+| Keys | `.rk`, `.dpad-*`, `.rocker`, `.rk-captioned`, `.rk-color` |
 
-### Pill / badge
-- Quiet outline by default; `.live` uses teal fill + glow; `.sim` uses amber muted fill
+Unported setup pages keep their own classes (`.panel`, `.btn-primary`,
+`.notice-*`, …), restyled to these tokens.
 
-### Button
-- Primary: amber fill, dark text, 10px radius, min-height 40px
-- Secondary: elevated surface + border, primary text
-- Ghost: transparent, secondary text
-- Quiet: transparent, tertiary text, hairline border; reveals amber on hover —
-  for repeatable row actions (Run, Start) so one screen has at most one amber
-- Danger: error text, transparent/error border — also used for Power off,
-  the one globally destructive action; Power off is never amber
-- Pressed: `transform: scale(0.98)`; transition 120ms transform/opacity only
+Icons are Material Icons (filled and outlined, Apache-2.0) inlined as SVG
+paths, the same glyphs the app draws. See `third_party/material-icons/`. No
+emoji icons.
 
-### Panel / card
-- `--surface-secondary`, 1px `--border-default`, radius 12px, padding `--space-6`
-- No drop shadow on ordinary cards; remote shell may use `--shadow-remote`
+## 6. Remote behaviour
 
-### Virtual remote
-- **Asset:** `/assets/remote-skin.jpg` extracted from `remote_skin_jpg.h`
-- **Geometry:** `IR_REMOTE_BUTTONS` percent `x,y,w,h` over aspect-ratio `591/1280`
-- Structure: `.ir-remote-shell` > `.ir-remote-skin` > `img` + absolute `.remote-hotspot`
-- **The photo is the interface.** Hotspots are invisible at rest — no fill,
-  no border. Mappedness is communicated by response, like the physical handset
-- Hover/focus: amber glow ring (`box-shadow` only, no fill). Press: brief
-  amber flash (35% fill) that fades. Hold window: glow intensifies
-- Hold-capable tick: 4px amber dot, revealed only on hover/focus of that key
-- Unmapped: transparent, no pointer (photo shows the physical key underneath)
-- **Skin power key:** UI affordance only (never saved into a ButtonMap). In
-  Activities mode it mirrors toolbar Power off (`activity-run -1`) while an
-  activity is running, and stays inert when nothing is on. In Devices mode it
-  sends the selected device's own power command when aliases resolve, else inert.
-  Same danger styling/weight as toolbar Power off — never amber.
-- Percent geometry is sacred — no min-size overrides on mobile; enlarged
-  targets overlap neighboring keys and mislead taps
-- Status line sits **above** the remote, pinned under the now-strip:
-  last command + device target in mono — feedback must be visible without scrolling
-- Soft buttons (MenuItem, no hard ButtonKey): chip row under the skin, not invented keys
-- **All commands** panel lists every sendable command (full device list in
-  Devices mode; mapped keys in Activities). Opens by default in Devices mode
-  (the list is the main event there); stays collapsed by default in Activities.
-  Preference is persisted as `hhc.commands`. Each row sends immediately — copy
-  must say so. Legacy `hhc.inspector=open` migrates to open once.
-- **Send log** is a separate, collapsed-by-default panel (`hhc.sendlog`) for the
-  recent-send trail and refresh controls — debug truth, never in the way
+- A key fires when the finger lifts. Sliding off cancels it.
+- A key with a long-press action fires that action after 500 ms instead.
+  Those keys carry a small dot.
+- Menu or Exit is labelled "Home" when it really sends Home.
+- Unmapped keys are dimmed and inert.
+- Feedback: the pressed key brightens, phones that can vibrate tick, and a
+  quiet status line shows "key → device · command" (it also previews keys on
+  hover and focus).
+- Failures show as a snackbar, never `alert()`.
+- **Power** turns the activity off with no confirmation, like the physical
+  remote. Destructive edits (delete, restore, reboot) keep their
+  confirmation guards.
 
-### Activity hero (“now running”)
-- Full-width panel, inset surface, live dot + display name + Power off
-- Not a gradient hero blob — restrained status strip
+## 7. Motion
 
-### Forms
-- Labels: caption weight 500, secondary color
-- Inputs: inset surface, border default, focus = amber 2px ring
-- Selects match inputs
+- Easing: standard `cubic-bezier(0.2, 0, 0, 1)`, emphasized
+  `cubic-bezier(0.05, 0.7, 0.1, 1)`.
+- Durations: 150, 250 and 400 ms.
+- Animate transform, opacity and colour only.
+- Views fade up 6 px.
+- Sheets rise; on wide screens they scale in from 96%.
+- With `prefers-reduced-motion`, all of that is off and spinners slow down.
 
-### Notices
-- Inline, not `alert()`. `.ok` / `.warn` / `.error` left border + muted fill
-
-### Iconography
-- Inline SVG only (16/20px stroke 1.75). No emoji icons.
-
-## 6. Motion
-
-| Token | Value | Usage |
-|-------|-------|-------|
-| `--ease-out` | `cubic-bezier(0.22, 1, 0.36, 1)` | Most UI |
-| `--dur-fast` | 120ms | Keys, toggles |
-| `--dur-med` | 200ms | Panels, nav |
-| `--dur-slow` | 320ms | View enter |
-
-- Animate **only** `transform` and `opacity`.
-- Live dot: gentle opacity pulse 1.6s, paused when `prefers-reduced-motion`.
-- View switch: 160ms fade; no slide-over gimmicks.
-
-## 7. Do / Don't
+## 8. Do and don't
 
 ### Do
-- Lead every control screen with **what is running** and a one-tap Power off.
-- Show the **resolved action** under a remote key (device · command) on hover/focus.
-- Prefer one primary action per toolbar.
-- Keep sim mode obvious: persistent “Simulated hub” pill; never look like production cloud.
-- Preserve activity-editor contracts (no action-less buttons, identity rules).
+
+- Lead the Remote tab with what is running and a one-tap power button.
+- Keep every function reachable. Web-only tools (Wi-Fi, MQTT, Backup, System,
+  IR tools) live under Settings and Devices.
+- Keep the hub offline: no CDN, no web fonts, no new served files.
 
 ### Don't
-- Purple gradients, glassmorphism stacks, Inter/Roboto as brand, three equal feature cards.
-- Emoji as icons or status.
-- Modal confirmations for ordinary sends; reserve dialogs for delete/destructive.
-- Hide the difference between Device control and Activity control.
-- Contact the live hub from the sim (localhost fixtures only).
 
----
-
-**Implementation note:** Production UI still embeds into `codex_webui`. The
-redesign lands first in `tools/webui-sim/` against a mock API. Tokens in
-`tools/webui-sim/public/css/tokens.css` are the runtime source of truth and must
-match this document.
+- Invent new colours outside the tokens, or use primary for power or delete.
+- Use emoji as icons, or modal confirmations for ordinary sends.
+- Make the simulator contact a real hub. The sim binds 127.0.0.1 and only
+  uses its fixtures.

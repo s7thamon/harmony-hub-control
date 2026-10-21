@@ -19,7 +19,7 @@ zig-distribution-sweep pilot reports):
 
   codex_webui.c          4e92f205ef80bcf1f96da4419c634ef4bbb8ff20 (box 2026-10-20 + LED + state-digest endpoints + system-status, delete guard, RAM agent logs, device settings, inputs)
   activity_ui_assets.h   5dad607f7c09a0d5cc0034969b76e6c5df1eb2bc
-  harmony_shell_assets.h f497e07b6f5ea0dd8fdf6c39369c41b47813483b (box 2026-10-20 + state-digest liveness + integrity fixes + device settings + inputs)
+  harmony_shell_assets.h 114fed5fa9ef9c7109c09032dd4a5274a6258116 (box 2026-10-20 + state-digest liveness + integrity fixes + device settings + inputs + Melodious shell)
   remote_skin_jpg.h      419611c5ff0713f1f5de2dd684d699f6d77238d5
   codex_hbus.c           d2bbcdef214369bff3dacf1836d6b5a0057f5ede (309cec3)
 
@@ -86,9 +86,9 @@ PINNED_SOURCES = {
         502204,
     ),
     "harmony_shell_assets.h": (
-        "f497e07b6f5ea0dd8fdf6c39369c41b47813483b",
-        "c3e86a6d1f8f67bf5d9bd2845f463566376e6c73504528ad81d29e8c3ebf790b",
-        1505770,
+        "114fed5fa9ef9c7109c09032dd4a5274a6258116",
+        "22481d8dfba1ee671a2574724014303fc22413a45f558506ed310f82feb0d28e",
+        1763731,
     ),
     "remote_skin_jpg.h": (
         "419611c5ff0713f1f5de2dd684d699f6d77238d5",
@@ -105,8 +105,8 @@ PINNED_SOURCES = {
 #: exact live binary targets (verified pilot reports)
 TARGETS = {
     "codex_webui": (
-        "3edc2b0a2d8614aa84a3f7efbbda223e8e1953a1b4100da704a46d5363b32654",
-        992740,
+        "228c2f99181eb1852e82ef6adb9a82f60d926ca05e1e93b6211aaa4c858fe6fd",
+        1043700,
     ),
     "codex_bt_pair_agent": (
         "563c6c58a3629edfebd7ec30ebcf14e6384a2d84e89669b1d7c3d79c75b619c8",

@@ -14,7 +14,8 @@
 #        - Google Fonts preconnect/stylesheet stripped (hub is offline)
 #        - one stylesheet (/assets/harmony-shell.css) + one classic script
 #          (/assets/harmony-shell.js), no ES-module loading
-#        - simulated-hub wording replaced with local/offline wording
+#        - simulated-hub wording replaced or dropped (title, description,
+#          the sim chip)
 #        - HARMONY_SIM flag rewritten to false + HARMONY_PRODUCTION=true
 #        - head split at the REMOTE_SKIN_SRC base64 seam; codex_webui.c
 #          injects the pre-existing REMOTE_SKIN_JPG_B64 there at request
@@ -106,18 +107,15 @@ awk '
     print
     next
   }
-  /<title>Harmony Hub Control/ {
-    print "  <title>Harmony Hub Control</title>"
+  /<title>Melodious/ {
+    print "  <title>Melodious</title>"
     next
   }
-  /Local control surface for a simulated Harmony hub/ {
-    print "  <meta name=\"description\" content=\"Local control surface for the Harmony hub: activities, virtual remote, and device IR. Fully offline.\">"
+  /Melodious: control a simulated Harmony hub/ {
+    print "  <meta name=\"description\" content=\"Melodious: control your Harmony hub from your browser. Activities, remote and devices, fully offline.\">"
     next
   }
-  /Simulated hub<\/span>/ {
-    print "        <span class=\"pill pill-sim\">Local hub · offline</span>"
-    next
-  }
+  /Simulated hub<\/span>/ { next }
   { print }
 ' "$SIM_PUBLIC/index.html" > "$TMP/index.html"
 

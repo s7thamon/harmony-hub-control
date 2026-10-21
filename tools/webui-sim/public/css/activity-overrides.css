@@ -30,11 +30,9 @@
 }
 
 #view-activities .activity-hero {
-  border: 1px solid rgba(61, 202, 160, 0.24) !important;
-  border-radius: var(--radius-panel) !important;
-  background:
-    radial-gradient(circle at 83% 8%, rgba(61, 202, 160, 0.16), transparent 34%),
-    linear-gradient(135deg, #0e1a1c 0%, #123336 62%, #0f4b47 100%) !important;
+  border: 0 !important;
+  border-radius: var(--shape-xl) !important;
+  background: var(--running-card) !important;
   box-shadow: none !important;
   color: var(--text-primary) !important;
 }

@@ -1,154 +1,860 @@
-/* -- Layout: source list | remote column | command side ------- */
+/* ============================================================
+   Melodious — remote (webui-sim)
+   The Remote tab and the device page: "Everything's off", the busy
+   state, the keypad (RemoteKeys / ButtonsSurface), More keys,
+   the keyboard tab and Fix it. Sizes follow the app (dp → px).
+   ============================================================ */
 
-.control-grid {
+/* -- Everything's off ---------------------------------------------- */
+
+.off {
+  max-width: 720px;
+  margin: 0 auto;
+}
+
+.off-title {
+  padding: var(--space-5) var(--space-1) 0;
+  font-size: var(--fs-display);
+  font-weight: 500;
+  line-height: 36px;
+}
+
+.off-sub {
+  padding: 6px var(--space-1) var(--space-5);
+  color: var(--on-surface-variant);
+  font-size: var(--fs-body-lg);
+}
+
+.off-note,
+.remote-preview {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--shape-md);
+  background: var(--running-card);
+  color: var(--on-primary-container);
+  font-size: var(--fs-body-sm);
+}
+
+.off-list {
   display: grid;
-  grid-template-columns: minmax(240px, 300px) minmax(280px, 360px) minmax(240px, 1fr);
-  gap: var(--space-5);
-  align-items: start;
+  gap: 10px;
 }
 
-.control-src {
+.off-card {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  width: 100%;
   padding: var(--space-4);
+  border-radius: var(--shape-lg);
+  background: var(--card);
+  text-align: left;
+  transition: box-shadow var(--dur-short) var(--ease-standard);
 }
 
-@media (min-width: 1121px) {
-  .control-src,
-  .control-side {
-    position: sticky;
-    top: calc(var(--topbar-h) + var(--space-5));
+.off-card:hover {
+  box-shadow: inset 0 0 0 100px var(--state-hover);
+}
+
+.off-card:active {
+  box-shadow: inset 0 0 0 100px var(--state-press);
+}
+
+.off-card-text {
+  flex: 1;
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.off-card-name {
+  font-size: 18px;
+  font-weight: 500;
+}
+
+.off-card-meta {
+  overflow: hidden;
+  color: var(--on-surface-variant);
+  font-size: var(--fs-body-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.off-card-play {
+  color: var(--primary);
+}
+
+.off-empty {
+  padding: var(--space-1);
+  color: var(--on-surface-variant);
+}
+
+.off-empty a {
+  color: var(--primary);
+}
+
+@media (min-width: 840px) {
+  .off-list {
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
   }
 }
 
-.control-src .panel-head {
-  margin-bottom: var(--space-3);
-}
+/* -- Starting / stopping ----------------------------------------------- */
 
-.control-remotecol {
-  justify-self: center;
-  width: 100%;
-}
-
-.control-side {
+.busy {
   display: grid;
-  gap: var(--space-4);
-  min-width: 0;
-}
-
-/* -- Source lists (activities / devices) ----------------------- */
-
-.src-list {
-  display: grid;
-  gap: var(--space-2);
-  max-height: calc(100vh - 260px);
-  overflow-y: auto;
-  padding-right: 2px;
-}
-
-.src-row {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  gap: var(--space-3);
-  align-items: center;
-  padding: var(--space-3);
-  background: var(--surface-primary);
-  border: 1px solid var(--border-default);
-  border-radius: var(--radius-panel);
-  text-align: left;
-  transition: transform var(--dur-fast) var(--ease-out),
-    opacity var(--dur-fast) var(--ease-out);
-}
-
-button.src-row {
-  grid-template-columns: minmax(0, 1fr);
-  width: 100%;
-}
-
-.src-row:hover {
-  transform: translateY(-1px);
-  border-color: var(--border-strong);
-}
-
-.src-row.is-selected {
-  border-color: var(--border-accent);
-  background: var(--surface-elevated);
-  box-shadow: inset 3px 0 0 var(--accent-primary);
-}
-
-.src-row.is-live {
-  border-color: var(--border-live);
-}
-
-.src-row.is-live.is-selected {
-  box-shadow: inset 3px 0 0 var(--status-live);
-}
-
-.src-order {
-  min-width: 30px;
-  padding: var(--space-1) 0;
-  text-align: center;
-  font-size: 11px;
-  color: var(--text-tertiary);
-  background: var(--surface-inset);
-  border: 1px solid var(--border-default);
-  border-radius: 6px;
-}
-
-.src-main {
-  display: block;
-  min-width: 0;
-  text-align: left;
-}
-
-.src-name {
-  display: block;
-  font-size: var(--text-body-sm);
-  font-weight: 600;
-  line-height: 1.35;
-  color: var(--text-primary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.src-meta {
-  display: block;
-  margin-top: 2px;
-  font-size: 11px;
-  color: var(--text-tertiary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.src-side {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-}
-
-.remote-wrap {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: var(--space-4);
-}
-
-.ir-remote-card {
-  display: grid;
+  align-content: center;
   justify-items: center;
-  gap: var(--space-3);
-  width: 100%;
-  min-width: 0;
+  min-height: 70dvh;
+  padding: var(--space-8);
+  text-align: center;
 }
 
-.ir-remote-shell {
-  width: 100%;
+.busy-ring {
+  position: relative;
   display: grid;
   place-items: center;
-  background: var(--surface-elevated);
-  border: 1px solid var(--border-default);
-  border-radius: 12px;
+  width: 72px;
+  height: 72px;
+  color: var(--primary);
+}
+
+.busy-ring .m-spinner {
+  position: absolute;
+  inset: 0;
+  width: 72px;
+  height: 72px;
+  border-width: 4px;
+}
+
+.busy-title {
+  margin-top: var(--space-6);
+  font-size: var(--fs-title);
+  font-weight: 500;
+}
+
+.busy-body {
+  max-width: 320px;
+  margin-top: var(--space-2);
+  color: var(--on-surface-variant);
+  font-size: var(--fs-label);
+}
+
+/* -- Remote layout -------------------------------------------------------- */
+
+/* The remote fills the screen above the navigation bar, like the app, up to
+   a phone's height (a tall tablet keeps the keys together instead of opening
+   a gap above the D-pad); on a short screen the page scrolls instead of
+   squashing the keys. */
+.remote {
+  display: flex;
+  flex-direction: column;
+  min-height: min(780px, calc(100dvh - var(--nav-h) - env(safe-area-inset-bottom, 0px) - var(--space-4)));
+  max-width: var(--remote-max);
+  margin: 0 auto;
+}
+
+.app.is-subpage .remote {
+  min-height: min(780px, calc(100dvh - var(--appbar-h) - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - var(--space-4)));
+}
+
+.remote-main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.remote-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) 0 var(--space-2);
+}
+
+.remote-title {
+  flex: 1;
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding: var(--space-1);
+  border-radius: var(--shape-sm);
+  text-align: left;
+}
+
+.remote-title:hover {
+  background: var(--state-hover);
+}
+
+.remote-name {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
+  font-size: var(--fs-headline);
+  font-weight: 500;
+  line-height: 32px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.remote-caret {
+  color: var(--on-surface-variant);
+}
+
+.remote-sub {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--on-surface-variant);
+  font-size: var(--fs-body-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The resolved "key → device · command" line (web-only feedback). */
+.remote-status {
+  min-height: 20px;
+  margin: 0 var(--space-1) 6px;
+  overflow: hidden;
+  color: var(--on-surface-variant);
+  font-size: var(--fs-body-sm);
+  line-height: 20px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.remote-status[data-kind="error"] {
+  color: var(--error);
+}
+
+.remote-status[data-kind="preview"] {
+  color: var(--on-surface);
+}
+
+.remote-surface {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  padding: var(--space-3) 0 0;
+}
+
+.remote-side {
+  display: none;
+}
+
+/* -- Keypad --------------------------------------------------------------- */
+
+.pad {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.pad-transport {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: var(--space-2);
+  height: 56px;
+}
+
+/* The D-pad takes whatever height is left, never more than 320px, and sits
+   at the bottom next to the volume cluster (inside the thumb's arc). Height
+   comes from the flex-grown box, so it is placed absolutely: Chrome resolves
+   container *height* units to 0 for a flex-grown item, width units are fine. */
+.pad-dpad {
+  position: relative;
+  flex: 1;
+  min-height: 160px;
+  container-type: inline-size;
+}
+
+.dpad {
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  height: min(100%, 320px, 100cqw);
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: var(--dpad-ring);
+  transform: translateX(-50%);
+}
+
+.pad-bottom {
+  display: flex;
+  flex: none;
+  gap: var(--space-3);
+  height: 176px;
+}
+
+.pad-grid {
+  display: grid;
+  flex: 1;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+  gap: 10px;
+}
+
+/* A key: a tinted surface that brightens while pressed, dims when unmapped. */
+.rk {
+  position: relative;
+  display: grid;
+  place-items: center;
+  min-width: 0;
+  border-radius: var(--shape-md);
+  background: var(--key);
+  color: var(--on-surface);
+  font-size: var(--fs-body);
+  font-weight: 500;
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  transition: background-color 90ms linear;
+}
+
+.rk:hover:not(:disabled) {
+  box-shadow: inset 0 0 0 100px var(--state-hover);
+}
+
+.rk.is-pressed,
+.rk.is-sent {
+  background: var(--key-raised);
+}
+
+.rk:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.rk-primary {
+  background: var(--primary-container);
+  color: var(--on-primary-container);
+}
+
+.rk-primary.is-pressed,
+.rk-primary.is-sent {
+  background: #3a4c76;
+}
+
+.rk-captioned {
+  align-content: center;
+  gap: var(--space-1);
+  border-radius: 20px;
+}
+
+.rk-caption {
+  color: var(--on-tile);
+  font-size: var(--fs-caption);
+  font-weight: 400;
+}
+
+/* Long-press capable: a small dot, like the hub's own remote page. */
+.rk.has-hold::after {
+  content: "";
+  position: absolute;
+  top: 7px;
+  right: 9px;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--primary);
+  opacity: 0.7;
+}
+
+.dpad-key {
+  position: absolute;
+  width: 31%;
+  height: 31%;
+  border-radius: 50%;
+  background: transparent;
+}
+
+.dpad-up {
+  top: 2%;
+  left: 34.5%;
+}
+
+.dpad-down {
+  bottom: 2%;
+  left: 34.5%;
+}
+
+.dpad-left {
+  top: 34.5%;
+  left: 2%;
+}
+
+.dpad-right {
+  top: 34.5%;
+  right: 2%;
+}
+
+.dpad-ok {
+  position: absolute;
+  top: 31%;
+  left: 31%;
+  width: 38%;
+  height: 38%;
+  border-radius: 50%;
+  background: var(--key-raised);
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.dpad-ok.is-pressed,
+.dpad-ok.is-sent {
+  background: var(--primary-container);
+}
+
+.rocker {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  align-items: center;
+  width: 72px;
+  overflow: hidden;
+  border-radius: 36px;
+  background: var(--key);
+}
+
+.rocker-key {
+  flex: 1;
+  width: 100%;
+  border-radius: 0;
+  background: transparent;
+}
+
+.rocker-cap {
+  color: var(--on-surface-variant);
+  font-size: var(--fs-overline);
+  font-weight: 600;
+  letter-spacing: 1px;
+}
+
+/* -- More keys ----------------------------------------------------------------- */
+
+.mk {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.mk-head,
+.mk-page-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 0 var(--space-1);
+}
+
+.mk-title {
+  flex: 1;
+  font-size: var(--fs-title);
+  font-weight: 500;
+}
+
+.mk-for {
+  color: var(--on-surface-variant);
+  font-size: var(--fs-body-sm);
+}
+
+.mk .m-section {
+  margin: 0;
+}
+
+.mk-soft {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-2);
+}
+
+.mk-soft-key {
+  min-height: 52px;
+  padding: 0 6px;
+  border-radius: var(--shape-md);
+  background: rgba(43, 58, 94, 0.55);
+  color: var(--on-surface);
+  font-size: var(--fs-label);
+  font-weight: 500;
+}
+
+.mk-soft-key:hover {
+  box-shadow: inset 0 0 0 100px var(--state-hover);
+}
+
+.mk-soft-key.is-sent {
+  background: var(--primary-container);
+}
+
+.mk-row {
+  display: grid;
+  gap: var(--space-2);
+  height: 56px;
+}
+
+.mk-row-4 {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.mk-row-6 {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+}
+
+.mk-numbers {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-2);
+}
+
+.mk-numbers .rk {
+  height: 56px;
+  font-size: 22px;
+  font-weight: 400;
+}
+
+.rk-sheet {
+  background: var(--sheet-key);
+}
+
+.mk-numbers .rk-small,
+.rk-small {
+  font-size: var(--fs-label);
+  font-weight: 500;
+}
+
+.rk-record {
+  color: var(--record);
+}
+
+.rk-color {
+  width: 32px;
+  height: 6px;
+  border-radius: 3px;
+}
+
+.rk-color-red {
+  background: var(--key-red);
+}
+
+.rk-color-green {
+  background: var(--key-green);
+}
+
+.rk-color-yellow {
+  background: var(--key-yellow);
+}
+
+.rk-color-blue {
+  background: var(--key-blue);
+}
+
+.mk-links,
+.mk-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--space-2);
+}
+
+.mk-actions {
+  justify-content: flex-start;
+  margin: var(--space-2) 0;
+}
+
+.mk-page {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.mk-hint,
+.mk-empty {
+  margin: 0 var(--space-1);
+  color: var(--on-surface-variant);
+  font-size: var(--fs-body-sm);
+}
+
+.mk-page .search-field {
+  margin: var(--space-1) 0;
+}
+
+.cmd-list {
+  display: grid;
+}
+
+.cmd-row {
+  min-height: 52px;
+  padding: 0 var(--space-5);
+  border-bottom: 1px solid var(--divider);
+  font-size: var(--fs-body-lg);
+  text-align: left;
+}
+
+.cmd-row:hover {
+  background: var(--state-hover);
+}
+
+.cmd-row:active,
+.cmd-row.is-sent {
+  background: var(--state-press);
+}
+
+.cmd-row:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--primary);
+}
+
+.mk-page .m-section,
+.cmd-results .m-section {
+  margin: var(--space-4) 0 var(--space-1) var(--space-4);
+}
+
+/* Send log */
+.send-log {
+  display: grid;
+  gap: 2px;
+}
+
+.send-log li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: var(--space-3);
+  padding: 6px var(--space-2);
+  border-radius: var(--shape-xs);
+  font-size: var(--fs-body-sm);
+}
+
+.send-log li:nth-child(odd) {
+  background: var(--surface-highest);
+}
+
+.send-time {
+  color: var(--on-surface-variant);
+  font-family: var(--font-mono);
+  font-size: var(--fs-caption);
+  font-variant-numeric: tabular-nums;
+}
+
+.send-target {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.send-note {
+  color: var(--live);
+  font-size: var(--fs-caption);
+}
+
+.send-note.is-error {
+  color: var(--error);
+}
+
+/* -- Keyboard tab ----------------------------------------------------------- */
+
+.kb {
+  display: grid;
+  align-content: start;
+  gap: var(--space-4);
+  padding-top: var(--space-1);
+}
+
+.kb .m-section {
+  margin: 0;
+}
+
+.kb-connecting {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 var(--space-1);
+  color: var(--on-surface-variant);
+  font-size: var(--fs-label);
+}
+
+.kb-connecting .m-spinner {
+  width: 16px;
+  height: 16px;
+  border-width: 2px;
+}
+
+.kb-warn {
+  display: flex;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border-radius: 20px;
+  background: var(--warning-container);
+}
+
+.kb-warn-icon {
+  color: var(--warning);
+}
+
+.kb-warn-title {
+  font-weight: 500;
+}
+
+.kb-warn-body {
+  margin: var(--space-1) 0;
+  color: var(--on-surface-variant);
+  font-size: var(--fs-body-sm);
+}
+
+.kb-warn .btn {
+  margin-left: calc(-1 * var(--space-3));
+}
+
+.kb-hint {
+  color: var(--on-surface-variant);
+  font-size: var(--fs-label);
+}
+
+.kb-text {
+  min-height: 120px;
+  padding: var(--space-4);
+  border-radius: 20px;
+  font-family: var(--font-sans);
+  font-size: var(--fs-body-lg);
+}
+
+.kb-keys {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+/* -- Fix it ------------------------------------------------------------------- */
+
+.fix-card {
+  display: grid;
+  gap: 10px;
+  margin-top: var(--space-3);
+  padding: var(--space-4);
+  border-radius: 20px;
+  background: var(--card);
+}
+
+.fix-card-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.fix-card-text {
+  display: grid;
+  min-width: 0;
+}
+
+.fix-card-name {
+  font-size: var(--fs-title-sm);
+  font-weight: 500;
+}
+
+.fix-card-roles {
+  color: var(--on-surface-variant);
+  font-size: var(--fs-body-sm);
+}
+
+.fix-card-actions {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.fix-card-actions .btn {
+  flex: 1;
+  min-height: 48px;
+  padding: 0 var(--space-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fix-card-warn {
+  color: var(--warning);
+  font-size: var(--fs-caption);
+}
+
+/* -- Device page commands -------------------------------------------------------- */
+
+.cmd-tools {
+  display: flex;
+  gap: 10px;
+  margin: var(--space-3) 0 0;
+}
+
+.cmd-tools .btn {
+  flex: 1;
+  min-height: 48px;
+  padding: 0 var(--space-3);
+}
+
+/* -- Wide screens: More keys beside the remote ---------------------------------- */
+
+@media (min-width: 840px) {
+  .remote {
+    min-height: min(780px, calc(100dvh - var(--space-6)));
+  }
+
+  .app.is-subpage .remote {
+    min-height: min(780px, calc(100dvh - var(--appbar-h) - var(--space-6)));
+  }
+}
+
+@media (min-width: 1100px) {
+  .remote {
+    flex-direction: row;
+    align-items: flex-start;
+    gap: var(--space-8);
+    max-width: 1040px;
+  }
+
+  .remote-main {
+    position: sticky;
+    top: 0;
+    flex: 0 0 var(--remote-max);
+    min-height: inherit;
+  }
+
+  .remote-side {
+    display: block;
+    flex: 1;
+    min-width: 0;
+    margin-top: var(--space-4);
+    padding: var(--space-5);
+    border-radius: var(--shape-xl);
+    background: var(--card);
+  }
+
+  .remote-side .mk-head {
+    padding-top: 0;
+  }
+
+  .pad-transport {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .rk-more {
+    display: none;
+  }
+}
+
+/* ============================================================
+   Photo remote used by the activity wizard's "Map buttons" step
+   until the Activities slice ports it (then this section goes).
+   ============================================================ */
+
+.ir-remote-shell {
+  display: grid;
+  place-items: center;
+  width: 100%;
   padding: var(--space-3);
+  border-radius: var(--shape-lg);
+  background: var(--key);
   box-shadow: var(--shadow-remote);
 }
 
@@ -168,32 +874,21 @@ button.src-row {
   pointer-events: none;
 }
 
-.remote-help {
-  max-width: min(315px, 100%);
-  text-align: center;
-  font-size: var(--text-caption, 11px);
-  line-height: 1.4;
-}
-
-/* The photo is the interface. Hotspots are invisible at rest — mappedness
-   is communicated by response (glow on hover/focus, flash on press), not by
-   permanent decoration, exactly like the physical handset. */
 .remote-hotspot {
   position: absolute;
+  z-index: 2;
+  min-height: 0;
   margin: 0;
   padding: 0;
-  min-height: 0;
-  border-radius: 999px;
   border: 0;
+  border-radius: 999px;
   background: transparent;
   color: transparent;
   box-shadow: none;
   touch-action: manipulation;
   cursor: pointer;
-  z-index: 2;
-  transition: background var(--dur-fast) var(--ease-out),
-    box-shadow var(--dur-fast) var(--ease-out),
-    transform var(--dur-fast) var(--ease-out);
+  transition: background-color var(--dur-short) var(--ease-standard),
+    box-shadow var(--dur-short) var(--ease-standard);
 }
 
 .remote-hotspot:hover:not(:disabled):not(.disabled),
@@ -203,27 +898,10 @@ button.src-row {
     0 0 18px 4px var(--accent-muted);
 }
 
-.remote-hotspot:active:not(:disabled):not(.disabled),
-.remote-hotspot.is-sending {
-  background: rgba(232, 165, 75, 0.35);
-  box-shadow:
-    0 0 0 2px var(--accent-hover),
-    0 0 22px 6px var(--accent-muted);
-}
-
-/* Long-press window: the glow intensifies while the hold timer runs. */
-.remote-hotspot.is-holding {
-  background: rgba(232, 165, 75, 0.48);
-  box-shadow:
-    0 0 0 3px var(--accent-primary),
-    0 0 30px 10px var(--accent-muted);
-  transform: scale(0.97);
-}
-
 .remote-hotspot:focus-visible {
+  z-index: 5;
   outline: 2px solid #fff;
   outline-offset: 2px;
-  z-index: 5;
 }
 
 .remote-hotspot:disabled,
@@ -232,28 +910,6 @@ button.src-row {
   box-shadow: none;
   cursor: default;
   pointer-events: none;
-}
-
-/* Hold-capable tick: 4px amber dot, revealed only while the key is
-   hovered or focused. */
-.remote-hotspot.has-hold::after {
-  content: "";
-  position: absolute;
-  top: 3px;
-  right: 4px;
-  width: 4px;
-  height: 4px;
-  border-radius: 50%;
-  background: var(--accent-primary);
-  opacity: 0;
-  transition: opacity var(--dur-fast) var(--ease-out);
-  pointer-events: none;
-}
-
-.remote-hotspot.has-hold:hover::after,
-.remote-hotspot.has-hold:focus-visible::after,
-.remote-hotspot.has-hold.is-holding::after {
-  opacity: 1;
 }
 
 @media (max-width: 980px) {
@@ -269,381 +925,5 @@ button.src-row {
 
   .ir-remote-skin {
     width: min(100%, 230px);
-  }
-}
-
-/* -- Status line: pinned under the now-strip, above the remote ----------- */
-
-.remote-status {
-  display: flex;
-  align-items: baseline;
-  gap: var(--space-3);
-  min-height: 40px;
-  margin-bottom: var(--space-5);
-  padding: var(--space-2) var(--space-4);
-  color: var(--text-secondary);
-  font-size: var(--text-mono);
-  background: var(--surface-primary);
-  border: 1px solid var(--border-default);
-  border-radius: 8px;
-}
-
-.remote-status .status-target {
-  color: var(--text-primary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.remote-status .status-note {
-  margin-left: auto;
-  flex: none;
-  color: var(--text-tertiary);
-}
-
-.remote-status .status-note.is-ok {
-  color: var(--status-live);
-}
-
-.remote-status .status-note.is-local {
-  color: var(--status-warn);
-}
-
-.remote-status .status-note.is-err {
-  color: var(--status-error);
-}
-
-/* -- All commands + Send log side panels ----------------------------------
-   Commands: primary sendable list (Devices often open; Activities collapsed).
-   Send log: secondary debug trail, collapsed by default. */
-
-.commands-panel,
-.inspector {
-  padding: 0;
-}
-
-.commands-panel {
-  margin-bottom: var(--space-3);
-}
-
-.commands-panel summary,
-.inspector summary {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  padding: var(--space-4) var(--space-5);
-  cursor: pointer;
-  list-style: none;
-  color: var(--text-secondary);
-  font-size: var(--text-body-sm);
-  font-weight: 600;
-}
-
-.commands-panel summary::-webkit-details-marker,
-.inspector summary::-webkit-details-marker {
-  display: none;
-}
-
-.commands-panel summary::before,
-.inspector summary::before {
-  content: "";
-  width: 7px;
-  height: 7px;
-  flex: none;
-  border-right: 1.75px solid var(--text-tertiary);
-  border-bottom: 1.75px solid var(--text-tertiary);
-  transform: rotate(-45deg);
-  transition: transform var(--dur-fast) var(--ease-out);
-}
-
-.commands-panel[open] summary::before,
-.inspector[open] summary::before {
-  transform: rotate(45deg);
-}
-
-.commands-panel summary:hover,
-.inspector summary:hover {
-  color: var(--text-primary);
-}
-
-.commands-title {
-  color: var(--text-primary);
-}
-
-.commands-panel summary .mono,
-.inspector summary .mono {
-  margin-left: auto;
-  font-weight: 450;
-}
-
-.commands-body,
-.inspector-body {
-  padding: 0 var(--space-5) var(--space-5);
-}
-
-.commands-body .mini {
-  margin: 0 0 var(--space-3);
-}
-
-.inspector-actions {
-  display: flex;
-  gap: var(--space-2);
-  margin-bottom: var(--space-4);
-}
-
-.inspector-h {
-  margin: var(--space-4) 0 var(--space-2);
-  font-size: var(--text-caption);
-  font-weight: 500;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--text-tertiary);
-}
-
-/* -- Soft button chips --------------------------------------------- */
-
-.chip-grid {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: var(--space-2);
-  max-width: min(var(--remote-max-w), 100%);
-}
-
-.chip-grid:empty {
-  display: none;
-}
-
-.chip {
-  padding: 6px var(--space-3);
-  border-radius: var(--radius-pill);
-  border: 1px solid var(--border-default);
-  background: var(--surface-elevated);
-  color: var(--text-secondary);
-  font-family: var(--font-mono);
-  font-size: 11px;
-  line-height: 1.35;
-  transition: transform var(--dur-fast) var(--ease-out),
-    opacity var(--dur-fast) var(--ease-out);
-}
-
-.chip:hover {
-  border-color: var(--border-strong);
-  color: var(--text-primary);
-}
-
-.chip:active,
-.chip.is-sending {
-  transform: scale(0.96);
-  background: var(--accent-primary);
-  border-color: transparent;
-  color: var(--text-inverse);
-}
-
-/* -- Resolved actions panel ------------------------------------------ */
-
-.resolve-list {
-  display: grid;
-  gap: 2px;
-  max-height: 344px;
-  overflow-y: auto;
-  mask-image: linear-gradient(#000 88%, transparent);
-  -webkit-mask-image: linear-gradient(#000 88%, transparent);
-}
-
-.resolve-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 1px;
-  width: 100%;
-  padding: 7px var(--space-2);
-  border-radius: 6px;
-  text-align: left;
-  font-family: var(--font-mono);
-  font-size: 11px;
-  transition: transform var(--dur-fast) var(--ease-out),
-    opacity var(--dur-fast) var(--ease-out);
-}
-
-.resolve-row:nth-child(odd) {
-  background: var(--surface-primary);
-}
-
-.resolve-row:not(:disabled):hover {
-  transform: translateX(2px);
-}
-
-.resolve-row:disabled {
-  cursor: default;
-}
-
-.resolve-key {
-  color: var(--text-primary);
-  font-weight: 500;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.resolve-target {
-  color: var(--text-tertiary);
-  line-height: 1.35;
-  overflow-wrap: anywhere;
-}
-
-.resolve-row:not(:disabled) .resolve-target {
-  color: var(--text-secondary);
-}
-
-.resolve-row:disabled .resolve-key {
-  color: var(--text-tertiary);
-}
-
-.resolve-empty {
-  padding: var(--space-4);
-  color: var(--text-tertiary);
-  font-size: var(--text-body-sm);
-  text-align: center;
-}
-
-/* -- Send log ----------------------------------------------------------- */
-
-.send-log {
-  display: grid;
-  gap: 2px;
-  max-height: 240px;
-  overflow-y: auto;
-  mask-image: linear-gradient(#000 84%, transparent);
-  -webkit-mask-image: linear-gradient(#000 84%, transparent);
-}
-
-.send-log li {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  gap: var(--space-3);
-  align-items: baseline;
-  padding: 6px var(--space-2);
-  border-radius: 6px;
-}
-
-.send-log li:nth-child(odd) {
-  background: var(--surface-primary);
-}
-
-.send-time {
-  color: var(--text-tertiary);
-  font-size: 11px;
-}
-
-.send-target {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--text-secondary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.send-note {
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
-
-.send-note.is-ok {
-  color: var(--status-live);
-}
-
-.send-note.is-ir {
-  color: var(--accent-hover);
-}
-
-.send-note.is-local {
-  color: var(--status-warn);
-}
-
-.send-note.is-err {
-  color: var(--status-error);
-}
-
-.send-log .resolve-empty,
-.send-log .send-hint {
-  grid-column: 1 / -1;
-  padding: var(--space-3) var(--space-2);
-  color: var(--text-tertiary);
-  font-size: var(--text-body-sm);
-  text-align: center;
-}
-
-/* -- Responsive ----------------------------------------------------------- */
-
-@media (max-width: 1120px) {
-  .control-grid {
-    grid-template-columns: minmax(220px, 300px) minmax(280px, 360px);
-  }
-
-  .control-side {
-    grid-column: 1 / -1;
-  }
-}
-
-@media (max-width: 760px) {
-  .control-grid {
-    grid-template-columns: minmax(0, 1fr);
-    gap: var(--space-4);
-  }
-
-  .remote-status {
-    flex-wrap: wrap;
-    row-gap: 0;
-  }
-
-  .remote-status .status-note {
-    margin-left: 0;
-    flex-basis: 100%;
-  }
-
-  .control-src {
-    order: 1;
-  }
-
-  .control-remotecol {
-    order: 2;
-  }
-
-  .control-side {
-    order: 3;
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .ir-remote-shell {
-    padding: var(--space-2);
-  }
-
-  .ir-remote-skin {
-    width: min(100%, 200px);
-  }
-
-  /* Hotspot percent geometry is sacred: no min-size overrides here.
-     Enlarged targets overlap neighboring keys and mislead taps. */
-
-  .src-list {
-    max-height: none;
-    display: flex;
-    overflow-x: auto;
-    padding-bottom: var(--space-2);
-    gap: var(--space-2);
-  }
-
-  .src-row {
-    flex: none;
-    width: 200px;
-    grid-template-columns: auto minmax(0, 1fr);
-  }
-
-  .src-side {
-    grid-column: 1 / -1;
-    justify-content: flex-end;
   }
 }
