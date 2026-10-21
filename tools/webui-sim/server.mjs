@@ -560,6 +560,20 @@ async function handleApi(req, res, pathname, url) {
         files: []
       });
       return;
+    case "GET /api/system-status":
+      sendJson(res, 200, {
+        ok: true,
+        firmware: "SIMULATED HUB",
+        uptime: "0h 0m",
+        memTotal: "",
+        memory: "",
+        uname: "SIMULATED HUB — no live device",
+        mounts: "",
+        processes: "",
+        logs: "SIMULATED HUB — no logs",
+        authMode: "open on local network"
+      });
+      return;
     default:
       sendError(res, 404, "not found");
   }

@@ -6,11 +6,11 @@
    /api/device-commands) — the UI never trusts its own copy. All dynamic DOM
    is built with the safe setup-kit primitives; there is no innerHTML. */
 
-import { getJson, postApiForm, postHubForm } from "../api.js";
+import { getConfig, getJson, postApiForm, postHubForm, saveActivity } from "../api.js";
 import { el, setText, clear, notice, dangerGuard } from "../setup-kit.js";
 import {
   LIMITS,
-  DEVICE_TYPES,
+  deviceTypeOptions,
   isSafeLabel,
   isSafeRunId,
   clampDelay,
@@ -21,6 +21,8 @@ import {
   remoteCentralCommands,
   normalizeRemoteCentralPath,
   describeInventory,
+  deviceUsage,
+  withoutDeviceMaps,
 } from "./ir-model.js";
 import {
   DOC_LINKS,
@@ -251,7 +253,7 @@ export function createIrView(section) {
     );
     const del = button("Delete", "btn-danger btn-sm", null);
     dangerGuard(del, {
-      consequence: `Permanently removes "${device.name}" and all of its learned commands from the hub.`,
+      consequence: `Permanently removes "${device.name}", all of its learned commands and its device screen on the remote from the hub.`,
       confirmLabel: "Delete device",
       onConfirm: () => deleteDevice(device.id),
     });
@@ -307,7 +309,7 @@ export function createIrView(section) {
     const model = textInput("irDevModel", { value: device?.model ?? "", placeholder: "UN55…", maxlength: LIMITS.model });
     const type = el("select", {
       attrs: { id: "irDevType" },
-      children: DEVICE_TYPES.map((t) =>
+      children: deviceTypeOptions(device?.type).map((t) =>
         el("option", { text: t, attrs: { value: t, selected: t === device?.type || undefined } })),
     });
 
@@ -357,10 +359,31 @@ export function createIrView(section) {
     name.focus();
   }
 
+  /* The hub refuses to delete a device that activities or button maps still
+     name (their later saves would fail validation). Say where it is used, or
+     first drop the device's own remote screens through the activity save. */
   async function deleteDevice(deviceId) {
     const status = refs.inventoryStatus;
-    setNotice(status, "info", "Deleting device…");
+    setNotice(status, "info", "Checking where the device is used…");
     try {
+      const config = await getConfig();
+      const usage = deviceUsage(config, deviceId);
+      if (usage.uses.length) {
+        setNotice(status, "error",
+          `This device is still used by ${usage.uses.join(", ")}. Remove it from there first, then delete it.`);
+        return;
+      }
+      if (usage.ownMaps) {
+        setNotice(status, "info", "Removing the device's remote screens…");
+        const { mapList, functionList } = withoutDeviceMaps(config, deviceId);
+        await saveActivity({
+          baseRevision: config.revision,
+          activityList: config.activityList,
+          mapList,
+          functionList,
+        });
+      }
+      setNotice(status, "info", "Deleting device…");
       const res = await postHubForm("/ir/delete-device", { deviceId });
       if (selectedDeviceId === deviceId) {
         selectedDeviceId = "";

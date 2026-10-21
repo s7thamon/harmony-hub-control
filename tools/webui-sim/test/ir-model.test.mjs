@@ -1,8 +1,12 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   LIMITS,
   DEVICE_TYPES,
+  deviceTypeOptions,
   isSafeLabel,
   isSafeRunId,
   clampDelay,
@@ -20,6 +24,8 @@ import {
   remoteCentralCommands,
   normalizeRemoteCentralPath,
   describeInventory,
+  deviceUsage,
+  withoutDeviceMaps,
 } from "../public/js/views/ir-model.js";
 
 describe("LIMITS", () => {
@@ -49,6 +55,23 @@ describe("DEVICE_TYPES", () => {
       "Game Console",
       "Home Appliance",
     ]);
+  });
+});
+
+describe("deviceTypeOptions", () => {
+  it("offers the five types for a new device or a known type", () => {
+    assert.deepEqual(deviceTypeOptions(undefined), [...DEVICE_TYPES]);
+    assert.deepEqual(deviceTypeOptions(""), [...DEVICE_TYPES]);
+    assert.deepEqual(deviceTypeOptions("Amplifier"), [...DEVICE_TYPES]);
+  });
+
+  it("keeps a stock type outside the five as the leading option", () => {
+    assert.deepEqual(deviceTypeOptions("GameConsoleWithDvd"), ["GameConsoleWithDvd", ...DEVICE_TYPES]);
+  });
+
+  it("does not mutate DEVICE_TYPES", () => {
+    deviceTypeOptions("Projector").push("x");
+    assert.equal(DEVICE_TYPES.length, 5);
   });
 });
 
@@ -438,5 +461,79 @@ describe("describeInventory", () => {
     assert.equal(inv.devices[0].name, "");
     assert.equal(inv.devices[0].commands[0].name, "");
     assert.equal(inv.devices[0].commands[0].keycode, "0");
+  });
+});
+
+const FIXTURE = JSON.parse(readFileSync(
+  join(dirname(fileURLToPath(import.meta.url)), "../fixtures/activity-config.json"), "utf8"));
+
+const USAGE_CONFIG = {
+  revision: "r1",
+  activityList: {
+    Activities: [
+      { "Id-": 10, Name: "Watch TV", Roles: [{ "DeviceId-": 1 }, { "DeviceId-": 2 }] },
+      { "Id-": 11, Name: "Music", Roles: [{ "DeviceId-": 3 }] },
+    ],
+  },
+  mapList: {
+    ButtonMaps: [
+      { ButtonMapIdentifier: "16414Activity10", "ActivityId-": 10, Buttons: [{ ButtonAction: { "DeviceId-": 1 } }] },
+      { ButtonMapIdentifier: "16414Root", Buttons: [{ ButtonLongPressAction: { "DeviceId-": 4 } }] },
+      { ButtonMapIdentifier: "16417Device1", "DeviceId-": 1, Buttons: [{ ButtonAction: { "DeviceId-": 1 } }] },
+      { ButtonMapIdentifier: "16417Device5", "DeviceId-": 5, Buttons: [{ ButtonAction: { "DeviceId-": 5 } }] },
+      { ButtonMapIdentifier: "16417Device6", "DeviceId-": 6, Buttons: [{ ButtonAction: { "DeviceId-": 7 } }] },
+    ],
+    Extra: "kept",
+  },
+  functionList: {
+    FunctionMaps: [
+      { __type: "ActivityFunctionMap", "ActivityId-": 11, FunctionGroups: [{ Functions: [{ "DeviceId-": 3 }] }] },
+      { __type: "DeviceFunctionMap", "DeviceId-": 5, FunctionGroups: [] },
+    ],
+  },
+  deviceList: { DevicesWithFeatures: [{ Device: { "Id-": 6, Name: "Receiver" } }] },
+};
+
+describe("deviceUsage", () => {
+  it("names the activities that use a device and counts its own maps", () => {
+    assert.deepEqual(deviceUsage(USAGE_CONFIG, "1"), { uses: ['activity "Watch TV"'], ownMaps: 1 });
+    assert.deepEqual(deviceUsage(USAGE_CONFIG, 3), { uses: ['activity "Music"'], ownMaps: 0 });
+  });
+
+  it("reports the remote's home screen and other devices' screens", () => {
+    assert.deepEqual(deviceUsage(USAGE_CONFIG, 4), { uses: ["the remote's home screen"], ownMaps: 0 });
+    assert.deepEqual(deviceUsage(USAGE_CONFIG, 7), { uses: ['the device screen of "Receiver"'], ownMaps: 0 });
+  });
+
+  it("treats a device named only by its own maps as free to delete", () => {
+    assert.deepEqual(deviceUsage(USAGE_CONFIG, 5), { uses: [], ownMaps: 2 });
+    assert.deepEqual(deviceUsage(USAGE_CONFIG, 99), { uses: [], ownMaps: 0 });
+  });
+
+  it("matches ids exactly", () => {
+    const config = { activityList: { Activities: [{ "Id-": 1, Name: "A", Roles: [{ "DeviceId-": 55 }] }] } };
+    assert.deepEqual(deviceUsage(config, 5), { uses: [], ownMaps: 0 });
+  });
+
+  it("finds a role use and the device's own screen in the sim fixture", () => {
+    const usage = deviceUsage(FIXTURE, 65521940);
+    assert.ok(usage.uses.includes('activity "Smart TV"'));
+    assert.equal(usage.ownMaps, 1);
+  });
+});
+
+describe("withoutDeviceMaps", () => {
+  it("drops only the device's own maps and keeps the rest of each list", () => {
+    const { mapList, functionList } = withoutDeviceMaps(USAGE_CONFIG, 5);
+    assert.deepEqual(mapList.ButtonMaps.map((m) => m.ButtonMapIdentifier),
+      ["16414Activity10", "16414Root", "16417Device1", "16417Device6"]);
+    assert.equal(mapList.Extra, "kept");
+    assert.deepEqual(functionList.FunctionMaps.map((m) => m.__type), ["ActivityFunctionMap"]);
+  });
+
+  it("leaves the config untouched", () => {
+    withoutDeviceMaps(USAGE_CONFIG, 1);
+    assert.equal(USAGE_CONFIG.mapList.ButtonMaps.length, 5);
+    assert.equal(USAGE_CONFIG.functionList.FunctionMaps.length, 2);
   });
 });

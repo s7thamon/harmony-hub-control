@@ -8,6 +8,7 @@ import {
   cloneJsonResource,
   composeKeyboardHidMap,
   createAllocator,
+  draftButtonsFromMap,
   isKeyboardHidActivityMap,
   isWizardOwnedActivityMap,
 } from "../public/js/wizard-model.js";
@@ -76,26 +77,7 @@ function draftFromActivity(config, activityId, { dropKeyboard = false } = {}) {
   const surface = (config.mapList.ButtonMaps ?? []).find(
     (m) => isWizardOwnedActivityMap(m, activityId),
   );
-  const buttons = {};
-  for (const b of surface?.Buttons ?? []) {
-    if (!b.ButtonKey || !b.ButtonAction?.CommandName) continue;
-    buttons[b.ButtonKey] = {
-      deviceId: String(b.ButtonAction["DeviceId-"]),
-      command: {
-        name: b.ButtonAction.CommandName,
-        functionId: b.ButtonAction["FunctionId-"],
-      },
-      hold: b.ButtonLongPressAction?.CommandName
-        ? {
-            deviceId: String(b.ButtonLongPressAction["DeviceId-"]),
-            command: {
-              name: b.ButtonLongPressAction.CommandName,
-              functionId: b.ButtonLongPressAction["FunctionId-"],
-            },
-          }
-        : null,
-    };
-  }
+  const buttons = draftButtonsFromMap(surface);
   return {
     name: activity.Name,
     type: Number(activity.Type ?? 1),
@@ -451,6 +433,36 @@ describe("buildActivityGraph — map ownership", () => {
     assert.equal(fn.CustomFnField, "fn-keep");
     assert.equal(fn.FunctionGroups.length, 1);
     assert.equal(fn.FunctionGroups[0].Name, "Volume");
+  });
+});
+
+describe("double-press actions", () => {
+  it("draftButtonsFromMap carries press, hold and double-press", () => {
+    const doublePress = { "DeviceId-": 1, __type: "ButtonCommandAction", "FunctionId-": 9, CommandName: "Mute", EventType: 3 };
+    const buttons = draftButtonsFromMap({
+      Buttons: [
+        { ButtonKey: "Mute", ButtonAction: { "DeviceId-": 1, CommandName: "Mute", "FunctionId-": 8 }, ButtonDoublePressAction: doublePress },
+        { ButtonKey: "Info", ButtonAction: null },
+      ],
+    });
+    assert.deepEqual(Object.keys(buttons), ["Mute"]);
+    assert.deepEqual(buttons.Mute.doublePress, doublePress);
+    assert.equal(buttons.Mute.hold, null);
+    assert.equal(buttons.Mute.source, "existing");
+  });
+
+  it("an edit keeps the activity's existing double-press actions", () => {
+    const activityId = "48113644";
+    const config = structuredClone(FIXTURE);
+    const map = config.mapList.ButtonMaps.find((m) => isWizardOwnedActivityMap(m, activityId));
+    const button = map.Buttons.find((b) => b.ButtonKey && b.ButtonAction?.CommandName);
+    const doublePress = { ...button.ButtonAction, EventType: 3 };
+    button.ButtonDoublePressAction = doublePress;
+
+    const graph = buildActivityGraph({ config, draft: draftFromActivity(config, activityId), editId: activityId });
+    const after = graph.mapList.ButtonMaps.find((m) => isWizardOwnedActivityMap(m, activityId));
+    const kept = after.Buttons.find((b) => b.ButtonKey === button.ButtonKey);
+    assert.deepEqual(kept.ButtonDoublePressAction, doublePress);
   });
 });
 

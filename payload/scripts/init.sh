@@ -48,6 +48,8 @@ if [ -x /data/codex/bin/codex_bt_pair_agent ]; then
   # The agent exits at once ("HCI bind failed: No such device") if hci0 is
   # not up yet, which it often isn't this early in boot. Wait for the
   # controller in the background, start the agent, and retry until it stays.
+  # Its log lives in RAM: a redirect into a full /cache fails before the
+  # agent runs, so every retry would silently do nothing.
   (
     TRIES=0
     while [ "$TRIES" -lt 40 ]; do
@@ -57,7 +59,7 @@ if [ -x /data/codex/bin/codex_bt_pair_agent ]; then
       if hciconfig hci0 2>/dev/null | grep 'UP RUNNING' >/dev/null 2>&1; then
         rm -f /var/run/codex-bt-hid-control.pid
         /data/codex/bin/codex_bt_pair_agent btkeyboard 600 --hid-control-daemon \
-          > /cache/codex-bt-hid-control.log 2>&1 &
+          > /var/volatile/codex-bt-hid-control.log 2>&1 &
         echo $! > /var/run/codex-bt-hid-control.pid
       fi
       TRIES=$((TRIES + 1))

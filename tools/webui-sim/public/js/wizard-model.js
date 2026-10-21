@@ -79,6 +79,30 @@ export const BUTTON_SOURCE = {
   existing: "existing",
 };
 
+/* Draft mappings for the keys an existing activity's wizard-owned map already
+   has. The wizard edits press and hold only; a double-press action has no
+   wizard control, so it rides along untouched instead of being lost on save. */
+export function draftButtonsFromMap(map) {
+  const buttons = {};
+  for (const b of map?.Buttons ?? []) {
+    if (!b.ButtonKey || !b.ButtonAction?.CommandName) continue;
+    buttons[b.ButtonKey] = {
+      deviceId: String(b.ButtonAction["DeviceId-"]),
+      command: { name: b.ButtonAction.CommandName, functionId: b.ButtonAction["FunctionId-"] },
+      hold: b.ButtonLongPressAction?.CommandName
+        ? {
+            deviceId: String(b.ButtonLongPressAction["DeviceId-"]),
+            command: { name: b.ButtonLongPressAction.CommandName, functionId: b.ButtonLongPressAction["FunctionId-"] },
+          }
+        : null,
+      doublePress: b.ButtonDoublePressAction ?? null,
+      /* Existing activity mappings are locked against default overwrite. */
+      source: BUTTON_SOURCE.existing,
+    };
+  }
+  return buttons;
+}
+
 function roleDeviceId(roles, roleType) {
   const role = (roles ?? []).find(
     (r) => r?.deviceId && String(r.roleType ?? "").includes(roleType),
@@ -436,7 +460,7 @@ function composeButtonMap(draft, activityId, config, alloc, existing) {
       ButtonId: alloc.id(),
       __type: "HardRemoteButton",
       ButtonAction: commandAction(mapping.deviceId, mapping.command, 1),
-      ButtonDoublePressAction: null,
+      ButtonDoublePressAction: mapping.doublePress ?? null,
       FunctionGroupType: /^Number\d$/.test(buttonKey) ? 2 : 0,
       ButtonState: 1,
       ButtonKey: buttonKey,
