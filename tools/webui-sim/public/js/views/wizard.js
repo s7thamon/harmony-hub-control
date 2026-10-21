@@ -8,6 +8,7 @@ import {
   ACTIVITY_TYPES,
   ROLE_TYPES,
   roleLabel,
+  inputOptions,
   saveDraft,
   BUTTON_SOURCE,
   draftButtonsFromMap,
@@ -51,24 +52,6 @@ const TEMPLATE = `
 function escapeHtml(value) {
   return String(value ?? "").replace(/[&<>"']/g, (c) =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
-}
-
-function prettifyInput(commandName) {
-  const stripped = String(commandName).replace(/^Input/i, "");
-  return stripped
-    .replace(/([a-z])([A-Z])/g, "$1 $2")
-    .replace(/([A-Za-z])(\d)/g, "$1 $2")
-    .replace(/\bHdmi\b/g, "HDMI")
-    .replace(/\bTv\b/g, "TV")
-    .replace(/\bAv\b/g, "AV")
-    .replace(/\bUsb\b/g, "USB")
-    .replace(/\bArc\b/g, "ARC");
-}
-
-function inputOptions(device) {
-  return (device?.commands ?? [])
-    .filter((c) => /^(input|hdmi|source)/i.test(c.name))
-    .map((c) => ({ value: prettifyInput(c.name), command: c.name }));
 }
 
 function emptyDraft() {
@@ -235,7 +218,7 @@ export function createWizardView(section) {
           <div>
             <label>Input on start</label>
             <select data-field="input" ${inputs.length ? "" : "disabled"}>
-              <option value="">No input change</option>
+              <option value="">${inputs.length ? "No input change" : "No inputs set up (IR → Settings)"}</option>
               ${inputs.map((o) => `<option value="${escapeHtml(o.value)}" ${o.value === role.input ? "selected" : ""}>${escapeHtml(o.value)}</option>`).join("")}
             </select>
           </div>

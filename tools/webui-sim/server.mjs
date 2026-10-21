@@ -15,6 +15,7 @@ import crypto from "node:crypto";
 import {
   applyDeviceSettings,
   commandNames,
+  inputsInUse,
   validateDeviceSettings,
 } from "./public/js/views/device-settings-model.js";
 
@@ -225,6 +226,14 @@ function handleDeviceSettings(res, params) {
     return;
   }
   const errors = validateDeviceSettings(settings, commandNames(devices[index]));
+  if (settings.inputs && typeof settings.inputs === "object") {
+    const kept = settings.inputs.type === "none"
+      ? []
+      : (Array.isArray(settings.inputs.list) ? settings.inputs.list : []).map((i) => String(i?.name ?? "").trim());
+    for (const use of inputsInUse({ activityList: state.activityList }, deviceId, kept)) {
+      errors.push(`activity "${use.activity}" switches it to ${use.input}`);
+    }
+  }
   if (errors.length) {
     sendError(res, 422, errors.join(" "));
     return;

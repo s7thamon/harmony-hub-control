@@ -1,4 +1,5 @@
 import * as api from "./api.js";
+import { inputNames } from "./views/device-settings-model.js";
 
 export const state = {
   config: null,
@@ -224,6 +225,7 @@ export function devices() {
       manufacturer: device.Manufacturer ?? "",
       model: device.Model ?? "",
       type: device.DeviceType ?? "",
+      inputs: inputNames(entry),
       commands: (entry.Commands ?? []).map((c) => ({
         name: c.Name,
         functionId: c["FunctionId-"],

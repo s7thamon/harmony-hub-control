@@ -63,6 +63,12 @@ export const ROLE_TYPES = [
   { type: "KeyboardTextEntryActivityRole", label: "Keyboard / typing", hint: "Device you type searches and logins into" },
 ];
 
+/* An activity selects a device's input by its exact InputName, so offer the
+   device's input names; a device without inputs set up offers none. */
+export function inputOptions(device) {
+  return (Array.isArray(device?.inputs) ? device.inputs : []).map((name) => ({ value: name }));
+}
+
 export function roleLabel(type) {
   return ROLE_TYPES.find((r) => r.type === type)?.label ?? type;
 }

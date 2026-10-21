@@ -9,9 +9,11 @@ import {
   composeKeyboardHidMap,
   createAllocator,
   draftButtonsFromMap,
+  inputOptions,
   isKeyboardHidActivityMap,
   isWizardOwnedActivityMap,
 } from "../public/js/wizard-model.js";
+import { inputNames } from "../public/js/views/device-settings-model.js";
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const FIXTURE = JSON.parse(
@@ -707,5 +709,32 @@ describe("cloneJsonResource — structured-clone seam", () => {
       graph.activityList.ExtraActivityListKey.deep.k = 99;
       assert.equal(config.activityList.ExtraActivityListKey.deep.k, 1);
     });
+  });
+});
+
+describe("inputOptions", () => {
+  const entry = (id) => FIXTURE.deviceList.DevicesWithFeatures.find((e) => String(e.Device["Id-"]) === id);
+
+  it("offers the device's input names exactly, so the engine finds them", () => {
+    const options = inputOptions({ inputs: inputNames(entry("81897247")) });
+    assert.deepEqual(options.map((o) => o.value),
+      ["Aux", "Bluetooth", "Coaxial", "HDMI Arc", "HDMI 2", "HDMI 3", "HDMI 4", "Optical", "USB"]);
+  });
+
+  it("matches what the cloud-made activities select", () => {
+    for (const activity of FIXTURE.activityList.Activities) {
+      for (const role of activity.Roles) {
+        const name = role.SelectedInput?.Name;
+        // The fixture's older activities also name devices it no longer has.
+        if (!name || !entry(String(role["DeviceId-"]))) continue;
+        const values = inputOptions({ inputs: inputNames(entry(String(role["DeviceId-"]))) }).map((o) => o.value);
+        assert.ok(values.includes(name), `${activity.Name}: ${name}`);
+      }
+    }
+  });
+
+  it("offers nothing for a device without inputs set up", () => {
+    assert.deepEqual(inputOptions({ inputs: inputNames(entry("93111391")) }), []);
+    assert.deepEqual(inputOptions(null), []);
   });
 });

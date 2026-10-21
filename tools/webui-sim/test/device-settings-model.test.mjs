@@ -11,6 +11,11 @@ import {
   validateDeviceSettings,
   deviceSettingsRequest,
   applyDeviceSettings,
+  inputDisplayName,
+  inputNames,
+  suggestInputs,
+  readInputSettings,
+  inputsInUse,
 } from "../public/js/views/device-settings-model.js";
 
 const FIXTURE = JSON.parse(readFileSync(
@@ -156,5 +161,105 @@ describe("applyDeviceSettings", () => {
     assert.equal(feature["GlobalDeviceVersionId-"], 625762);
     assert.equal(feature.DefaultPowerOnDelay, 2000);
     assert.equal(after.DeviceFeatures.length, 4);
+  });
+});
+
+describe("inputs", () => {
+  const discrete = (list, over = {}) => ({ type: "discrete", delayMs: 1000, list, next: "", previous: "", afterPowerOn: "", ...over });
+
+  it("reads the cloud TV's discrete inputs in order with their commands", () => {
+    const s = readInputSettings(device(LG));
+    assert.equal(s.hasInputFeature, true);
+    assert.equal(s.type, "discrete");
+    assert.equal(s.delayMs, 0);
+    assert.deepEqual(s.list.slice(0, 4), [
+      { name: "TV", command: "InputTv" }, { name: "AV", command: "InputAv1" },
+      { name: "Component", command: "InputComponent1" }, { name: "HDMI 1", command: "InputHdmi1" },
+    ]);
+    assert.deepEqual(inputNames(device(AMP)).slice(0, 4), ["Aux", "Bluetooth", "Coaxial", "HDMI Arc"]);
+  });
+
+  it("reads a device without inputs as none, with suggestions offered, not applied", () => {
+    const s = readInputSettings(device(BARE));
+    assert.equal(s.hasInputFeature, false);
+    assert.equal(s.type, "none");
+    assert.deepEqual(s.list, []);
+    assert.equal(s.delayMs, 1000);
+  });
+
+  it("suggests inputs from Input commands, without the cycling ones", () => {
+    assert.deepEqual(suggestInputs(["InputHdmi1", "INPUT_NEXT", "InputPrevious", "InputBD", "VolumeUp"]),
+      [{ name: "HDMI 1", command: "InputHdmi1" }, { name: "BD", command: "InputBD" }]);
+    assert.equal(inputDisplayName("InputHDMI2"), "HDMI 2");
+    assert.equal(inputDisplayName("InputHdmiArc"), "HDMI ARC");
+  });
+
+  it("names the activities that still select an input", () => {
+    const keepAll = inputNames(device(LG));
+    assert.deepEqual(inputsInUse(FIXTURE, LG, keepAll), []);
+    const uses = inputsInUse(FIXTURE, LG, keepAll.filter((n) => n !== "HDMI 1"));
+    assert.ok(uses.length >= 1);
+    assert.ok(uses.every((u) => u.input === "HDMI 1"));
+  });
+
+  it("validates inputs like the hub", () => {
+    const names = [...commandNames(device(LG)), "InputNext"];
+    const check = (inputs) => validateDeviceSettings(valid({ inputs }), names);
+    assert.deepEqual(check(discrete([{ name: "HDMI 1", command: "inputhdmi1" }, { name: "Phono", command: "" }])), []);
+    assert.match(check(discrete([{ name: "TV" }, { name: "tv" }]))[0], /listed twice/);
+    assert.match(check(discrete([{ name: "X", command: "Nope" }]))[0], /needs a command/);
+    assert.match(check(discrete([{ name: 'A"B' }]))[0], /without quotes/);
+    assert.match(check(discrete([]))[0], /1 to 32/);
+    assert.match(check(discrete([{ name: "A" }], { delayMs: 61000 }))[0], /0 to 60 seconds/);
+    assert.match(check({ type: "cycle", delayMs: 0, list: [{ name: "A" }, { name: "B" }], next: "" })[0], /next-input/);
+    assert.match(check({ type: "cycle", delayMs: 0, list: [{ name: "A" }], next: "InputNext" })[0], /at least two/);
+    assert.match(check({ type: "cycle", delayMs: 0, list: [{ name: "A" }, { name: "B" }], next: "InputNext", afterPowerOn: "Z" })[0], /after power-on/);
+    assert.deepEqual(check({ type: "none", delayMs: 0 }), []);
+  });
+
+  it("sends inputs only when given, trimmed, with the fields the type uses", () => {
+    assert.equal("inputs" in deviceSettingsRequest(LG, valid()).settings, false);
+    const body = deviceSettingsRequest(LG, valid({ inputs: discrete([{ name: " HDMI 1 ", command: "InputHdmi1" }, { name: "Phono", command: "" }], { next: "InputNext" }) }));
+    assert.deepEqual(body.settings.inputs, {
+      type: "discrete", delayMs: 1000,
+      list: [{ name: "HDMI 1", command: "InputHdmi1" }, { name: "Phono", command: null }],
+      next: null, previous: null, afterPowerOn: null,
+    });
+    const cycle = deviceSettingsRequest(LG, valid({ inputs: { type: "cycle", delayMs: 500, list: [{ name: "A", command: "X" }, { name: "B" }], next: "InputNext", previous: "", afterPowerOn: "B" } }));
+    assert.deepEqual(cycle.settings.inputs.list, [{ name: "A", command: null }, { name: "B", command: null }]);
+    assert.equal(cycle.settings.inputs.afterPowerOn, "B");
+    assert.equal(cycle.settings.inputs.previous, null);
+  });
+
+  it("applies discrete inputs, keeping each cloud input's fields by name", () => {
+    const after = applyDeviceSettings(device(LG), valid({ inputs: discrete([
+      { name: "HDMI 1", command: "inputhdmi1" }, { name: "Game", command: "InputHdmi4" }]) }));
+    const feature = after.DeviceFeatures.find((f) => f.__type === "InputFeature");
+    assert.equal(feature.InputType, 1);
+    assert.equal(feature.InputDelay, 1000);
+    assert.deepEqual(feature.Inputs.map((i) => [i.InputName, i.InputOrder, i.Actions[0].IRCommandName]),
+      [["HDMI 1", 1, "InputHdmi1"], ["Game", 2, "InputHdmi4"]]);
+    assert.equal(feature.Inputs[0].PortTypes[0].Name, "HDMI", "cloud PortTypes kept");
+    assert.equal(after.DeviceFeatures.length, 4);
+  });
+
+  it("applies a cycle with an input after power-on, and none removes the feature", () => {
+    const names = ["InputNext", "InputPrev"];
+    const entry = device(BARE);
+    entry.Commands.push(...names.map((n) => ({ Name: n })));
+    let after = applyDeviceSettings(entry, valid({ power: { type: "toggle", toggle: "Power" },
+      inputs: { type: "cycle", delayMs: 800, list: [{ name: "TV" }, { name: "HDMI" }], next: "inputnext", previous: "InputPrev", afterPowerOn: "HDMI" } }));
+    const feature = after.DeviceFeatures.find((f) => f.__type === "InputFeature");
+    const power = after.DeviceFeatures.find((f) => f.__type === "PowerFeature");
+    assert.equal(after.DeviceFeatures[0], feature, "input feature leads, like the cloud's");
+    assert.equal(feature.InputType, 2);
+    assert.deepEqual(feature.NextActions.map((a) => a.IRCommandName), ["InputNext"]);
+    assert.deepEqual(feature.PreviousActions.map((a) => a.IRCommandName), ["InputPrev"]);
+    assert.deepEqual(feature.Inputs.map((i) => i.Actions.length), [0, 0]);
+    assert.deepEqual(power.PowerOnResetActions.map((a) => [a.StateName, a.StateValue, a.DevActionType]), [["Input", "HDMI", 1]]);
+    assert.deepEqual(readInputSettings(after).afterPowerOn, "HDMI");
+    after = applyDeviceSettings(after, valid({ power: { type: "toggle", toggle: "Power" }, inputs: { type: "none", delayMs: 0 } }));
+    assert.equal(after.DeviceFeatures.some((f) => f.__type === "InputFeature"), false);
+    assert.deepEqual(after.DeviceFeatures.find((f) => f.__type === "PowerFeature").PowerOnResetActions, []);
   });
 });
