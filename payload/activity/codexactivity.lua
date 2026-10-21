@@ -16,6 +16,19 @@ local CLOUD_BLOCKER_FILE = "/data/codex/cloud_blocker.conf"
 local ACTIVITY_ENGINE_BARRIER_MESSAGE = "process_activity"
 -- A long activity start can hold the engine; bound the wait (100 ms steps).
 local ACTIVITY_ENGINE_BARRIER_STEPS = 600
+-- codex_webui leaves this flag (resource names, one per line) after it edits
+-- IR devices or commands. codexmqtt used to be its only reader and never looks
+-- while its broker is unreachable, so the reload lives here, with the other
+-- local config writes.
+local RESOURCE_RELOAD_FLAG = "/data/codex/reload_resources"
+local RELOADABLE_RESOURCES = {
+  ActivityList = true,
+  AutomationConfig = true,
+  DeviceList = true,
+  FunctionList = true,
+  MapList = true,
+  ProtocolList = true
+}
 
 local moduleObj
 local workerTask
@@ -645,6 +658,54 @@ local function processRequest(raw)
   return response
 end
 
+-- Reload what codex_webui changed on disk. The flag stays put while the engine
+-- isn't listening yet or a stock sync owns the resources, so the next pass
+-- picks it up.
+local function reloadRequestedResources()
+  local data = readFile(RESOURCE_RELOAD_FLAG)
+  if not data then
+    return
+  end
+  if not system.isMessageRegistered("config_new") or
+      resources.isAnySyncInProgress() then
+    return
+  end
+  os.remove(RESOURCE_RELOAD_FLAG)
+  local names = {}
+  for name in string.gmatch(data, "[%w]+") do
+    if name == "all" then
+      names = "all"
+      break
+    end
+    if RELOADABLE_RESOURCES[name] then
+      table.insert(names, name)
+    end
+  end
+  if type(names) == "table" and #names == 0 then
+    names = {"DeviceList", "ProtocolList"}
+  end
+  local ok, result = pcall(system.sendMessage, "config_new", names)
+  if not ok or result ~= true then
+    log.warning("codexactivity: requested resource reload failed:", tostring(result))
+    return
+  end
+  local engineReady, engineError = waitForActivityEngine()
+  if not engineReady then
+    log.warning("activity engine barrier:", engineError)
+  end
+  digest.configVersion = (tonumber(digest.configVersion) or 0) + 1
+  -- connect.statedigest?get answers 304 unless stateVersion changes.
+  digest.stateVersion = (tonumber(digest.stateVersion) or 0) + 1
+  local digestOk, digestError = pcall(function()
+    digest:saveStateDigest()
+    notifyLocalClients()
+  end)
+  if not digestOk then
+    log.warning("codexactivity: could not publish the reload:", tostring(digestError))
+  end
+  log.notice("codexactivity: reloaded resources requested by codex_webui")
+end
+
 local function workerLoop()
   os.remove(REQUEST_FILE)
   os.remove(RESPONSE_FILE)
@@ -669,6 +730,10 @@ local function workerLoop()
       else
         log.error("codexactivity response encode failed:", tostring(encoded))
       end
+    end
+    local reloaded, reloadError = pcall(reloadRequestedResources)
+    if not reloaded then
+      log.error("codexactivity resource reload failed:", tostring(reloadError))
     end
     system.sleep(100)
   end
