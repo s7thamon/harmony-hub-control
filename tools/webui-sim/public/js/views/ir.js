@@ -26,8 +26,11 @@ import {
 } from "./ir-model.js";
 import {
   POWER_TYPES,
+  INPUT_TYPES,
   commandNames,
   readDeviceSettings,
+  readInputSettings,
+  inputsInUse,
   validateDeviceSettings,
   deviceSettingsRequest,
 } from "./device-settings-model.js";
@@ -259,7 +262,7 @@ export function createIrView(section) {
       button("Edit", "btn-quiet btn-sm", () => openDeviceForm(device)),
     );
     side.appendChild(
-      button("Power & timing", "btn-quiet btn-sm", () => openSettings(device)),
+      button("Settings", "btn-quiet btn-sm", () => openSettings(device)),
     );
     const del = button("Delete", "btn-danger btn-sm", null);
     dangerGuard(del, {
@@ -369,13 +372,14 @@ export function createIrView(section) {
     name.focus();
   }
 
-  /* ---------------- power & timing ---------------- */
-  /* How activities power the device on and off, and its command timing. The
-     hub checks the settings against the device's commands, saves DeviceList
-     and reloads its engine (codexactivity CommitDeviceSettings). */
+  /* ---------------- device settings ---------------- */
+  /* How activities power the device on and off and switch its inputs, and
+     its command timing. The hub checks the settings against the device's
+     commands and the activities, saves DeviceList and reloads its engine
+     (codexactivity CommitDeviceSettings). */
   async function openSettings(device) {
     refs.settingsPanel.hidden = false;
-    setText(refs.settingsTitle, `Power & timing — ${device.name || device.id}`);
+    setText(refs.settingsTitle, `Settings — ${device.name || device.id}`);
     clear(refs.settingsBody);
     refs.settingsBody.appendChild(skeleton(3));
     refs.settingsPanel.scrollIntoView({ block: "nearest" });
@@ -386,7 +390,7 @@ export function createIrView(section) {
       const entry = (config?.deviceList?.DevicesWithFeatures ?? [])
         .find((e) => String(e?.Device?.["Id-"]) === device.id);
       if (!entry) throw new Error("the hub's DeviceList has no such device");
-      renderSettingsForm(device, entry);
+      renderSettingsForm(device, entry, config);
     } catch (error) {
       if (gen !== generation) return;
       clear(refs.settingsBody);
@@ -398,11 +402,12 @@ export function createIrView(section) {
     refs.settingsPanel.hidden = true;
   }
 
-  function renderSettingsForm(device, entry) {
+  function renderSettingsForm(device, entry, config) {
     const body = refs.settingsBody;
     clear(body);
     const names = commandNames(entry);
     const current = readDeviceSettings(entry);
+    const inputState = readInputSettings(entry);
     const commandSelect = (id, value) => el("select", {
       attrs: { id },
       children: [
@@ -410,14 +415,15 @@ export function createIrView(section) {
         ...names.map((n) => el("option", { text: n, attrs: { value: n, selected: n === value || undefined } })),
       ],
     });
-    const checkRow = (id, checked, text) => el("label", {
-      className: "mini",
-      attrs: { for: id },
-      children: [
-        el("input", { attrs: { id, type: "checkbox", checked: checked || undefined } }),
-        el("span", { text: ` ${text}` }),
-      ],
-    });
+    /* Checkboxes fight the global input reset (full width, 38px tall);
+       restyle inline with tokens, as the MQTT view does. */
+    const checkRow = (id, checked, text) => {
+      const box = el("input", { attrs: { id, type: "checkbox", checked: checked || undefined } });
+      Object.assign(box.style, { width: "auto", minHeight: "0", margin: "0", flex: "none", accentColor: "var(--accent-primary)" });
+      const label = el("label", { className: "mini", attrs: { for: id }, children: [box, el("span", { text })] });
+      Object.assign(label.style, { display: "flex", alignItems: "center", gap: "var(--space-2)", cursor: "pointer" });
+      return label;
+    };
     const whole = (input) => (input.value.trim() === "" ? NaN : Number(input.value.trim()));
 
     const type = el("select", {
@@ -444,6 +450,90 @@ export function createIrView(section) {
     type.addEventListener("change", syncType);
     syncType();
 
+    /* Inputs. They are sent only once edited, so saving power alone never
+       rewrites a cloud-made input feature. */
+    const rows = inputState.list.map((i) => ({ name: i.name, command: i.command }));
+    let inputsTouched = false;
+    const touch = () => { inputsTouched = true; };
+    const inType = el("select", {
+      attrs: { id: "irSetInputType" },
+      children: INPUT_TYPES.map((t) =>
+        el("option", { text: t.label, attrs: { value: t.value, selected: t.value === inputState.type || undefined } })),
+    });
+    const inDelay = textInput("irSetInputDelay", { value: String(inputState.delayMs / 1000), maxlength: 5 });
+    const nextSel = commandSelect("irSetInputNext", inputState.next);
+    const prevSel = commandSelect("irSetInputPrev", inputState.previous);
+    prevSel.firstChild.textContent = "None";
+    const afterOn = el("select", { attrs: { id: "irSetInputAfterOn" } });
+    const rowsWrap = el("div", { className: "setup-fields" });
+    const cycleRow = el("div", { className: "row", children: [field("Next-input command", nextSel), field("Previous-input command", prevSel)] });
+    const afterOnRow = el("div", { children: [field("Input after power-on", afterOn,
+      "Which input the device is on when it turns on, so the hub knows where cycling starts.")] });
+    const inUse = inputsInUse(config, device.id, []);
+    const fit = (node, basis) => { node.style.flex = `1 1 ${basis}`; node.style.width = "auto"; return node; };
+
+    function renderAfterOn() {
+      const chosen = afterOn.value || inputState.afterPowerOn;
+      clear(afterOn);
+      afterOn.appendChild(el("option", { text: "Not set", attrs: { value: "" } }));
+      for (const row of rows) {
+        const name = row.name.trim();
+        if (name) afterOn.appendChild(el("option", { text: name, attrs: { value: name, selected: name === chosen || undefined } }));
+      }
+    }
+
+    function renderRows() {
+      clear(rowsWrap);
+      const discrete = inType.value === "discrete";
+      rows.forEach((row, i) => {
+        const name = fit(textInput(`irSetInputName${i}`, { value: row.name, placeholder: "HDMI 1", maxlength: 64 }), "9rem");
+        name.setAttribute("aria-label", `Input ${i + 1} name`);
+        name.addEventListener("input", () => { row.name = name.value; touch(); renderAfterOn(); });
+        const parts = [name];
+        if (discrete) {
+          const command = fit(commandSelect(`irSetInputCmd${i}`, row.command), "9rem");
+          command.firstChild.textContent = "No command";
+          command.setAttribute("aria-label", `Input ${i + 1} command`);
+          command.addEventListener("change", () => { row.command = command.value; touch(); });
+          parts.push(command);
+        }
+        const move = (to) => () => {
+          [rows[i], rows[to]] = [rows[to], rows[i]];
+          touch();
+          renderRows();
+        };
+        const up = button("↑", "btn-quiet btn-sm", move(i - 1), { attrs: { "aria-label": `Move input ${i + 1} up` } });
+        const down = button("↓", "btn-quiet btn-sm", move(i + 1), { attrs: { "aria-label": `Move input ${i + 1} down` } });
+        up.disabled = i === 0;
+        down.disabled = i === rows.length - 1;
+        parts.push(up, down, button("Remove", "btn-quiet btn-sm", () => { rows.splice(i, 1); touch(); renderRows(); }));
+        rowsWrap.appendChild(el("div", { className: "view-actions", children: parts }));
+      });
+      rowsWrap.appendChild(el("div", { className: "view-actions", children: [
+        button("Add input", "btn-quiet btn-sm", () => { rows.push({ name: "", command: "" }); touch(); renderRows(); }),
+        button("Fill from commands", "btn-quiet btn-sm", () => {
+          rows.splice(0, rows.length, ...inputState.suggested.map((s) => ({ ...s })));
+          touch();
+          renderRows();
+        }),
+      ] }));
+      renderAfterOn();
+    }
+
+    const syncInputs = () => {
+      const kind = inType.value;
+      rowsWrap.hidden = kind === "none";
+      cycleRow.hidden = kind !== "cycle";
+      afterOnRow.hidden = kind !== "cycle";
+      inDelay.closest("div").hidden = kind === "none";
+      if (kind !== "none" && !rows.length) rows.push(...inputState.suggested.map((s) => ({ ...s })));
+      renderRows();
+    };
+    inType.addEventListener("change", () => { touch(); syncInputs(); });
+    for (const control of [inDelay, nextSel, prevSel, afterOn]) {
+      control.addEventListener("change", touch);
+    }
+
     const status = el("div", { className: "setup-status" });
     const save = button("Save settings", "btn-secondary", async () => {
       const settings = {
@@ -460,7 +550,23 @@ export function createIrView(section) {
           onBetweenActivities: between.querySelector("input").checked,
         },
       };
+      if (inputsTouched) {
+        settings.inputs = {
+          type: inType.value,
+          delayMs: Math.round(whole(inDelay) * 1000),
+          list: rows.map((r) => ({ name: r.name.trim(), command: r.command })),
+          next: nextSel.value,
+          previous: prevSel.value,
+          afterPowerOn: afterOn.value,
+        };
+      }
       const errors = validateDeviceSettings(settings, names);
+      if (settings.inputs) {
+        const kept = settings.inputs.type === "none" ? [] : settings.inputs.list.map((r) => r.name);
+        for (const use of inputsInUse(config, device.id, kept)) {
+          errors.push(`Activity "${use.activity}" switches this device to ${use.input}; keep that input or change the activity first.`);
+        }
+      }
       if (errors.length) {
         setNotice(status, "error", errors.join(" "));
         return;
@@ -481,6 +587,7 @@ export function createIrView(section) {
       body.appendChild(notice("info",
         "Activities can't turn this device on or off yet. The choices below are suggested from its command names; save to apply them."));
     }
+    body.appendChild(el("h4", { text: "Power" }));
     body.appendChild(el("div", { className: "row", children: [
       field("Power", type),
       field("Wait after power-on (seconds)", delay, "How long the device needs before it takes its next command, such as an input change."),
@@ -488,6 +595,27 @@ export function createIrView(section) {
     body.appendChild(discreteRow);
     body.appendChild(toggleRow);
     body.appendChild(el("div", { className: "setup-fields", children: [alwaysOn, between] }));
+
+    body.appendChild(el("h4", { text: "Inputs" }));
+    if (!inputState.hasInputFeature) {
+      body.appendChild(notice("info",
+        "Activities can't switch this device's input yet. Choose how it switches inputs and list them."));
+    }
+    if (inUse.length) {
+      body.appendChild(el("p", { className: "setup-field-hint", text:
+        `Used by activities: ${inUse.map((u) => `${u.input} (${u.activity})`).join(", ")}. Keep these names.` }));
+    }
+    body.appendChild(el("div", { className: "row", children: [
+      field("Input switching", inType),
+      field("Wait after switching input (seconds)", inDelay, "How long the device needs after an input change."),
+    ] }));
+    body.appendChild(rowsWrap);
+    body.appendChild(cycleRow);
+    body.appendChild(afterOnRow);
+    syncInputs();
+    inputsTouched = false;
+
+    body.appendChild(el("h4", { text: "Timing" }));
     body.appendChild(el("div", { className: "row", children: [
       field("Delay between commands (ms)", interKey, "Pause after each command to this device."),
       field("Inter-device delay (ms)", interDevice, "Pause before this device's command when the previous one went to another device."),
@@ -1404,12 +1532,12 @@ export function createIrView(section) {
     refs.deviceFormPanel.hidden = true;
     section.appendChild(refs.deviceFormPanel);
 
-    // power & timing (hidden)
-    refs.settingsTitle = el("h3", { text: "Power & timing" });
+    // device settings (hidden)
+    refs.settingsTitle = el("h3", { text: "Settings" });
     refs.settingsBody = el("div");
     refs.settingsPanel = el("section", {
       className: "panel setup-panel",
-      attrs: { "aria-label": "Device power and timing" },
+      attrs: { "aria-label": "Device settings" },
       children: [el("div", { className: "panel-head", children: [refs.settingsTitle] }), refs.settingsBody],
     });
     refs.settingsPanel.hidden = true;

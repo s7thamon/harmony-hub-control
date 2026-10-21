@@ -16,14 +16,41 @@ export const POWER_TYPES = Object.freeze([
   { value: "none", label: "No power control (always on, or switched by hand)" },
 ]);
 
+export const INPUT_TYPES = Object.freeze([
+  { value: "discrete", label: "Each input has its own command" },
+  { value: "cycle", label: "One button cycles through the inputs" },
+  { value: "none", label: "No input switching" },
+]);
+
+export const MAX_INPUTS = 32;
+export const INPUT_DELAY_MAX_MS = 60000;
+
+/* A readable input name for an input command: InputHdmi1 → "HDMI 1". */
+export function inputDisplayName(commandName) {
+  return String(commandName)
+    .replace(/^Input/i, "")
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/([A-Za-z])(\d)/g, "$1 $2")
+    .replace(/\bHdmi\b/gi, "HDMI")
+    .replace(/\bTv\b/g, "TV")
+    .replace(/\bAv\b/g, "AV")
+    .replace(/\bUsb\b/g, "USB")
+    .replace(/\bArc\b/g, "ARC")
+    .trim();
+}
+
 // PowerFeature.PowerTypeId: 0 not specified and 3 manual both mean the engine
 // sends no power commands.
 const TYPE_BY_ID = { 0: "none", 1: "discrete", 2: "toggle", 3: "none" };
 const TYPE_ID = { none: 0, discrete: 1, toggle: 2 };
 
-function powerFeature(entry) {
+function featureOf(entry, type) {
   const features = Array.isArray(entry?.DeviceFeatures) ? entry.DeviceFeatures : [];
-  return features.find((f) => String(f?.__type ?? "").includes("PowerFeature")) ?? null;
+  return features.find((f) => String(f?.__type ?? "").includes(type)) ?? null;
+}
+
+function powerFeature(entry) {
+  return featureOf(entry, "PowerFeature");
 }
 
 function firstCommand(actions) {
@@ -89,6 +116,119 @@ export function readDeviceSettings(entry) {
   };
 }
 
+/* The device's input names in order: what an activity's SelectedInput must
+   match exactly. */
+export function inputNames(entry) {
+  const inputs = featureOf(entry, "InputFeature")?.Inputs;
+  return (Array.isArray(inputs) ? inputs : [])
+    .filter((i) => i?.InputName)
+    .slice()
+    .sort((a, b) => (Number(a.InputOrder) || 0) - (Number(b.InputOrder) || 0))
+    .map((i) => String(i.InputName));
+}
+
+/* Inputs for a device without an input feature, from its Input* commands. */
+export function suggestInputs(names) {
+  return names
+    .filter((n) => /^input/i.test(n) && !/^input(next|previous|prev|cycle|select)$/i.test(n.replace(/[\s_-]+/g, "")))
+    .map((n) => ({ name: inputDisplayName(n) || n, command: n }));
+}
+
+// InputFeature.InputType 2 (toggle) and 4 (menu toggle) cycle. A device
+// without an input feature reads as "none", with suggestions offered rather
+// than applied.
+export function readInputSettings(entry) {
+  const feature = featureOf(entry, "InputFeature");
+  const names = commandNames(entry);
+  const cycleKey = (name) => name.toLowerCase().replace(/[\s_-]+/g, "");
+  const guess = (keys) => names.find((n) => keys.includes(cycleKey(n))) ?? "";
+  const suggested = suggestInputs(names);
+  if (!feature) {
+    const tv = /television|projector/i.test(String(entry?.Device?.DeviceTypeDisplayName ?? ""));
+    return {
+      hasInputFeature: false,
+      type: "none",
+      delayMs: tv ? 0 : 1000,
+      list: [],
+      suggested,
+      next: guess(["inputnext", "input", "source", "inputselect"]),
+      previous: guess(["inputprevious", "inputprev"]),
+      afterPowerOn: "",
+    };
+  }
+  const order = (i) => Number(i?.InputOrder) || 0;
+  const resets = powerFeature(entry)?.PowerOnResetActions;
+  const reset = (Array.isArray(resets) ? resets : [])
+    .find((a) => a?.StateName === "Input" && Number(a?.DevActionType) === 1);
+  return {
+    hasInputFeature: true,
+    type: [2, 4].includes(Number(feature.InputType)) ? "cycle" : "discrete",
+    delayMs: wholeNumber(feature.InputDelay, 0),
+    list: (Array.isArray(feature.Inputs) ? feature.Inputs : [])
+      .filter((i) => i?.InputName)
+      .slice()
+      .sort((a, b) => order(a) - order(b))
+      .map((i) => ({ name: String(i.InputName), command: firstCommand(i.Actions) })),
+    suggested,
+    next: firstCommand(feature.NextActions) || guess(["inputnext", "input", "source"]),
+    previous: firstCommand(feature.PreviousActions) || guess(["inputprevious", "inputprev"]),
+    afterPowerOn: reset?.StateValue ? String(reset.StateValue) : "",
+  };
+}
+
+/* Activities that would lose their input switch if the device's inputs
+   became `names`. */
+export function inputsInUse(config, deviceId, names) {
+  const keep = new Set(names);
+  const uses = new Map();
+  for (const activity of config?.activityList?.Activities ?? []) {
+    for (const role of Array.isArray(activity?.Roles) ? activity.Roles : []) {
+      const selected = role?.SelectedInput?.Name;
+      if (String(role?.["DeviceId-"]) === String(deviceId) && typeof selected === "string" && !keep.has(selected)) {
+        const name = activity.Name || activity.ActivityDisplayName || String(activity["Id-"]);
+        uses.set(`${name}\u0000${selected}`, { activity: name, input: selected });
+      }
+    }
+  }
+  return [...uses.values()];
+}
+
+function validateInputs(inputs, has, errors) {
+  if (!["discrete", "cycle", "none"].includes(inputs.type)) {
+    errors.push("Choose how the device switches inputs.");
+    return;
+  }
+  if (!Number.isInteger(inputs.delayMs) || inputs.delayMs < 0 || inputs.delayMs > INPUT_DELAY_MAX_MS) {
+    errors.push(`Input delay must be from 0 to ${INPUT_DELAY_MAX_MS / 1000} seconds.`);
+  }
+  if (inputs.type === "none") return;
+  const list = Array.isArray(inputs.list) ? inputs.list : [];
+  if (!list.length || list.length > MAX_INPUTS) errors.push(`List 1 to ${MAX_INPUTS} inputs.`);
+  const seen = new Set();
+  for (const input of list) {
+    const name = String(input?.name ?? "").trim();
+    if (!name || name.length > 64 || /[\u0000-\u001f\u007f"\\]/.test(name)) {
+      errors.push("Input names must be 1–64 characters without quotes or backslashes.");
+      break;
+    }
+    if (seen.has(name.toLowerCase())) errors.push(`Input "${name}" is listed twice.`);
+    seen.add(name.toLowerCase());
+    if (inputs.type === "discrete" && input.command && !has.has(String(input.command).toLowerCase())) {
+      errors.push(`Input "${name}" needs a command that the device has.`);
+    }
+  }
+  if (inputs.type === "cycle") {
+    if (list.length < 2) errors.push("Cycling needs at least two inputs.");
+    if (!has.has(String(inputs.next ?? "").toLowerCase())) errors.push("Choose the device's next-input command.");
+    if (inputs.previous && !has.has(String(inputs.previous).toLowerCase())) {
+      errors.push("The previous-input command is not on the device.");
+    }
+    if (inputs.afterPowerOn && !seen.has(String(inputs.afterPowerOn).toLowerCase())) {
+      errors.push("The input after power-on must be one of the inputs.");
+    }
+  }
+}
+
 export function validateDeviceSettings(settings, names) {
   const errors = [];
   const has = new Set(names.map((n) => n.toLowerCase()));
@@ -116,14 +256,16 @@ export function validateDeviceSettings(settings, names) {
   if (power.type === "toggle" && !has.has(String(power.toggle ?? "").toLowerCase())) {
     errors.push("Choose the device's power command.");
   }
+  if (settings.inputs) validateInputs(settings.inputs, has, errors);
   return errors;
 }
 
 /* Body for POST /api/device-settings. deviceId leads: the hub finds it by
-   the first "deviceId" key. */
+   the first "deviceId" key. Inputs are sent only when given; the hub leaves
+   the device's inputs alone otherwise. */
 export function deviceSettingsRequest(deviceId, settings) {
   const power = settings.power;
-  return {
+  const body = {
     deviceId: String(deviceId),
     settings: {
       interKeyDelayMs: settings.interKeyDelayMs,
@@ -140,6 +282,22 @@ export function deviceSettingsRequest(deviceId, settings) {
       },
     },
   };
+  const inputs = settings.inputs;
+  if (inputs) {
+    const cycle = inputs.type === "cycle";
+    body.settings.inputs = {
+      type: inputs.type,
+      delayMs: inputs.delayMs,
+      list: inputs.type === "none" ? [] : inputs.list.map((i) => ({
+        name: String(i.name).trim(),
+        command: inputs.type === "discrete" && i.command ? i.command : null,
+      })),
+      next: cycle ? inputs.next : null,
+      previous: cycle && inputs.previous ? inputs.previous : null,
+      afterPowerOn: cycle && inputs.afterPowerOn ? inputs.afterPowerOn : null,
+    };
+  }
+  return body;
 }
 
 /* What the hub writes: a copy of the DeviceList entry with the settings
@@ -167,5 +325,38 @@ export function applyDeviceSettings(entry, settings) {
   if (typeof feature.DefaultPowerOnDelay !== "number") feature.DefaultPowerOnDelay = power.delayMs;
   feature.IsPowerAlwaysOn = Boolean(power.alwaysOn);
   feature.IsPoweredOnBetweenActivities = Boolean(power.onBetweenActivities);
+  if (settings.inputs) applyInputs(next, feature, settings.inputs, stored, press);
   return next;
+}
+
+function applyInputs(entry, power, inputs, stored, press) {
+  const index = entry.DeviceFeatures.findIndex((f) => String(f?.__type ?? "").includes("InputFeature"));
+  if (inputs.type === "none") {
+    if (index >= 0) entry.DeviceFeatures.splice(index, 1);
+  } else {
+    let feature = entry.DeviceFeatures[index];
+    if (!feature) {
+      feature = { __type: "InputFeature", "DeviceId-": entry.Device["Id-"], Id: 0, State: 1, CanSkipInputs: 0 };
+      entry.DeviceFeatures.unshift(feature);
+    }
+    const byName = new Map((feature.Inputs ?? []).filter((i) => i?.InputName).map((i) => [i.InputName, i]));
+    feature.InputType = inputs.type === "cycle" ? 2 : 1;
+    feature.InputDelay = inputs.delayMs;
+    if (typeof feature.DefaultInputDelay !== "number") feature.DefaultInputDelay = inputs.delayMs;
+    feature.Inputs = inputs.list.map((input, i) => ({
+      ...(byName.get(String(input.name).trim()) ?? { Id: 0, ActionId: 0, IsOnline: false, PressDuration: 0, PortTypes: null }),
+      InputName: String(input.name).trim(),
+      InputOrder: i + 1,
+      IsActiveInput: true,
+      ActionSetTypeId: 1,
+      Actions: press(inputs.type === "discrete" ? stored(input.command) : null),
+    }));
+    feature.NextActions = press(inputs.type === "cycle" ? stored(inputs.next) : null);
+    feature.PreviousActions = press(inputs.type === "cycle" ? stored(inputs.previous) : null);
+  }
+  const resets = (power.PowerOnResetActions ?? []).filter((a) => !(a?.StateName === "Input" && Number(a?.DevActionType) === 1));
+  if (inputs.type === "cycle" && inputs.afterPowerOn) {
+    resets.push({ __type: "IRDevAction", DevActionType: 1, StateName: "Input", StateValue: inputs.afterPowerOn, IRCommandName: null, Order: resets.length, ActionId: 0 });
+  }
+  power.PowerOnResetActions = resets;
 }

@@ -841,6 +841,196 @@ local function deviceSettingsFrom(entry, settings)
   return out
 end
 
+-- InputFeature.InputType: 1 discrete; 2 toggle, which the engine cycles as a
+-- relative state.
+local INPUT_TYPE_IDS = {discrete = 1, cycle = 2}
+local MAX_INPUTS = 32
+
+local function present(value)
+  return value ~= nil and value ~= json.null and value ~= ""
+end
+
+-- Check the input settings; nil inputs means "leave the inputs alone".
+local function inputSettingsFrom(entry, inputs)
+  if inputs == nil or inputs == json.null then
+    return nil
+  end
+  if type(inputs) ~= "table" then
+    return nil, "settings.inputs must be an object"
+  end
+  local out = {type = inputs.type, delay = wholeNumber(inputs.delayMs, 0, 60000), list = {}}
+  if out.type ~= "none" and not INPUT_TYPE_IDS[out.type] then
+    return nil, "inputs.type must be discrete, cycle or none"
+  end
+  if not out.delay then
+    return nil, "inputs.delayMs must be a whole number from 0 to 60000"
+  end
+  if out.type == "none" then
+    return out
+  end
+  if type(inputs.list) ~= "table" or #inputs.list == 0 or #inputs.list > MAX_INPUTS then
+    return nil, "inputs.list must have 1 to " .. MAX_INPUTS .. " inputs"
+  end
+  local seen = {}
+  for i, input in ipairs(inputs.list) do
+    local name = type(input) == "table" and type(input.name) == "string" and
+      string.match(input.name, "^%s*(.-)%s*$") or ""
+    if name == "" or #name > 64 or string.find(name, '[%c"\\]') then
+      return nil, "input names must be 1-64 characters without quotes or backslashes"
+    end
+    if seen[string.lower(name)] then
+      return nil, "input " .. name .. " is listed twice"
+    end
+    seen[string.lower(name)] = name
+    local command
+    -- A discrete input may have no command (it is selected by doing nothing).
+    if out.type == "discrete" and present(input.command) then
+      command = storedCommandName(entry, input.command)
+      if not command then
+        return nil, "input " .. name .. " needs a command that the device has"
+      end
+    end
+    out.list[i] = {name = name, command = command}
+  end
+  if out.type == "cycle" then
+    if #out.list < 2 then
+      return nil, "cycling needs at least two inputs"
+    end
+    out.next = storedCommandName(entry, inputs.next)
+    if not out.next then
+      return nil, "cycling needs the device's next-input command"
+    end
+    if present(inputs.previous) then
+      out.previous = storedCommandName(entry, inputs.previous)
+      if not out.previous then
+        return nil, "the previous-input command is not on the device"
+      end
+    end
+    if present(inputs.afterPowerOn) then
+      out.afterPowerOn = seen[string.lower(tostring(inputs.afterPowerOn))]
+      if not out.afterPowerOn then
+        return nil, "the input after power-on must be one of the inputs"
+      end
+    end
+  end
+  return out
+end
+
+-- Activities name an input by its exact InputName; refuse to drop one that a
+-- role still selects, since the engine would silently skip the switch.
+local function inputsInUse(deviceId, inputs)
+  local activities = resourceSnapshot("ActivityList")
+  if not activities or type(activities.resource.Activities) ~= "table" then
+    return {"ActivityList could not be read"}
+  end
+  local names = {}
+  for _, input in ipairs(inputs.list) do
+    names[input.name] = true
+  end
+  local problems = {}
+  for _, activity in ipairs(activities.resource.Activities) do
+    for _, role in ipairs(type(activity.Roles) == "table" and activity.Roles or {}) do
+      local selected = type(role) == "table" and role.SelectedInput
+      if normalizedId(role["DeviceId-"]) == deviceId and type(selected) == "table" and
+          type(selected.Name) == "string" and not names[selected.Name] then
+        problems[#problems + 1] = '"' .. tostring(activity.Name or activity["Id-"]) ..
+          '" switches it to ' .. selected.Name
+      end
+    end
+  end
+  return problems
+end
+
+local function featureOf(entry, typeName)
+  for i, feature in ipairs(entry.DeviceFeatures) do
+    if type(feature) == "table" and
+        string.find(tostring(feature.__type or ""), typeName, 1, true) then
+      return feature, i
+    end
+  end
+  return nil
+end
+
+local function applyInputs(entry, power, inputs)
+  local feature, index = featureOf(entry, "InputFeature")
+  if inputs.type == "none" then
+    if index then
+      table.remove(entry.DeviceFeatures, index)
+    end
+  else
+    if not feature then
+      feature = {
+        __type = "InputFeature",
+        ["DeviceId-"] = tonumber(entry.Device["Id-"]) or entry.Device["Id-"],
+        Id = 0,
+        State = 1,
+        CanSkipInputs = 0,
+        StartActions = {},
+        FinishActions = {},
+        HasAdditionalActions = false
+      }
+      table.insert(entry.DeviceFeatures, 1, feature)
+    end
+    -- Keep each input's other fields (PortTypes, Id, IsOnline, ...) by name.
+    local byName = {}
+    for _, old in ipairs(type(feature.Inputs) == "table" and feature.Inputs or {}) do
+      if type(old) == "table" and type(old.InputName) == "string" then
+        byName[old.InputName] = old
+      end
+    end
+    feature.InputType = INPUT_TYPE_IDS[inputs.type]
+    feature.InputDelay = inputs.delay
+    if type(feature.DefaultInputDelay) ~= "number" then
+      feature.DefaultInputDelay = inputs.delay
+    end
+    feature.Inputs = {}
+    for i, input in ipairs(inputs.list) do
+      local item = byName[input.name] or {
+        Id = 0,
+        ActionId = 0,
+        ActionName = json.null,
+        StateName = json.null,
+        StateValue = json.null,
+        Attributes = json.null,
+        IsOnline = false,
+        IsAutoSwitch = json.null,
+        PressDuration = 0,
+        PortTypes = json.null,
+        DevActionType = 0,
+        HasAdditionalActions = false
+      }
+      item.InputName = input.name
+      item.InputOrder = i
+      item.IsActiveInput = true
+      item.ActionSetTypeId = 1
+      item.Actions = pressActions(input.command)
+      feature.Inputs[i] = item
+    end
+    feature.NextActions = pressActions(inputs.next)
+    feature.PreviousActions = pressActions(inputs.previous)
+  end
+  -- A cycled input has to be known after power-on: a ForceValue power-on
+  -- reset tells the engine without sending anything.
+  local resets = {}
+  for _, action in ipairs(type(power.PowerOnResetActions) == "table" and power.PowerOnResetActions or {}) do
+    if not (type(action) == "table" and action.StateName == "Input" and action.DevActionType == 1) then
+      resets[#resets + 1] = action
+    end
+  end
+  if inputs.afterPowerOn then
+    resets[#resets + 1] = {
+      __type = "IRDevAction",
+      DevActionType = 1,
+      StateName = "Input",
+      StateValue = inputs.afterPowerOn,
+      IRCommandName = json.null,
+      Order = #resets,
+      ActionId = 0
+    }
+  end
+  power.PowerOnResetActions = resets
+end
+
 local function commitDeviceSettings(request)
   if not blockerActive() then
     return {
@@ -882,6 +1072,21 @@ local function commitDeviceSettings(request)
   if not settings then
     return {ok = false, localOnly = true, error = settingsError}
   end
+  local inputs, inputsError = inputSettingsFrom(entry, request.settings.inputs)
+  if inputsError then
+    return {ok = false, localOnly = true, error = inputsError}
+  end
+  if inputs then
+    local problems = inputsInUse(deviceId, inputs)
+    if #problems > 0 then
+      return {
+        ok = false,
+        localOnly = true,
+        error = "activities still use inputs this change removes: " ..
+          table.concat(problems, "; ")
+      }
+    end
+  end
 
   local device = entry.Device
   device.InterKeyDelay = settings.interKeyDelay
@@ -898,6 +1103,9 @@ local function commitDeviceSettings(request)
   end
   feature.IsPowerAlwaysOn = settings.alwaysOn
   feature.IsPoweredOnBetweenActivities = settings.onBetweenActivities
+  if inputs then
+    applyInputs(entry, feature, inputs)
+  end
 
   local deviceEtag = localEtag()
   local encoded, text = pcall(encodeDeviceList, deviceList)
