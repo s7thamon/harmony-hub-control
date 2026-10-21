@@ -10,6 +10,7 @@ import {
   roleLabel,
   saveDraft,
   BUTTON_SOURCE,
+  draftButtonsFromMap,
   reconcileWizardButtons,
   resetWizardButtonsToDefaults,
   revertWizardButtonToDefault,
@@ -521,21 +522,7 @@ export function createWizardView(section) {
     }));
     const maps = hub.buttonMapsForActivity(id);
     const surface = maps.find((m) => /^16414Activity/.test(String(m?.ButtonMapIdentifier ?? ""))) ?? maps[0];
-    for (const b of surface?.Buttons ?? []) {
-      if (!b.ButtonKey || !b.ButtonAction?.CommandName) continue;
-      draft.buttons[b.ButtonKey] = {
-        deviceId: String(b.ButtonAction["DeviceId-"]),
-        command: { name: b.ButtonAction.CommandName, functionId: b.ButtonAction["FunctionId-"] },
-        hold: b.ButtonLongPressAction?.CommandName
-          ? {
-              deviceId: String(b.ButtonLongPressAction["DeviceId-"]),
-              command: { name: b.ButtonLongPressAction.CommandName, functionId: b.ButtonLongPressAction["FunctionId-"] },
-            }
-          : null,
-        /* Existing activity mappings are locked against default overwrite. */
-        source: BUTTON_SOURCE.existing,
-      };
-    }
+    draft.buttons = draftButtonsFromMap(surface);
     /* Fill only keys the activity left empty — never replace existing. */
     draft.buttons = reconcileWizardButtons(draft.buttons, draft.roles, hub.devices());
     renderBasics();
@@ -565,6 +552,7 @@ export function createWizardView(section) {
       deviceId,
       command: { name: command.name, functionId: command.functionId },
       hold,
+      doublePress: draft.buttons[BUTTON_KEY_BY_LABEL[selectedKey]]?.doublePress ?? null,
       source: BUTTON_SOURCE.user,
     };
     setNote("");

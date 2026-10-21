@@ -3261,12 +3261,56 @@ static int remove_json_span(char **pdata, size_t *plen, size_t start, size_t end
     return 0;
 }
 
+/* delete_ir_device() results besides 0 (deleted) and -1 (failed) */
+#define DELETE_DEVICE_NOT_FOUND -2
+#define DELETE_DEVICE_IN_USE -3
+
+/* True when a resource text names device id through a "DeviceId-" key
+ * (bare or quoted value).  codexactivity rejects every later activity save
+ * while a role, button map, button action or function map names a device
+ * that DeviceList no longer has. */
+static int resource_references_device(const char *raw, long id) {
+    const char *p = raw;
+    while ((p = strstr(p, "\"DeviceId-\"")) != NULL) {
+        p += strlen("\"DeviceId-\"");
+        while (isspace((unsigned char)*p)) p++;
+        if (*p != ':') continue;
+        p++;
+        while (isspace((unsigned char)*p)) p++;
+        if (*p == '"') p++;
+        if (isdigit((unsigned char)*p) && strtol(p, NULL, 10) == id) return 1;
+    }
+    return 0;
+}
+
 static int delete_ir_device(const char *device_id, char *msg, size_t msglen) {
-    char *raw;
+    static const char *const referencing[] = { ACTIVITY_LIST, MAP_LIST, FUNCTION_LIST };
+    char *raw, *end;
     const char *p;
-    size_t len;
-    char idneedle[64];
-    snprintf(idneedle, sizeof(idneedle), "\"Id-\":%s", device_id);
+    size_t len, i;
+    long id;
+    errno = 0;
+    id = strtol(device_id, &end, 10);
+    if (!device_id[0] || errno != 0 || *end != 0 || id <= 0) {
+        snprintf(msg, msglen, "Device %s not found.", device_id);
+        return DELETE_DEVICE_NOT_FOUND;
+    }
+    for (i = 0; i < sizeof(referencing) / sizeof(referencing[0]); i++) {
+        int used;
+        raw = read_file_alloc(referencing[i], MAX_RESOURCE_FILE, &len);
+        if (!raw) {
+            snprintf(msg, msglen, "Could not check where device %s is used.", device_id);
+            return -1;
+        }
+        used = resource_references_device(raw, id);
+        free(raw);
+        if (used) {
+            snprintf(msg, msglen,
+                "Device %s is still used by an activity or a remote button map. "
+                "Remove it from those first, then delete it.", device_id);
+            return DELETE_DEVICE_IN_USE;
+        }
+    }
     raw = read_file_alloc(DEVICE_LIST, MAX_RESOURCE_FILE, &len);
     if (!raw) {
         snprintf(msg, msglen, "Failed to read DeviceList.");
@@ -3275,11 +3319,13 @@ static int delete_ir_device(const char *device_id, char *msg, size_t msglen) {
     p = raw;
     while ((p = strstr(p, "\"Device\":{")) != NULL) {
         const char *item_start = p;
+        const char *dev_obj = p + strlen("\"Device\":");
+        const char *dev_end = find_matching_json(dev_obj, '{', '}');
         const char *item_end;
         while (item_start > raw && *item_start != '{') item_start--;
         item_end = find_matching_json(item_start, '{', '}');
-        if (!item_end) break;
-        if (strstr(item_start, idneedle) && strstr(item_start, idneedle) < item_end) {
+        if (!item_end || !dev_end) break;
+        if (json_long_range(dev_obj, dev_end, "Id-", 0) == id) {
             backup_resources();
             if (remove_json_span(&raw, &len, (size_t)(item_start - raw), (size_t)(item_end + 1 - raw)) != 0 ||
                 write_file_atomic(DEVICE_LIST, raw, len) != 0) {
@@ -3296,7 +3342,7 @@ static int delete_ir_device(const char *device_id, char *msg, size_t msglen) {
     }
     free(raw);
     snprintf(msg, msglen, "Device %s not found.", device_id);
-    return -1;
+    return DELETE_DEVICE_NOT_FOUND;
 }
 
 static int delete_ir_command(const char *device_id, const char *command_name, char *msg, size_t msglen) {
@@ -5977,6 +6023,21 @@ static void render_page(int fd, const char *message) {
     fclose(f);
 }
 
+/* Compact result page with an explicit status, for form routes whose
+ * failures must not read as success: the shell's postHubForm() trusts only
+ * 2xx and shows the <div class='msg'> text either way. */
+static void render_message(int fd, const char *status, const char *message) {
+    FILE *f = fdopen(dup(fd), "w");
+    if (!f) return;
+    fprintf(f,
+        "HTTP/1.1 %s\r\nContent-Type: text/html; charset=utf-8\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n"
+        "<!doctype html><html><head><meta charset='utf-8'><title>Harmony Hub Control</title></head><body>"
+        "<div class='msg'>", status);
+    html(f, message);
+    fputs("</div><p><a href='/'>Back to Harmony Hub Control</a></p></body></html>", f);
+    fclose(f);
+}
+
 static void handle_mqtt(int fd, const struct request *req) {
     struct mqtt_config old, cfg;
     char tmp[256];
@@ -6516,6 +6577,97 @@ static void render_state_json(int fd, const struct request *req) {
     fprintf(f, "{\"ok\":%s,\"code\":%d,\"changed\":%s,\"reply\":",
         rc == 0 ? "true" : "false", code, (rc == 0 && code == 200) ? "true" : "false");
     json_write_string(f, reply);
+    fputs("}\n", f);
+    fclose(f);
+}
+
+/* System view probe (GET /api/system-status): firmware, uptime, memory,
+ * uname, mounts, processes, recent local logs and the sign-in mode, all
+ * read-only and bounded.  BusyBox has no tail and run_cmd() keeps only the
+ * head of long output, so each log is cut to its newest lines with awk;
+ * otherwise the append-only init log would show only its oldest boots. */
+#define SYSTEM_LOG_TAIL \
+    "awk '{l[NR%25]=$0} END {for (i = NR - 24; i <= NR; i++) if (i > 0) print l[i%25]}'"
+
+static void load_uptime_label(char *out, size_t outlen) {
+    char uptime[128];
+    long seconds, days, hours, minutes;
+    read_text("/proc/uptime", uptime, sizeof(uptime));
+    chomp(uptime);
+    seconds = atol(uptime);
+    days = seconds / 86400;
+    hours = (seconds % 86400) / 3600;
+    minutes = (seconds % 3600) / 60;
+    if (days > 0) snprintf(out, outlen, "%ldd %ldh %ldm", days, hours, minutes);
+    else snprintf(out, outlen, "%ldh %ldm", hours, minutes);
+}
+
+static void mem_total_value(const char *memory, char *out, size_t outlen) {
+    const char *start = strstr(memory, "MemTotal:");
+    const char *end;
+    size_t len;
+    if (!outlen) return;
+    out[0] = 0;
+    if (!start) return;
+    start += strlen("MemTotal:");
+    while (*start == ' ' || *start == '\t') start++;
+    end = strchr(start, '\n');
+    if (!end) end = start + strlen(start);
+    while (end > start && isspace((unsigned char)end[-1])) end--;
+    len = (size_t)(end - start);
+    if (len >= outlen) len = outlen - 1;
+    memcpy(out, start, len);
+    out[len] = 0;
+}
+
+static void render_system_status_json(int fd) {
+    enum {
+        SYSTEM_MEMORY_BYTES = 4096,
+        SYSTEM_DETAIL_BYTES = 6144,
+        SYSTEM_LOG_BYTES = 12288
+    };
+    char firmware[128], uptime[80], mem_total[80], uname_text[512];
+    char memory[SYSTEM_MEMORY_BYTES], mounts[SYSTEM_DETAIL_BYTES];
+    char processes[SYSTEM_DETAIL_BYTES], logs[SYSTEM_LOG_BYTES];
+    struct webui_auth_config auth;
+    FILE *f;
+
+    read_text("/etc/version", firmware, sizeof(firmware));
+    chomp(firmware);
+    load_uptime_label(uptime, sizeof(uptime));
+    run_cmd("uname -a", uname_text, sizeof(uname_text));
+    run_cmd("cat /proc/meminfo", memory, sizeof(memory));
+    run_cmd("mount", mounts, sizeof(mounts));
+    run_cmd("ps", processes, sizeof(processes));
+    run_cmd("echo '--- startup log (newest lines) ---'; "
+        SYSTEM_LOG_TAIL " /cache/codex-init.log 2>/dev/null; echo; "
+        "if [ -f /cache/codex-recovery.log ]; then echo '--- recovery log (newest lines) ---'; "
+        SYSTEM_LOG_TAIL " /cache/codex-recovery.log; echo; fi; "
+        "echo '--- local service syslog (newest lines) ---'; "
+        "logread 2>/dev/null | grep -i 'codex\\|mqtt' 2>/dev/null | " SYSTEM_LOG_TAIL,
+        logs, sizeof(logs));
+    chomp(uname_text);
+    chomp(memory);
+    chomp(mounts);
+    chomp(processes);
+    chomp(logs);
+    if (!logs[0]) snprintf(logs, sizeof(logs), "no matching logs");
+    mem_total_value(memory, mem_total, sizeof(mem_total));
+    load_webui_auth(&auth);
+
+    f = send_json_start(fd, "200 OK");
+    if (!f) return;
+    fputs("{\"ok\":true,\"firmware\":", f);
+    json_write_string(f, firmware[0] ? firmware : "unknown");
+    fputs(",\"uptime\":", f); json_write_string(f, uptime);
+    fputs(",\"memTotal\":", f); json_write_string(f, mem_total);
+    fputs(",\"memory\":", f); json_write_string(f, memory);
+    fputs(",\"uname\":", f); json_write_string(f, uname_text);
+    fputs(",\"mounts\":", f); json_write_string(f, mounts);
+    fputs(",\"processes\":", f); json_write_string(f, processes);
+    fputs(",\"logs\":", f); json_write_string(f, logs);
+    fputs(",\"authMode\":", f);
+    json_write_string(f, auth.enabled ? "sign-in required" : "open on local network");
     fputs("}\n", f);
     fclose(f);
 }
@@ -8497,9 +8649,17 @@ static void handle_ir_capture(int fd, const struct request *req) {
 
 static void handle_ir_delete_device(int fd, const struct request *req) {
     char device_id[64], msg[512];
+    int rc;
     form_value(req->body, "deviceId", device_id, sizeof(device_id));
-    delete_ir_device(device_id, msg, sizeof(msg));
-    render_page(fd, msg);
+    rc = delete_ir_device(device_id, msg, sizeof(msg));
+    if (rc == 0) {
+        render_page(fd, msg);
+    } else {
+        render_message(fd,
+            rc == DELETE_DEVICE_IN_USE ? "409 Conflict" :
+            rc == DELETE_DEVICE_NOT_FOUND ? "404 Not Found" : "500 Internal Server Error",
+            msg);
+    }
 }
 
 static void handle_ir_delete_command(int fd, const struct request *req) {
@@ -8713,6 +8873,8 @@ static void handle_client(int client) {
         strncmp(req.path, "/api/state", 10) == 0 &&
         (req.path[10] == 0 || req.path[10] == '?')) {
         render_state_json(client, &req);
+    } else if (strcmp(req.method, "GET") == 0 && strcmp(req.path, "/api/system-status") == 0) {
+        render_system_status_json(client);
     } else if ((strcmp(req.method, "GET") == 0 || strcmp(req.method, "POST") == 0) &&
         strncmp(req.path, "/api/device-commands", 20) == 0 &&
         (req.path[20] == 0 || req.path[20] == '?')) {

@@ -37,6 +37,17 @@ export const DEVICE_TYPES = Object.freeze([
   "Home Appliance",
 ]);
 
+/* Options for the device form's type select. A stock device can carry a type
+   outside DEVICE_TYPES (e.g. "GameConsoleWithDvd"); it leads the list so the
+   select keeps it, instead of falling back to the first option and silently
+   retyping the device on save. */
+export function deviceTypeOptions(currentType) {
+  const current = String(currentType ?? "");
+  return current && !DEVICE_TYPES.includes(current)
+    ? [current, ...DEVICE_TYPES]
+    : [...DEVICE_TYPES];
+}
+
 /* Mirror of safe_label(): non-empty, no control chars (<32 / 127), no '"' and
    no backslash, bounded by the destination buffer. */
 export function isSafeLabel(value, max = LIMITS.name) {
@@ -325,5 +336,66 @@ export function describeInventory(inv) {
         raw: Boolean(c?.raw),
       })) : [],
     })),
+  };
+}
+
+/* Where a device is still named in the activity resources. The hub refuses to
+   delete a device while any "DeviceId-" points at it: codexactivity rejects
+   every later activity save that names a missing device. The device's own
+   device-mode maps (its DeviceButtonMap and DeviceFunctionMap) go with it;
+   every other reference is a use the user has to remove first. */
+function namesDevice(value, id) {
+  if (Array.isArray(value)) return value.some((item) => namesDevice(item, id));
+  if (!value || typeof value !== "object") return false;
+  return Object.entries(value).some(([key, item]) =>
+    key === "DeviceId-" ? item != null && String(item) === id : namesDevice(item, id));
+}
+
+function isOwnDeviceMap(map, id) {
+  return map?.["DeviceId-"] != null && String(map["DeviceId-"]) === id && map["ActivityId-"] == null;
+}
+
+export function deviceUsage(config, deviceId) {
+  const id = String(deviceId);
+  const activities = config?.activityList?.Activities ?? [];
+  const devices = config?.deviceList?.DevicesWithFeatures ?? [];
+  const activityLabel = (activityId) => {
+    const activity = activities.find((a) => String(a?.["Id-"]) === String(activityId));
+    return `activity "${activity?.Name || activity?.ActivityDisplayName || activityId}"`;
+  };
+  const mapLabel = (map) => {
+    if (map?.["ActivityId-"] != null) return activityLabel(map["ActivityId-"]);
+    if (/Root$/.test(String(map?.ButtonMapIdentifier ?? ""))) return "the remote's home screen";
+    if (map?.["DeviceId-"] != null) {
+      const owner = devices.find((d) => String(d?.Device?.["Id-"]) === String(map["DeviceId-"]));
+      return `the device screen of "${owner?.Device?.Name || map["DeviceId-"]}"`;
+    }
+    return `button map ${map?.ButtonMapIdentifier ?? "(unnamed)"}`;
+  };
+  const uses = new Set();
+  let ownMaps = 0;
+  for (const activity of activities) {
+    if (namesDevice(activity, id)) uses.add(activityLabel(activity?.["Id-"]));
+  }
+  for (const map of [...(config?.mapList?.ButtonMaps ?? []), ...(config?.functionList?.FunctionMaps ?? [])]) {
+    if (isOwnDeviceMap(map, id)) ownMaps += 1;
+    else if (namesDevice(map, id)) uses.add(mapLabel(map));
+  }
+  return { uses: [...uses], ownMaps };
+}
+
+/* The map and function lists without the device's own device-mode maps, for
+   the activity save that has to precede deleting a device that has them. */
+export function withoutDeviceMaps(config, deviceId) {
+  const id = String(deviceId);
+  return {
+    mapList: {
+      ...config?.mapList,
+      ButtonMaps: (config?.mapList?.ButtonMaps ?? []).filter((m) => !isOwnDeviceMap(m, id)),
+    },
+    functionList: {
+      ...config?.functionList,
+      FunctionMaps: (config?.functionList?.FunctionMaps ?? []).filter((m) => !isOwnDeviceMap(m, id)),
+    },
   };
 }
