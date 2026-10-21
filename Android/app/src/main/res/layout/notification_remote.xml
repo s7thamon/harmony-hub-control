@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Six equal touch targets; unmapped keys are hidden at runtime. Tint follows the notification theme. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="48dp"
+    android:gravity="center_vertical"
+    android:orientation="horizontal">
+
+    <ImageButton android:id="@+id/notif_vol_down" style="@style/NotifButton"
+        android:src="@drawable/ic_n_vol_down" android:contentDescription="Volume down" />
+    <ImageButton android:id="@+id/notif_vol_up" style="@style/NotifButton"
+        android:src="@drawable/ic_n_vol_up" android:contentDescription="Volume up" />
+    <ImageButton android:id="@+id/notif_mute" style="@style/NotifButton"
+        android:src="@drawable/ic_n_mute" android:contentDescription="Mute" />
+    <ImageButton android:id="@+id/notif_play" style="@style/NotifButton"
+        android:src="@drawable/ic_n_play" android:contentDescription="Play" />
+    <ImageButton android:id="@+id/notif_pause" style="@style/NotifButton"
+        android:src="@drawable/ic_n_pause" android:contentDescription="Pause" />
+    <ImageButton android:id="@+id/notif_power" style="@style/NotifButton"
+        android:src="@drawable/ic_n_power" android:tint="#FFFF8A80" android:contentDescription="Turn off" />
+</LinearLayout>
