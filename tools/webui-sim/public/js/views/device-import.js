@@ -7,7 +7,8 @@
    pins that to the functions and button seams below. Everything from a
    library or a file is built with textContent, never innerHTML. */
 
-import { getJson, postApiForm } from "../api.js";
+import { getJson, importCatalog, postApiForm } from "../api.js";
+import { catalogRows, describeCatalogRows, hubProtocolNames } from "../logitech-catalog.js";
 import * as hub from "../state.js";
 import { clear, el, setText } from "../setup-kit.js";
 import { openSheet, snackbar } from "../ui/shell.js";
@@ -27,6 +28,7 @@ import {
 
 const TABS = [
   { id: "find", label: "Find codes" },
+  { id: "catalog", label: "Logitech catalog" },
   { id: "paste", label: "Paste" },
   { id: "type", label: "Type a code" },
 ];
@@ -365,6 +367,93 @@ export function openImportSheet({ device }) {
     await sendImport(payload, refs.findStatus, refs.findImportBtn);
   }
 
+  /* ---------------- Logitech catalog ---------------- */
+  const catalogState = { pkg: null, rows: [], skipped: [], protocols: [] };
+
+  async function loadHubProtocols() {
+    if (catalogState.protocols.length) return catalogState.protocols;
+    try {
+      const text = await (await fetch("/export/protocols", { cache: "no-store" })).text();
+      catalogState.protocols = hubProtocolNames(JSON.parse(text));
+    } catch (_) {
+      catalogState.protocols = [];
+    }
+    return catalogState.protocols;
+  }
+
+  function renderCatalogPreview() {
+    clear(refs.catalogPreview);
+    refs.catalogImportBtn.hidden = !catalogState.rows.length;
+    refs.catalogImportBtn.disabled = importing || !catalogState.rows.length;
+    if (!catalogState.pkg) return;
+    const result = { rows: catalogState.rows, skipped: catalogState.skipped, protocolsUsed: [], missingProtocols: [] };
+    const summary = describeCatalogRows({
+      ...result,
+      protocolsUsed: [...new Set(catalogState.rows.map((r) => r.protocol).filter(Boolean))],
+      missingProtocols: [...new Set(catalogState.skipped.map((s) => s.reason).filter(Boolean))],
+    });
+    const sample = catalogState.rows.slice(0, 24).map((r) => `${r.name} · ${r.protocol || "raw"}`).join("\n");
+    const skippedSample = catalogState.skipped.slice(0, 12).map((s) => `${s.name} — ${s.reason}`).join("\n");
+    refs.catalogPreview.appendChild(el("div", {
+      className: "m-card import-preview",
+      children: [
+        el("p", { text: summary }),
+        el("pre", { className: "import-rows mono", text: sample || "(no importable commands)" }),
+        ...(skippedSample
+          ? [el("p", { className: "m-field-hint", text: "Skipped:" }), el("pre", { className: "import-rows mono", text: skippedSample })]
+          : []),
+      ],
+    }));
+    setText(refs.catalogImportBtn, catalogState.rows.length
+      ? `Import ${plural(catalogState.rows.length, "command")} to ${device.name}` : "Nothing to import");
+  }
+
+  async function previewCatalogFile(file, text) {
+    let pkg;
+    try {
+      pkg = JSON.parse(text);
+    } catch (_) {
+      setMessage(refs.catalogStatus, `${file.name} is not a catalog package (not JSON).`, "error");
+      return;
+    }
+    if (pkg?.schema_version !== "0.2.0" || !pkg?.resources?.global_language_commands) {
+      setMessage(refs.catalogStatus, `${file.name} is not a Logitech catalog package from tools/catalog/harmony_catalog.py.`, "error");
+      return;
+    }
+    catalogState.pkg = pkg;
+    const protocols = await loadHubProtocols();
+    const converted = catalogRows(pkg, protocols);
+    catalogState.rows = converted.rows;
+    catalogState.skipped = converted.skipped;
+    renderCatalogPreview();
+    setMessage(refs.catalogStatus,
+      protocols.length
+        ? `Loaded ${file.name}: ${describeCatalogRows(converted)}.`
+        : `Loaded ${file.name}, but the hub's protocol list couldn't be read, so no KeyCode can be checked yet.`,
+      converted.rows.length ? "ok" : "warn");
+  }
+
+  async function doCatalogImport() {
+    if (!catalogState.rows.length) {
+      setMessage(refs.catalogStatus, "Nothing to import yet: open a catalog package with importable commands first.", "error");
+      return;
+    }
+    importing = true;
+    refs.catalogImportBtn.disabled = true;
+    setMessage(refs.catalogStatus, "Importing… the hub backs up its device list first.");
+    try {
+      const j = await importCatalog({ deviceId: device.id, commands: catalogState.rows });
+      try { await hub.refreshConfig(); } catch (_) { /* page catches up */ }
+      refs.close();
+      snackbar(`Imported to ${device.name}. ${j.message || ""}`.trim());
+    } catch (error) {
+      setMessage(refs.catalogStatus, error.message || "Import failed.", "error");
+    } finally {
+      importing = false;
+      refs.catalogImportBtn.disabled = false;
+    }
+  }
+
   /* ---------------- Type a code ---------------- */
   async function doAddCommand() {
     refs.addBtn.disabled = true;
@@ -494,6 +583,43 @@ export function openImportSheet({ device }) {
       ],
     });
 
+    // Logitech catalog
+    refs.catalogFile = el("input", {
+      className: "import-file-input",
+      attrs: { type: "file", id: `${id}CatalogFile`, accept: ".json,application/json" },
+    });
+    refs.catalogFile.addEventListener("change", () => {
+      const file = refs.catalogFile.files && refs.catalogFile.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => previewCatalogFile(file, String(reader.result || ""));
+      reader.onerror = () => setMessage(refs.catalogStatus, `Couldn't read ${file.name}.`, "error");
+      reader.readAsText(file);
+      refs.catalogFile.value = "";
+    });
+    refs.catalogStatus = status();
+    refs.catalogPreview = el("div");
+    refs.catalogImportBtn = button("Import", "btn-filled btn-block", doCatalogImport);
+    refs.catalogImportBtn.hidden = true;
+    refs.panels.catalog = el("div", {
+      className: "import-panel",
+      children: [
+        el("p", { className: "sheet-text", text:
+          `Use the code set from Logitech's own catalog for ${device.manufacturer || "this maker"} ${device.model || ""}`.trim() + ". " +
+          "On your computer, run tools/catalog/harmony_catalog.py once to sign in and download the package, then open it here. " +
+          "Only commands whose IR protocol this hub already has are imported; the rest are listed below, not dropped silently." }),
+        el("div", { className: "import-file", children: [
+          el("label", { className: "btn btn-outlined", text: "Open a catalog package…", attrs: { for: refs.catalogFile.id } }),
+          refs.catalogFile,
+          el("p", { className: "m-field-hint", text:
+            "A harmony-catalog-*.json file from the helper. Your Logitech sign-in stays on your computer; the hub never sees it." }),
+        ] }),
+        refs.catalogStatus,
+        refs.catalogPreview,
+        refs.catalogImportBtn,
+      ],
+    });
+
     // Type a code
     const formHost = el("div");
     refs.addBtn = button("Add command", "btn-filled btn-block", doAddCommand);
@@ -520,6 +646,7 @@ export function openImportSheet({ device }) {
       el("h2", { className: "sheet-title", text: "Import codes", attrs: { tabindex: "-1", autofocus: "" } }),
       el("div", { className: "seg-tabs import-tabs", attrs: { role: "tablist", "aria-label": "Import codes" }, children: refs.tabs }),
       refs.panels.find,
+      refs.panels.catalog,
       refs.panels.paste,
       refs.panels.type,
     );

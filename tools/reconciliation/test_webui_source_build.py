@@ -17,9 +17,9 @@ official Zig 0.16.0 pin:
 The exact source tuples (from the verified webui-repro and
 zig-distribution-sweep pilot reports):
 
-  codex_webui.c          fb699bfb8b2f1c0aac1bf1fc2acb68ae087097e5 (box 2026-10-20 + LED + state-digest endpoints + system-status, delete guard, RAM agent logs, device settings, inputs + shell without the photo + hold-to-repeat + IRDB search)
+  codex_webui.c          b48e532f92b2f83873dec227680f7c7243db9dad (box 2026-10-20 + LED + state-digest endpoints + system-status, delete guard, RAM agent logs, device settings, inputs + shell without the photo + hold-to-repeat + Logitech catalog)
   activity_ui_assets.h   5dad607f7c09a0d5cc0034969b76e6c5df1eb2bc
-  harmony_shell_assets.h 314a173f734e96faa8c929be952cdd450fc14a5d (box 2026-10-20 + state-digest liveness + integrity fixes + device settings + inputs + Melodious shell + Activities + Devices + hold-to-repeat + IRDB search)
+  harmony_shell_assets.h 4f07f32e668f111eb4bf2ca09fb910f84d0e71e7 (box 2026-10-20 + state-digest liveness + integrity fixes + device settings + inputs + Melodious shell + Activities + Devices + hold-to-repeat + Logitech catalog)
   remote_skin_jpg.h      419611c5ff0713f1f5de2dd684d699f6d77238d5
   codex_hbus.c           d2bbcdef214369bff3dacf1836d6b5a0057f5ede (309cec3)
 
@@ -76,9 +76,9 @@ BUILD_SCRIPT = os.path.join(REPO_ROOT, "build", "build_harmony_tools_kali.sh")
 #: constants from the verified pilot reports.
 PINNED_SOURCES = {
     "codex_webui.c": (
-        "fb699bfb8b2f1c0aac1bf1fc2acb68ae087097e5",
-        "dbac978bf9d5b828cf78c6acec9550e90b81280cbd25ccf8565d381e3a232a35",
-        571282,
+        "b48e532f92b2f83873dec227680f7c7243db9dad",
+        "4be618d51b6bbe6598d9acbc4fd7336288c816bd0d765bbdb94acfb873899c54",
+        580868,
     ),
     "activity_ui_assets.h": (
         "5dad607f7c09a0d5cc0034969b76e6c5df1eb2bc",
@@ -86,9 +86,9 @@ PINNED_SOURCES = {
         502204,
     ),
     "harmony_shell_assets.h": (
-        "314a173f734e96faa8c929be952cdd450fc14a5d",
-        "498cedb362d3bceec290268ced5cbae63bb0d0d85a513b4a60eff48a4e27765a",
-        1972957,
+        "4f07f32e668f111eb4bf2ca09fb910f84d0e71e7",
+        "03814c6a2e5972db8c04623d55166720327dc9b49acb5f1650f4d92a88678f71",
+        1998563,
     ),
     "remote_skin_jpg.h": (
         "419611c5ff0713f1f5de2dd684d699f6d77238d5",
@@ -105,8 +105,8 @@ PINNED_SOURCES = {
 #: exact live binary targets (verified pilot reports)
 TARGETS = {
     "codex_webui": (
-        "1fd443131c54a701f6340996de02ccbb204f5302dde39f48e7e37072594a1bb9",
-        1100180,
+        "55b6045f5eab25fbea9f6ceacfa7d32f1195f7e1069ce1cb9192e7a759b91ed4",
+        1109300,
     ),
     "codex_bt_pair_agent": (
         "563c6c58a3629edfebd7ec30ebcf14e6384a2d84e89669b1d7c3d79c75b619c8",

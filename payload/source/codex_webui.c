@@ -4424,6 +4424,226 @@ static int ir_cancel_path(const char *run_id, char *path, size_t pathlen) {
     return 1;
 }
 
+/* One browser-parsed catalog command for the JSON importer.  The browser
+ * keeps only importable rows, so by the time a command reaches here it has
+ * already passed the strict KeyCode/Raw gate; the hub still re-checks every
+ * field (the request body is not trusted input). */
+struct catalog_command {
+    char *name;
+    char *keycode;
+    char *raw_text;
+};
+
+/* Parse a JSON body of {"deviceId":"...","commands":[{name,keycode,raw}]}
+ * into command structs (fields owned by the returned array; free with
+ * free_catalog_commands).  KeyCodes keep their own ProtocolId by name: the
+ * hub refuses ("protocol the hub doesn't have") any whose named protocol
+ * has no ProtocolList record, instead of stamping a wrong one. */
+static int parse_catalog_commands(const char *body, char *device_id, size_t device_id_len,
+                                  struct catalog_command **out_commands, int *out_count,
+                                  char *msg, size_t msglen) {
+    const char *p;
+    struct catalog_command *commands;
+    int index = 0;
+    *out_commands = NULL;
+    *out_count = 0;
+    if (!body || !body[0]) {
+        snprintf(msg, msglen, "The request body was empty.");
+        return -1;
+    }
+    (void)device_id_len;
+    json_string_range(body, NULL, "deviceId", device_id, device_id_len);
+    if (!safe_label(device_id)) {
+        snprintf(msg, msglen, "Invalid device for catalog import.");
+        return -1;
+    }
+    p = strstr(body, "\"commands\"");
+    p = p ? strchr(p, '[') : NULL;
+    if (!p) {
+        snprintf(msg, msglen, "Catalog import needs a commands list.");
+        return -1;
+    }
+    commands = (struct catalog_command *)calloc(MAX_IR_BATCH_COMMANDS, sizeof(*commands));
+    if (!commands) {
+        snprintf(msg, msglen, "Not enough memory to receive catalog commands.");
+        return -1;
+    }
+    for (p = strchr(p, '{'); p; p = strchr(p, '{')) {
+        const char *end = find_matching_json(p, '{', '}');
+        char name[128], keycode[512], raw_text[2048];
+        if (!end) break;
+        if (index >= MAX_IR_BATCH_COMMANDS) {
+            for (int i = 0; i < index; i++) {
+                free(commands[i].name); free(commands[i].keycode); free(commands[i].raw_text);
+            }
+            free(commands);
+            snprintf(msg, msglen, "Catalog import holds too many commands for one request.");
+            return -1;
+        }
+        json_string_range(p, end, "name", name, sizeof(name));
+        json_string_range(p, end, "keycode", keycode, sizeof(keycode));
+        json_string_range(p, end, "raw", raw_text, sizeof(raw_text));
+        commands[index].name = strdup(name);
+        commands[index].keycode = strdup(keycode);
+        commands[index].raw_text = strdup(raw_text);
+        if (!commands[index].name || !commands[index].keycode || !commands[index].raw_text) {
+            free(commands[index].name); free(commands[index].keycode); free(commands[index].raw_text);
+            for (int i = 0; i < index; i++) {
+                free(commands[i].name); free(commands[i].keycode); free(commands[i].raw_text);
+            }
+            free(commands);
+            snprintf(msg, msglen, "Not enough memory to receive catalog commands.");
+            return -1;
+        }
+        index++;
+        p = end + 1;
+    }
+    if (!index) {
+        free(commands);
+        snprintf(msg, msglen, "Catalog import carried no commands.");
+        return -1;
+    }
+    *out_commands = commands;
+    *out_count = index;
+    return 0;
+}
+
+static void free_catalog_commands(struct catalog_command *commands, int count) {
+    if (!commands) return;
+    for (int i = 0; i < count; i++) {
+        free(commands[i].name); free(commands[i].keycode); free(commands[i].raw_text);
+    }
+    free(commands);
+}
+
+/* Import browser-parsed catalog rows (already KeyCode/Raw gated by the
+ * browser; re-validated here).  Same write path as the pipe importer:
+ * backup first, one atomic DeviceList write, then a reload request. */
+static int bulk_import_catalog_commands(const char *device_id, struct catalog_command *commands,
+                                        int count, char *msg, size_t msglen) {
+    char *joined = NULL, *raw, *out;
+    const char *arr, *arr_end, *scan;
+    size_t joined_len = 0, joined_cap = 0, raw_len, prefix_len, suffix_len, out_len;
+    long next_id, max_command_id = 0;
+    int imported = 0, skipped_existing = 0, rejected = 0, submitted = 0;
+    int uses_toshiba = 0, uses_memorex = 0, empty = 1;
+
+    raw = read_file_alloc(DEVICE_LIST, MAX_RESOURCE_FILE, &raw_len);
+    if (!raw || find_device_command_array(raw, device_id, &arr, &arr_end) != 0) {
+        free(raw);
+        snprintf(msg, msglen, "Failed to locate device command list.");
+        return -1;
+    }
+    scan_ir_resource_stats_from_raw(raw, NULL, NULL, NULL, &max_command_id);
+    int existing_commands = 0;
+    scan_command_array(arr, arr_end, &existing_commands, NULL);
+    int remaining = MAX_IR_STORED_COMMANDS - existing_commands;
+    if (remaining <= 0) {
+        free(raw);
+        snprintf(msg, msglen, "Device %s already has the local storage limit of %d commands.", device_id, MAX_IR_STORED_COMMANDS);
+        return -1;
+    }
+    next_id = max_command_id + 1;
+    if (next_id < 39000000) next_id = 39000000 + (long)(time(NULL) % 9000000);
+    protocol_list_cache = read_file_alloc(PROTOCOL_LIST, MAX_RESOURCE_FILE, NULL);
+    for (int i = 0; i < count; i++) {
+        struct catalog_command *row = &commands[i];
+        int is_raw = row->raw_text[0] != 0;
+        int protocol_id = 0;
+        char why[96];
+        char *cmd_json;
+        submitted++;
+        if (!safe_label(row->name)) { rejected++; continue; }
+        if (command_array_has_name(arr, arr_end, row->name) ||
+            command_fragment_has_name(joined, row->name)) { skipped_existing++; continue; }
+        if (is_raw ? !safe_raw_import_value(row->raw_text) : !row->keycode[0]) { rejected++; continue; }
+        if (!is_raw &&
+            (protocol_id = keycode_storage_protocol(row->keycode, 2, why, sizeof(why))) <= 0) {
+            rejected++;
+            continue;
+        }
+        if (imported >= remaining) { rejected++; continue; }
+        cmd_json = is_raw ?
+            build_ir_command_json(next_id++, row->name, "raw", 2, "", row->raw_text) :
+            build_ir_command_json(next_id++, row->name, "keycode", protocol_id, row->keycode, "");
+        if (!cmd_json || append_text(&joined, &joined_len, &joined_cap, cmd_json, imported > 0) != 0) {
+            free(cmd_json); free(joined); free(raw);
+            free(protocol_list_cache); protocol_list_cache = NULL;
+            snprintf(msg, msglen, "Failed to stage catalog commands.");
+            return -1;
+        }
+        free(cmd_json);
+        imported++;
+        if (protocol_id == 2) uses_toshiba = 1;
+        if (protocol_id == 679) uses_memorex = 1;
+    }
+    free(protocol_list_cache);
+    protocol_list_cache = NULL;
+    if (imported == 0) {
+        free(joined); free(raw);
+        format_irdb_import_result(msg, msglen, submitted, 0, skipped_existing, rejected);
+        return -1;
+    }
+    for (scan = arr + 1; scan < arr_end; scan++) {
+        if (!isspace((unsigned char)*scan)) { empty = 0; break; }
+    }
+    prefix_len = (size_t)(arr_end - raw);
+    suffix_len = raw_len - prefix_len;
+    out_len = prefix_len + joined_len + (empty ? 0 : 1) + suffix_len;
+    out = (char *)malloc(out_len + 1);
+    if (!out) {
+        free(raw); free(joined);
+        snprintf(msg, msglen, "Not enough memory to import catalog commands.");
+        return -1;
+    }
+    memcpy(out, raw, prefix_len);
+    if (!empty) out[prefix_len++] = ',';
+    memcpy(out + prefix_len, joined, joined_len);
+    memcpy(out + prefix_len + joined_len, raw + (arr_end - raw), suffix_len);
+    out[out_len] = 0;
+    backup_resources();
+    if ((uses_toshiba && ensure_builtin_protocol_for_id(2) != 0) ||
+        (uses_memorex && ensure_builtin_protocol_for_id(679) != 0)) {
+        free(raw); free(joined); free(out);
+        snprintf(msg, msglen, "Failed to add the IR protocol these commands need.");
+        return -1;
+    }
+    if (write_file_atomic(DEVICE_LIST, out, out_len) != 0) {
+        free(raw); free(joined); free(out);
+        snprintf(msg, msglen, "Failed to write imported catalog commands.");
+        return -1;
+    }
+    free(raw); free(joined); free(out);
+    request_resource_reload();
+    format_irdb_import_result(msg, msglen, submitted, imported, skipped_existing, rejected);
+    return 0;
+}
+
+static void render_catalog_import_json(int fd, const struct request *req) {
+    char device_id[64], msg[512];
+    struct catalog_command *commands = NULL;
+    int count = 0;
+    FILE *f;
+    int rc;
+    if (req->body_truncated) {
+        f = send_json_start(fd, "413 Payload Too Large");
+        if (!f) return;
+        fputs("{\"ok\":false,\"error\":\"Catalog import payload was too large\"}\n", f);
+        fclose(f);
+        return;
+    }
+    rc = parse_catalog_commands(req->body, device_id, sizeof(device_id), &commands, &count, msg, sizeof(msg));
+    if (rc == 0) rc = bulk_import_catalog_commands(device_id, commands, count, msg, sizeof(msg));
+    f = send_json_start(fd, rc == 0 ? "200 OK" : "400 Bad Request");
+    if (f) {
+        fputs("{\"ok\":", f); fputs(rc == 0 ? "true" : "false", f);
+        fputs(",\"message\":", f); json_write_string(f, msg);
+        fputs("}\n", f);
+        fclose(f);
+    }
+    free_catalog_commands(commands, count);
+}
+
 static int ir_run_canceled(const char *run_id) {
     char path[192];
     int ok = ir_cancel_path(run_id, path, sizeof(path));
@@ -9840,6 +10060,8 @@ static void handle_client(int client) {
         render_update_apply_json(client, &req);
     } else if (strcmp(req.method, "POST") == 0 && strcmp(req.path, "/api/irdb-import") == 0) {
         render_irdb_import_json(client, &req);
+    } else if (strcmp(req.method, "POST") == 0 && strcmp(req.path, "/api/catalog-import") == 0) {
+        render_catalog_import_json(client, &req);
     } else if (strcmp(req.method, "GET") == 0 && strcmp(req.path, "/export/bundle") == 0) {
         send_bundle_download(client);
     } else if (strcmp(req.method, "GET") == 0 && strcmp(req.path, "/export/devices") == 0) {

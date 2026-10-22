@@ -87,6 +87,13 @@ export function saveDeviceSettings({ deviceId, settings }) {
   });
 }
 
+export function importCatalog({ deviceId, commands }) {
+  return request("/api/catalog-import", {
+    method: "POST",
+    body: { deviceId, commands },
+  });
+}
+
 // `status` and `holdId` are for hold-to-repeat only (views/key-repeat.js):
 // "press" | "hold" | "release" for one hold. A plain send leaves them out
 // and the hub presses and releases once.
