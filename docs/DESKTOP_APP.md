@@ -1,6 +1,6 @@
 # Melodious for macOS: the desktop app with Logitech catalog lookup
 
-Status: plan, waiting for the owner's approval. No app code exists yet.
+Status: plan approved by the owner, 2026-10-22 (decisions at the end).
 
 Melodious for macOS is the hub's web UI in a desktop window, plus the one
 thing a page served by the hub can't do: sign in to the user's own Logitech
@@ -149,7 +149,7 @@ so it looks like the rest of the app.
   `ST: urn:myharmony-com:device:harmony:1` over Node `dgram`, as in
   `HubDiscovery.kt`. Each answer is checked with `GET /api/system-status` on
   port 8080 (a 200 or 401 is a Melodious hub; the firmware string is shown).
-  The Android app's /24 port sweep is not ported (see open questions).
+  The Android app's /24 port sweep is not ported.
 - **Enter address:** host, plus a port that defaults to 8080, checked the
   same way.
 - **Hub sign-in:** user name and password, only when the hub asks (401).
@@ -187,8 +187,7 @@ Etiquette, as for the helper:
   background or on a timer.
 - Search and download run only when the user clicks.
 - The model check runs on typing after a 600 ms pause, at most one request
-  in flight, and never for the values pre-filled when the tab opens (see
-  open questions).
+  in flight, and never for the values pre-filled when the tab opens.
 
 ### The bridge
 
@@ -277,7 +276,7 @@ Only `tools/webui-sim/public/js/views/device-import.js` and
      `doCatalogSignOut`, `doCatalogSearch`, `doCatalogDownload`,
      `checkCatalogModel`), so the smoke test can pin them, as it does for
      IRDB.
-3. **A small fix (owner's call, see open questions).** In
+3. **A small fix (in slice 2).** In
    `renderCatalogPreview`, "missing on hub" lists the skip *reasons* rather
    than the protocol names. The same function in `describeCatalogRows`
    already does it right.
@@ -514,25 +513,23 @@ Each PR has its test output, sizes (bundle delta for slice 2, app size
 for slice 3) and, where screens change, screenshots with personal data
 masked.
 
-## Open questions for the owner
+## Owner decisions (2026-10-22)
 
-1. **Model check while typing:** OK to call Logitech's anonymous
-   `SearchDevice` after a 600 ms pause in typing, never for the pre-filled
-   values? Or only on a Check button? Proposed: on typing, debounced.
+1. **Model check while typing:** call Logitech's anonymous `SearchDevice`
+   after a 600 ms pause in typing, never for the pre-filled values.
 2. **The "missing on hub" summary fix** in `renderCatalogPreview` (shared
-   code): fix it in slice 2, or leave it?
-3. **Subnet sweep:** port the Android app's /24 sweep on port 8080 as a
-   "Scan this network" button for when SSDP is blocked, or keep SSDP plus
-   manual entry? Proposed: SSDP plus manual entry.
-4. **Settings placement:** macOS menu (⌘,) only, as proposed, or also a
-   "This Mac" row in the shared Settings tab (a shared-code change)?
-5. **Sign-in persistence:** Logitech and Google cookies are not kept
-   (in-memory sign-in session), so after the refresh token expires the
-   user signs in fully again. OK?
-6. **Downloads:** `.dmg` and `.zip`, or `.zip` only?
-7. **The helper's stricter callback check:** it is in a local stash, not
-   on `main`. Should slice 2 also bring it into
-   `tools/catalog/harmony_catalog.py`, or will you commit it yourself?
+   code): fix it in slice 2.
+3. **Subnet sweep:** keep SSDP plus manual entry only (do not port the /24
+   subnet sweep).
+4. **Settings placement:** macOS menu (⌘,) only, with no shared-code change
+   in slice 1.
+5. **Sign-in persistence:** in-memory sign-in cookies are OK; the refresh
+   token stored in Keychain keeps the session alive until it expires.
+6. **Downloads:** build both `.dmg` and `.zip` for arm64 and x64 in slice 3.
+7. **The helper's stricter callback check:** include it in
+   `tools/catalog/harmony_catalog.py` in slice 2 (leaving the local stash
+   untouched).
+8. **The plan is approved; slice 1 starts once PR #35 merges.**
 
 ## Risks
 
