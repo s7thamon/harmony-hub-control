@@ -51,10 +51,13 @@ DISCOVERY_CLIENT_TYPE = "Redbull 1.0"
 OAUTH_AUTHORIZE_URL = "https://accounts.logi.com/identity/oauth2/authorize"
 OAUTH_TOKEN_URL = "https://accounts.logi.com/identity/oauth2/token"
 OAUTH_REDIRECT_URI = "com.logitech.harmony://lidsoauth"
-# Logitech's Harmony desktop app: the prod LIP client from its publicly
-# served web bundle (sl.dhg.myharmony.com/desktop/...en.desktop-app-main).
-# The staging twin is accepted at authorize but is not the production app.
-DEFAULT_CLIENT_ID = "60ef626e-be68-4bb8-a23a-17281dfda5a7"
+# Logitech's Harmony desktop app: the LIP client its publicly served web
+# bundle (sl.dhg.myharmony.com/desktop/...en.desktop-app-main) selects when
+# running on a myharmony host. Verified at accounts.logi.com authorize
+# 2026-10-22: this id renders the login page and bogus codes reach
+# "code invalid"; the bundle's other twin (the non-myharmony branch)
+# answers "The specified client_id is not valid.", so this is the live one.
+DEFAULT_CLIENT_ID = "9d88df5e-7edf-4288-8634-26721cbe7add"
 HARMONY_SIGNIN_URL = "https://lb-svcs.myharmony.com/CompositeSecurityServices/Security.svc/json2/signin"
 SEARCH_OPERATION = "DeviceManager/SearchGlobalDevices"
 GLOBAL_DEVICES_OPERATION = "DeviceManager/GetGlobalDevices"
