@@ -13,18 +13,24 @@ open the package. Only commands whose IR protocol your hub already has are
 imported (a Sony receiver's `Sony 15 Bit` set works out of the box on most
 hubs); the rest are listed in the sheet, not dropped silently.
 
-## One-time setup
+## Signing in (no APK, no password in the terminal)
 
-1. **Logitech's client_id.** Sign-in needs an identifier that lives inside
-   Logitech's Android app. It is their credential, so it is not shipped
-   here. Put your own copy of the Harmony app APK at `~/Downloads/harmony.apk`
-   (or pass `--apk PATH`, or set `MELODIOUS_HARMONY_APK`), and the helper
-   reads the one value out of it. If you already have the value, set
-   `MELODIOUS_CLIENT_ID` instead.
-2. **Your Logitech email.** Pass `--email` or set `MELODIOUS_LOGITECH_EMAIL`.
-   The password is prompted each time it is needed and is never saved.
-   Tokens are kept at `~/.melodious/harmony_token.json` (mode `0600`) so
-   later runs usually need no password.
+The first run opens Logitech's own login page in your browser — the same
+OAuth flow the Harmony desktop app uses (authorization code + PKCE):
+
+1. Sign in on Logitech's page. Your password is typed only there; this
+   program never sees it, and there is no APK or client secret involved.
+   The sign-in uses the public client identifier of Logitech's Harmony
+   desktop app, read out of Logitech's publicly served desktop web bundle.
+   If Logitech ever rotates it, set `MELODIOUS_CLIENT_ID` to the new one.
+2. The browser then tries to open the Harmony app and lands on an address
+   starting with `com.logitech.harmony://lidsoauth?code=...`. Copy that
+   whole address from the address bar.
+3. Paste it into the helper's bridge page (it opens
+   `http://127.0.0.1:8765/` for you; 127.0.0.1 only) or into the terminal.
+
+Tokens are kept at `~/.melodious/harmony_token.json` (mode `0600`), so
+later runs refresh silently and usually skip the browser entirely.
 
 `--list` shows the catalog matches for a maker/model without downloading.
 

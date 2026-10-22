@@ -9,15 +9,15 @@ never sees your sign-in.
     python3 tools/catalog/harmony_catalog.py Sony STR-DG720
     python3 tools/catalog/harmony_catalog.py Sony STR-DG720 --output ~/Downloads/
 
-First run needs two things, once:
-  1. Logitech's client_id, pulled out of YOUR OWN copy of the Harmony
-     Android APK (it is Logitech's credential, so it is not shipped here):
-         ~/Downloads/harmony.apk   (any recent Harmony app APK)
-     or:  MELODIOUS_HARMONY_APK=/path/to.apk, or --apk, or extract it
-     yourself and set MELODIOUS_CLIENT_ID.
-  2. Your Logitech email. The password is prompted (never saved); tokens
-     go to ~/.melodious/harmony_token.json (mode 0600) and the password
-     goes nowhere.
+Sign-in is a browser OAuth flow, like the Harmony desktop app: the helper
+opens Logitech's own login page in your browser (OAuth 2.0 + PKCE; no
+password ever touches this program), Logitech redirects to the app's
+callback address, and you paste that address into the helper's local bridge
+page (or its terminal). Tokens go to ~/.melodious/harmony_token.json
+(mode 0600); later runs refresh them silently. No APK and no client
+secret: the client_id below is the public identifier of Logitech's own
+Harmony desktop app, read out of Logitech's publicly served desktop web
+bundle; override it with MELODIOUS_CLIENT_ID if Logitech ever rotates it.
 
 Etiquette: the catalog is queried like the official app queries it, for one
 device at a time, read-only. Nothing is created or changed in your account.
@@ -28,26 +28,33 @@ Run it only for devices you own. Last verified against the live service
 from __future__ import annotations
 
 import argparse
-import getpass
+import base64
+import hashlib
 import http.cookiejar
+import http.server
 import json
 import os
 import re
-import struct
+import secrets
 import sys
 import tempfile
+import threading
 import urllib.error
 import urllib.parse
 import urllib.request
-import uuid
-import zipfile
+import webbrowser
 from dataclasses import dataclass
 from pathlib import Path
 
 DISCOVERY_URL = "https://cf-svcs.myharmony.com/Discovery/Discovery.svc/json/GetJsonOperations"
 DISCOVERY_CLIENT_TYPE = "Redbull 1.0"
-LIP_SIGNIN_URL = "https://accounts.logi.com/identity/signin"
-LIP_REFRESH_URL = "https://accounts.logi.com/identity/refresh"
+OAUTH_AUTHORIZE_URL = "https://accounts.logi.com/identity/oauth2/authorize"
+OAUTH_TOKEN_URL = "https://accounts.logi.com/identity/oauth2/token"
+OAUTH_REDIRECT_URI = "com.logitech.harmony://lidsoauth"
+# Logitech's Harmony desktop app: the prod LIP client from its publicly
+# served web bundle (sl.dhg.myharmony.com/desktop/...en.desktop-app-main).
+# The staging twin is accepted at authorize but is not the production app.
+DEFAULT_CLIENT_ID = "60ef626e-be68-4bb8-a23a-17281dfda5a7"
 HARMONY_SIGNIN_URL = "https://lb-svcs.myharmony.com/CompositeSecurityServices/Security.svc/json2/signin"
 SEARCH_OPERATION = "DeviceManager/SearchGlobalDevices"
 GLOBAL_DEVICES_OPERATION = "DeviceManager/GetGlobalDevices"
@@ -56,7 +63,8 @@ COMMANDS_OPERATION = "DeviceManager/GetCommands"
 TIMEOUT = 30.0
 PACKAGE_SCHEMA = "0.2.0"
 DEFAULT_TOKEN_FILE = Path.home() / ".melodious" / "harmony_token.json"
-DEFAULT_APK_GLOB = ("~/Downloads/harmony*.apk", "~/Downloads/Harmony*.apk")
+BRIDGE_PORT = 8765
+BRIDGE_TIMEOUT = 300.0
 
 
 class CatalogError(RuntimeError):
@@ -95,6 +103,22 @@ class JsonClient:
             raise CatalogError(f"could not reach {urllib.parse.urlsplit(url).netloc}: {error}") from None
 
 
+    def post_form(self, url: str, fields: dict[str, str]) -> tuple[int, object]:
+        """One form-encoded POST (the OAuth token endpoint is not JSON)."""
+        request = urllib.request.Request(
+            url, data=urllib.parse.urlencode(fields).encode("utf-8"), method="POST")
+        request.add_header("Content-Type", "application/x-www-form-urlencoded")
+        request.add_header("Accept", "application/json")
+        request.add_header("User-Agent", os.environ.get("MELODIOUS_USER_AGENT", "melodious-catalog/1.0"))
+        try:
+            with self._opener.open(request, timeout=self._timeout) as response:
+                return response.status, _decode(response.read())
+        except urllib.error.HTTPError as error:
+            return error.code, _decode(error.read())
+        except (urllib.error.URLError, OSError) as error:
+            raise CatalogError(f"could not reach {urllib.parse.urlsplit(url).netloc}: {error}") from None
+
+
 def _decode(body: bytes) -> object:
     if not body:
         return None
@@ -104,86 +128,206 @@ def _decode(body: bytes) -> object:
         return None
 
 
-# --------------------------------------------------------------------------
-# client_id: out of your own APK, never shipped
-# --------------------------------------------------------------------------
-_UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-z]{12}$")
+def client_id() -> str:
+    """The OAuth client: MELODIOUS_CLIENT_ID, else the Harmony desktop
+    app's public identifier. It is a public client (PKCE, no secret)."""
+    return os.environ.get("MELODIOUS_CLIENT_ID", "").strip() or DEFAULT_CLIENT_ID
 
 
-def _pool_strings(data: bytes, off: int = 12) -> list[str]:
-    kind, header, _size = struct.unpack_from("<HHI", data, off)
-    if kind != 0x0001:
-        raise ValueError("no ResStringPool at the expected offset")
-    n, _styles, flags, start, _ = struct.unpack_from("<IIIII", data, off + 8)
-    utf8 = bool(flags & (1 << 8))
-    offsets = struct.unpack_from("<%dI" % n, data, off + header)
-    base = off + start
-    out: list[str] = []
-    for o in offsets:
-        pos = base + o
+# --------------------------------------------------------------------------
+# browser OAuth sign-in (authorization code + PKCE, localhost bridge)
+# --------------------------------------------------------------------------
+def _b64url(data: bytes) -> str:
+    return base64.urlsafe_b64encode(data).rstrip(b"=").decode("ascii")
+
+
+def pkce_pair() -> tuple[str, str]:
+    """(code_verifier, S256 code_challenge), the desktop app's shape."""
+    verifier = _b64url(secrets.token_bytes(48))
+    challenge = _b64url(hashlib.sha256(verifier.encode("ascii")).digest())
+    return verifier, challenge
+
+
+def authorize_url(cid: str, challenge: str, state: str) -> str:
+    query = urllib.parse.urlencode({
+        "client_id": cid,
+        "response_type": "code",
+        "code_challenge_method": "S256",
+        "code_challenge": challenge,
+        "state": state,
+        "redirect_uri": OAUTH_REDIRECT_URI,
+        "scope": "openid",
+    })
+    return f"{OAUTH_AUTHORIZE_URL}?{query}"
+
+
+def parse_callback(text: str, *, expected_state: str) -> str:
+    """The authorization code out of a pasted callback address.
+
+    Accepts the full com.logitech.harmony://lidsoauth?... address, a bare
+    query string, or a bare code. The state must match what this run sent:
+    a callback from any other sign-in attempt is refused, not exchanged.
+    """
+    candidate = (text or "").strip()
+    if not candidate:
+        raise CatalogError("nothing was pasted; paste the callback address from your browser")
+    query = candidate
+    if "://" in candidate or candidate.startswith("?"):
+        query = urllib.parse.urlsplit(candidate).query
+    params = urllib.parse.parse_qs(query)
+    error = (params.get("error") or [""])[0]
+    if error:
+        description = (params.get("error_description") or [""])[0]
+        raise CatalogError(f"Logitech refused the sign-in: {error}" + (f" ({description})" if description else ""))
+    state = (params.get("state") or [""])[0]
+    if state and state != expected_state:
+        raise CatalogError("that callback belongs to a different sign-in attempt; use the address from the tab this run opened")
+    if not state and "://" in candidate:
+        raise CatalogError("that address carries no sign-in state; use the address from the tab this run opened")
+    code = (params.get("code") or [""])[0]
+    if not code:
+        if "=" not in candidate and "://" not in candidate and candidate:
+            return candidate  # a bare code, pasted on its own
+        raise CatalogError("that address carries no authorization code; finish signing in, then copy the address your browser lands on")
+    return code
+
+
+def oauth_exchange(client: JsonClient, cid: str, *, code: str, verifier: str) -> LipTokens:
+    status, payload = client.post_form(OAUTH_TOKEN_URL, {
+        "grant_type": "authorization_code",
+        "client_id": cid,
+        "code_verifier": verifier,
+        "redirect_uri": OAUTH_REDIRECT_URI,
+        "code": code,
+    })
+    if status != 200:
+        detail = ""
+        if isinstance(payload, dict):
+            detail = str(payload.get("error_description") or payload.get("error") or "")
+        raise CatalogError(_rejected("Logitech rejected the code exchange", status) + (f": {detail}" if detail else ""))
+    return LipTokens.from_mapping(payload)
+
+
+def oauth_refresh(client: JsonClient, tokens: LipTokens, cid: str) -> LipTokens:
+    if not tokens.refresh_token:
+        raise CatalogError("there is no refresh_token; a browser sign-in is needed")
+    status, payload = client.post_form(OAUTH_TOKEN_URL, {
+        "grant_type": "refresh_token",
+        "client_id": cid,
+        "refresh_token": tokens.refresh_token,
+    })
+    if status != 200:
+        raise CatalogError(_rejected("Logitech rejected the renewal", status))
+    return LipTokens.from_mapping(payload)
+
+
+_BRIDGE_PAGE = """<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<title>Melodious catalog sign-in</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>body{font:16px/1.5 system-ui,sans-serif;max-width:34rem;margin:3rem auto;padding:0 1rem}
+input,button{font:inherit;padding:.6rem;border-radius:.5rem}input{width:100%;box-sizing:border-box}
+button{margin-top:.6rem;cursor:pointer}.hint{color:#666;font-size:.9rem}</style></head>
+<body><h1>One more step</h1>
+<p>After you sign in, your browser tries to open the Harmony app and lands
+on an address starting with <code>com.logitech.harmony://lidsoauth</code>.
+Copy that whole address from the address bar and paste it here:</p>
+<form method="post" action="/callback">
+<input name="callback" autocomplete="off" spellcheck="false"
+ placeholder="com.logitech.harmony://lidsoauth?code=...&amp;state=...">
+<button type="submit">Finish sign-in</button>
+</form>
+<p class="hint">This page is served by the helper on your own computer
+(127.0.0.1 only). Your password is typed only on Logitech's page, never here.</p>
+</body></html>
+"""
+
+
+def browser_signin(client: JsonClient, cid: str, *, opener=None, input_fn=None) -> LipTokens:
+    """Sign in through the browser and return fresh tokens.
+
+    Opens the authorize page, then waits for the callback address: pasted
+    into the localhost bridge page, or into the terminal as a fallback.
+    The pasted address is the only thing that travels back — the password
+    is typed on Logitech's page and never reaches this program.
+    """
+    verifier, challenge = pkce_pair()
+    state = secrets.token_urlsafe(24)
+    url = authorize_url(cid, challenge, state)
+    open_page = opener if opener is not None else webbrowser.open
+    received: dict[str, str] = {}
+    done = threading.Event()
+
+    class BridgeHandler(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *args):  # keep the terminal readable
+            pass
+
+        def _send(self, status: int, body: str) -> None:
+            data = body.encode("utf-8")
+            self.send_response(status)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        def do_GET(self):  # noqa: N802 - http.server's name
+            self._send(200, _BRIDGE_PAGE)
+
+        def do_POST(self):  # noqa: N802 - http.server's name
+            length = int(self.headers.get("Content-Length") or 0)
+            fields = urllib.parse.parse_qs(self.rfile.read(length).decode("utf-8", "replace"))
+            received["callback"] = (fields.get("callback") or [""])[0]
+            self._send(200, "<!doctype html><title>Signed in</title>"
+                            "<p>Sign-in received. You can close this tab and return to the terminal.</p>")
+            done.set()
+
+    server = None
+    try:
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", BRIDGE_PORT), BridgeHandler)
+    except OSError:
+        server = None  # port busy or sandboxed: the terminal paste still works
+    if server is not None:
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        print("Opening Logitech's sign-in page in your browser...")
+        print(f"If it does not open, visit:\n  {url}")
         try:
-            if utf8:
-                size = data[pos]
-                pos += 1
-                if size & 0x80:
-                    size = ((size & 0x7F) << 8) | data[pos]
-                    pos += 1
-                pos += 1  # encoded byte length, not needed
-                out.append(data[pos:pos + size].decode("utf-8", "replace"))
-            else:
-                size = struct.unpack_from("<H", data, pos)[0]
-                pos += 2
-                if size & 0x8000:
-                    lo = struct.unpack_from("<H", data, pos)[0]
-                    pos += 2
-                    size = ((size & 0x7FFF) << 16) | lo
-                out.append(data[pos:pos + size * 2].decode("utf-16-le", "replace"))
-        except (IndexError, struct.error):
-            out.append("")
-    return out
+            open_page(url)
+        except Exception:
+            pass
+        if server is not None:
+            print(f"After signing in, paste the callback address at http://127.0.0.1:{BRIDGE_PORT}/ "
+                  "(it starts with com.logitech.harmony://lidsoauth).")
+        print("Or paste that address here and press Enter (Ctrl-C to cancel):")
+        callback = ""
+        if server is not None:
+            # Race the bridge paste against a terminal paste.
+            pasted: dict[str, str] = {}
 
+            def read_terminal() -> None:
+                try:
+                    pasted["text"] = (input_fn or input)()
+                except (EOFError, KeyboardInterrupt):
+                    pasted["text"] = ""
+                done.set()
 
-def extract_client_id(apk_path: Path) -> str:
-    with zipfile.ZipFile(apk_path) as z:
-        data = z.read("resources.arsc")
-    candidates = [s for s in _pool_strings(data) if _UUID.match(s)]
-    if len(candidates) != 1:
-        raise CatalogError(
-            f"expected exactly one client_id in {apk_path}, found {len(candidates)}; "
-            "not guessing. Set MELODIOUS_CLIENT_ID yourself if you already have it.")
-    return candidates[0]
-
-
-def find_apk(explicit: str | None) -> Path | None:
-    candidates: list[Path] = []
-    if explicit:
-        candidates.append(Path(explicit).expanduser())
-    env = os.environ.get("MELODIOUS_HARMONY_APK", "").strip()
-    if env:
-        candidates.append(Path(env).expanduser())
-    for pattern in DEFAULT_APK_GLOB:
-        candidates.extend(sorted(Path(p).expanduser() for p in Path().glob(pattern[2:])) if False else [])
-        candidates.extend(sorted(Path(os.path.expanduser(pattern)).parent.glob(Path(pattern).name)))
-    for path in candidates:
-        if path.is_file():
-            return path
-    return None
-
-
-def client_id(explicit_apk: str | None) -> str:
-    from_env = os.environ.get("MELODIOUS_CLIENT_ID", "").strip()
-    if from_env:
-        return from_env
-    apk = find_apk(explicit_apk)
-    if apk is None:
-        raise CatalogError(
-            "Logitech's client_id is missing, and without it their account "
-            "service answers 401.\nIt is not shipped here: it is Logitech's "
-            "credential.\nEither put your Harmony app APK at "
-            "~/Downloads/harmony.apk (or pass --apk / set "
-            "MELODIOUS_HARMONY_APK), or extract it once and set "
-            "MELODIOUS_CLIENT_ID.")
-    return extract_client_id(apk)
+            threading.Thread(target=read_terminal, daemon=True).start()
+            if not done.wait(BRIDGE_TIMEOUT):
+                raise CatalogError("timed out waiting for the sign-in callback; run it again when ready")
+            callback = received.get("callback") or pasted.get("text", "")
+        else:
+            try:
+                callback = (input_fn or input)()
+            except (EOFError, KeyboardInterrupt):
+                callback = ""
+        if not callback.strip():
+            raise CatalogError("sign-in was cancelled before a callback arrived")
+        code = parse_callback(callback, expected_state=state)
+        return oauth_exchange(client, cid, code=code, verifier=verifier)
+    finally:
+        if server is not None:
+            server.shutdown()
+            server.server_close()
 
 
 # --------------------------------------------------------------------------
@@ -239,30 +383,11 @@ def load_tokens(token_file: Path) -> LipTokens | None:
 
 
 # --------------------------------------------------------------------------
-# the three sign-in calls + refresh cascade
+# session: saved tokens, silent refresh, browser sign-in as last resort
 # --------------------------------------------------------------------------
 def _rejected(what: str, status: int) -> str:
-    hint = " -- either the email/password is wrong, or the client_id is not the one Logitech's own client uses" if status in (401, 403) else ""
+    hint = " -- the saved sign-in may have expired; the browser sign-in will run next" if status in (401, 403) else ""
     return f"{what}: HTTP {status}{hint}"
-
-
-def lip_login(client: JsonClient, email: str, password: str, cid: str) -> LipTokens:
-    status, payload = client.post(LIP_SIGNIN_URL, {
-        "email": email, "password": password, "client_id": cid,
-        "channel_id": str(uuid.uuid4()),
-    })
-    if status != 200:
-        raise CatalogError(_rejected("Logitech rejected the login", status))
-    return LipTokens.from_mapping(payload)
-
-
-def lip_refresh(client: JsonClient, tokens: LipTokens, cid: str) -> LipTokens:
-    if not tokens.refresh_token:
-        raise CatalogError("there is no refresh_token; a login is needed")
-    status, payload = client.post(LIP_REFRESH_URL, {"refresh_token": tokens.refresh_token, "client_id": cid})
-    if status != 200:
-        raise CatalogError(_rejected("Logitech rejected the renewal", status))
-    return LipTokens.from_mapping(payload)
 
 
 @dataclass(frozen=True)
@@ -288,28 +413,25 @@ def harmony_signin(client: JsonClient, tokens: LipTokens) -> HarmonySession:
     return HarmonySession(account_id=account_id, tokens=tokens)
 
 
-def ensure_session(client: JsonClient, email: str, token_file: Path, cid: str) -> tuple[HarmonySession, bool]:
-    """(session, needed_password). Tries saved tokens, then refresh; if both
-    fail, asks the caller for a password (this function never prompts, so it
-    stays testable and scriptable)."""
+def ensure_session(client: JsonClient, token_file: Path, cid: str, *, signin=None) -> HarmonySession:
+    """A signed-in Harmony session: saved tokens first, then a silent
+    refresh, and only then the browser sign-in (injectable for tests, so
+    it never prompts on its own)."""
     tokens = load_tokens(token_file)
     if tokens is not None:
         try:
-            return harmony_signin(client, tokens), False
+            return harmony_signin(client, tokens)
         except CatalogError:
             pass
         try:
-            tokens = lip_refresh(client, tokens, cid)
+            tokens = oauth_refresh(client, tokens, cid)
             save_tokens(tokens, token_file)
-            return harmony_signin(client, tokens), False
+            return harmony_signin(client, tokens)
         except CatalogError:
             pass
-    password = getpass.getpass(f"Logitech password for {email} (not saved): ")
-    if not password:
-        raise CatalogError("no password given")
-    tokens = lip_login(client, email, password, cid)
-    save_tokens(tokens, token_file)
-    return harmony_signin(client, tokens), True
+    fresh = (signin or (lambda: browser_signin(client, cid)))()
+    save_tokens(fresh, token_file)
+    return harmony_signin(client, fresh)
 
 
 # --------------------------------------------------------------------------
@@ -503,22 +625,14 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("manufacturer")
     parser.add_argument("model")
-    parser.add_argument("--email", default=os.environ.get("MELODIOUS_LOGITECH_EMAIL", ""))
     parser.add_argument("--output", default=".", help="directory for the package (default: current)")
-    parser.add_argument("--apk", default=None, help="path to your Harmony app APK (for the client_id)")
     parser.add_argument("--list", action="store_true", help="list matches and exit without downloading")
     args = parser.parse_args(argv)
 
-    email = args.email.strip()
-    if not email:
-        email = input("Logitech email: ").strip()
-    if not email:
-        print("An email is needed to sign in.", file=sys.stderr)
-        return 2
     try:
-        cid = client_id(args.apk)
+        cid = client_id()
         with JsonClient() as client:
-            session, _ = ensure_session(client, email, DEFAULT_TOKEN_FILE, cid)
+            session = ensure_session(client, DEFAULT_TOKEN_FILE, cid)
             if args.list:
                 with GlobalCatalogClient(client, session) as catalog:
                     catalog.signin()
