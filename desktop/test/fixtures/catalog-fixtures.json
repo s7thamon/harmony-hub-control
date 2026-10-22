@@ -1,0 +1,118 @@
+{
+  "discovery": {
+    "GetJsonOperationsResult": [
+      {
+        "Identifier": "CloudFront/Discovery",
+        "Address": "https://cf-svcs.myharmony.com/Discovery/Discovery.svc",
+        "Name": "Discovery"
+      },
+      {
+        "Identifier": "DeviceManager/SearchGlobalDevices",
+        "Address": "https://svcs.myharmony.com/HarmonyPlatform/DeviceManager.svc/json/",
+        "Name": "SearchGlobalDevices"
+      },
+      {
+        "Identifier": "DeviceManager/GetGlobalDevices",
+        "Address": "https://svcs.myharmony.com/HarmonyPlatform/DeviceManager.svc/json/",
+        "Name": "GetGlobalDevices"
+      },
+      {
+        "Identifier": "DeviceManager/GetCommands",
+        "Address": "https://svcs.myharmony.com/HarmonyPlatform/DeviceManager.svc/json/",
+        "Name": "GetCommands"
+      }
+    ]
+  },
+  "searchDeviceFound": {
+    "devices": [
+      {
+        "aliases": [
+          {
+            "manf": "Sony",
+            "model": "STR-DG720"
+          }
+        ],
+        "spec": null
+      }
+    ]
+  },
+  "searchDeviceNotFound": {
+    "devices": []
+  },
+  "searchGlobalDevices": {
+    "SearchGlobalDevicesResult": {
+      "Matches": [
+        {
+          "Description": null,
+          "DeviceModel": "STR-DG720",
+          "DeviceType": 5,
+          "DisplayText": null,
+          "GlobalDeviceSearchType": 2,
+          "GlobalLanguageVersionId-": 25932,
+          "Id-": 167856,
+          "IsMultiCode": false,
+          "Manufacturer": "Sony",
+          "SelectedText": null
+        }
+      ],
+      "Status": 0
+    }
+  },
+  "getGlobalDevices": {
+    "GetGlobalDevicesResult": [
+      {
+        "Id": 167856,
+        "DeviceType": 5,
+        "DefaultGlobalLanguageVersionId": 25932,
+        "PrimaryManufacturerAlias": "Sony",
+        "PrimaryModelAlias": "STR-DG720",
+        "InterDeviceDelay": 500,
+        "InterKeyDelay": 100
+      }
+    ]
+  },
+  "getGlobalLanguageCommands": {
+    "GetGlobalLanguageCommandsResult": [
+      {
+        "CommandTypeId": "PowerOn",
+        "KeyCode": "G:Sony 15 Bit:()(0x3A0C)():3",
+        "Name": "PowerOn",
+        "ProtocolId": 17,
+        "Raw": null,
+        "TransportType": 1
+      },
+      {
+        "CommandTypeId": "PowerOff",
+        "KeyCode": "G:Sony 15 Bit:()(0x7A0C)():3",
+        "Name": "PowerOff",
+        "ProtocolId": 17,
+        "Raw": null,
+        "TransportType": 1
+      },
+      {
+        "CommandTypeId": "VolumeUp",
+        "KeyCode": "G:Sony 15 Bit:()(0x240C)():3",
+        "Name": "VolumeUp",
+        "ProtocolId": 17,
+        "Raw": null,
+        "TransportType": 1
+      },
+      {
+        "CommandTypeId": "Unknown",
+        "KeyCode": "G:Sony 20 Bit:()(0x68114)():3",
+        "Name": "InputBd",
+        "ProtocolId": 18,
+        "Raw": null,
+        "TransportType": 1
+      },
+      {
+        "CommandTypeId": "Unknown",
+        "KeyCode": "G:RC6 Mode 0:()(0x1)():0",
+        "Name": "SmartKey",
+        "ProtocolId": 999,
+        "Raw": null,
+        "TransportType": 1
+      }
+    ]
+  }
+}

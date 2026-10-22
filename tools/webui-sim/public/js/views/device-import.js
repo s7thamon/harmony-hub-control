@@ -8,7 +8,7 @@
    library or a file is built with textContent, never innerHTML. */
 
 import { getJson, importCatalog, postApiForm } from "../api.js";
-import { catalogRows, describeCatalogRows, hubProtocolNames } from "../logitech-catalog.js";
+import { catalogRows, describeCatalogRows, hubProtocolNames, isCatalogPackage } from "../logitech-catalog.js";
 import * as hub from "../state.js";
 import { clear, el, setText } from "../setup-kit.js";
 import { openSheet, snackbar } from "../ui/shell.js";
@@ -368,7 +368,36 @@ export function openImportSheet({ device }) {
   }
 
   /* ---------------- Logitech catalog ---------------- */
-  const catalogState = { pkg: null, rows: [], skipped: [], protocols: [] };
+  const catalogState = {
+    pkg: null,
+    rows: [],
+    skipped: [],
+    protocols: [],
+    protocolsUsed: [],
+    missingProtocols: [],
+    signedIn: false,
+    matches: [],
+    initialBrand: String(device.manufacturer ?? "").trim(),
+    initialModel: String(device.model ?? "").trim(),
+    modelTimer: null,
+    modelInFlight: false,
+    modelVersion: 0,
+    modelPending: null,
+    busy: false,
+    closed: false,
+  };
+  let desktop = null;
+
+  function clearCatalogPackage() {
+    Object.assign(catalogState, { pkg: null, rows: [], skipped: [], protocolsUsed: [], missingProtocols: [] });
+    renderCatalogPreview();
+  }
+
+  function setCatalogBusy(busy) {
+    catalogState.busy = busy;
+    for (const node of [refs.catalogSearchBtn, refs.catalogSignInBtn, refs.catalogSignOutBtn, refs.catalogFile, ...refs.catalogResults.querySelectorAll("button")]) node.disabled = busy;
+    refs.catalogImportBtn.disabled = busy || importing || !catalogState.rows.length;
+  }
 
   async function loadHubProtocols() {
     if (catalogState.protocols.length) return catalogState.protocols;
@@ -381,19 +410,65 @@ export function openImportSheet({ device }) {
     return catalogState.protocols;
   }
 
+  function renderCatalogAccount() {
+    if (!refs.catalogAccount) return;
+    clear(refs.catalogAccount);
+    refs.catalogAccount.append(
+      el("span", {
+        className: "m-row-text",
+        children: [
+          el("span", {
+            className: "m-row-title",
+            text: catalogState.signedIn ? "Signed in to Logitech" : "Logitech account",
+          }),
+          el("span", {
+            className: "m-row-sub",
+            text: catalogState.signedIn
+              ? "Your sign-in stays on this Mac; the hub never sees it."
+              : "Sign in to search and download from Logitech's catalog.",
+          }),
+        ],
+      }),
+      catalogState.signedIn ? refs.catalogSignOutBtn : refs.catalogSignInBtn,
+    );
+  }
+
+  function renderCatalogResults() {
+    if (!refs.catalogResults) return;
+    clear(refs.catalogResults);
+    if (!catalogState.matches.length) return;
+    const list = el("div", { className: "m-list import-results" });
+    catalogState.matches.forEach((m) => {
+      const title = m.displayText || `${m.manufacturer || ""} ${m.model || ""}`.trim() || "Device";
+      const detail = [m.deviceType, m.description].filter(Boolean).join(" · ");
+      const btn = button("Download", "btn-outlined btn-sm", () => doCatalogDownload(m));
+      list.appendChild(el("div", {
+        className: "m-row",
+        children: [
+          el("span", { className: "m-row-text", children: [
+            el("span", { className: "m-row-title", text: title }),
+            ...(detail ? [el("span", { className: "m-row-sub", text: detail })] : []),
+          ] }),
+          btn,
+        ],
+      }));
+    });
+    refs.catalogResults.appendChild(list);
+  }
+
   function renderCatalogPreview() {
     clear(refs.catalogPreview);
     refs.catalogImportBtn.hidden = !catalogState.rows.length;
-    refs.catalogImportBtn.disabled = importing || !catalogState.rows.length;
+    refs.catalogImportBtn.disabled = importing || catalogState.busy || !catalogState.rows.length;
     if (!catalogState.pkg) return;
-    const result = { rows: catalogState.rows, skipped: catalogState.skipped, protocolsUsed: [], missingProtocols: [] };
     const summary = describeCatalogRows({
-      ...result,
-      protocolsUsed: [...new Set(catalogState.rows.map((r) => r.protocol).filter(Boolean))],
-      missingProtocols: [...new Set(catalogState.skipped.map((s) => s.reason).filter(Boolean))],
+      rows: catalogState.rows,
+      skipped: catalogState.skipped,
+      protocolsUsed: catalogState.protocolsUsed,
+      missingProtocols: catalogState.missingProtocols,
     });
     const sample = catalogState.rows.slice(0, 24).map((r) => `${r.name} · ${r.protocol || "raw"}`).join("\n");
-    const skippedSample = catalogState.skipped.slice(0, 12).map((s) => `${s.name} — ${s.reason}`).join("\n");
+    const skippedSample = catalogState.skipped.map((s) => `${s.name} — ${s.reason}`).join("\n");
     refs.catalogPreview.appendChild(el("div", {
       className: "m-card import-preview",
       children: [
@@ -408,6 +483,26 @@ export function openImportSheet({ device }) {
       ? `Import ${plural(catalogState.rows.length, "command")} to ${device.name}` : "Nothing to import");
   }
 
+  async function previewCatalogPackage(pkg, label) {
+    if (!isCatalogPackage(pkg)) {
+      setMessage(refs.catalogStatus, `${label} is not a Logitech catalog package from tools/catalog/harmony_catalog.py.`, "error");
+      return;
+    }
+    catalogState.pkg = pkg;
+    const protocols = await loadHubProtocols();
+    const converted = catalogRows(pkg, protocols);
+    catalogState.rows = converted.rows;
+    catalogState.skipped = converted.skipped;
+    catalogState.protocolsUsed = converted.protocolsUsed;
+    catalogState.missingProtocols = converted.missingProtocols;
+    renderCatalogPreview();
+    setMessage(refs.catalogStatus,
+      protocols.length
+        ? `Loaded ${label}: ${describeCatalogRows(converted)}.`
+        : `Loaded ${label}, but the hub's protocol list couldn't be read, so no KeyCode can be checked yet.`,
+      converted.rows.length ? "ok" : "warn");
+  }
+
   async function previewCatalogFile(file, text) {
     let pkg;
     try {
@@ -416,29 +511,141 @@ export function openImportSheet({ device }) {
       setMessage(refs.catalogStatus, `${file.name} is not a catalog package (not JSON).`, "error");
       return;
     }
-    if (pkg?.schema_version !== "0.2.0" || !pkg?.resources?.global_language_commands) {
-      setMessage(refs.catalogStatus, `${file.name} is not a Logitech catalog package from tools/catalog/harmony_catalog.py.`, "error");
+    await previewCatalogPackage(pkg, file.name);
+  }
+
+  async function doCatalogSignIn() {
+    if (!desktop || catalogState.busy) return;
+    setCatalogBusy(true);
+    setMessage(refs.catalogStatus, "Signing in to Logitech…");
+    try {
+      const res = await desktop.signIn();
+      catalogState.signedIn = Boolean(res?.signedIn);
+      renderCatalogAccount();
+      setMessage(
+        refs.catalogStatus,
+        catalogState.signedIn ? "Signed in to Logitech." : "",
+        catalogState.signedIn ? "ok" : "info",
+      );
+    } catch (error) {
+      setMessage(refs.catalogStatus, error.message || "Sign-in failed.", "error");
+    } finally {
+      setCatalogBusy(false);
+    }
+  }
+
+  async function doCatalogSignOut() {
+    if (!desktop || catalogState.busy) return;
+    setCatalogBusy(true);
+    try {
+      await desktop.signOut();
+      catalogState.signedIn = false;
+      renderCatalogAccount();
+      setMessage(refs.catalogStatus, "Signed out of Logitech.");
+    } catch (error) {
+      setMessage(refs.catalogStatus, error.message || "Sign-out failed.", "error");
+    } finally {
+      setCatalogBusy(false);
+    }
+  }
+
+  function checkCatalogModel() {
+    if (!desktop) return;
+    clearTimeout(catalogState.modelTimer);
+    const version = ++catalogState.modelVersion;
+    setText(refs.catalogModelCheck, "");
+    const mfr0 = refs.catalogBrand.value.trim();
+    const mdl0 = refs.catalogModel.value.trim();
+    if (!mfr0 || !mdl0 || (mfr0 === catalogState.initialBrand && mdl0 === catalogState.initialModel)) {
+      setText(refs.catalogModelCheck, "");
       return;
     }
-    catalogState.pkg = pkg;
-    const protocols = await loadHubProtocols();
-    const converted = catalogRows(pkg, protocols);
-    catalogState.rows = converted.rows;
-    catalogState.skipped = converted.skipped;
+    catalogState.modelTimer = setTimeout(async () => {
+      if (catalogState.modelPending) await catalogState.modelPending;
+      if (version !== catalogState.modelVersion || catalogState.closed) return;
+      const mfr = refs.catalogBrand.value.trim();
+      const mdl = refs.catalogModel.value.trim();
+      if (catalogState.modelInFlight || !mfr || !mdl || (mfr === catalogState.initialBrand && mdl === catalogState.initialModel)) return;
+      catalogState.modelInFlight = true;
+      try {
+        const request = desktop.checkModel({ manufacturer: mfr, model: mdl });
+        catalogState.modelPending = request.then(() => {}, () => {});
+        const res = await request;
+        if (version !== catalogState.modelVersion || catalogState.closed || refs.catalogBrand.value.trim() !== mfr || refs.catalogModel.value.trim() !== mdl) return;
+        setText(refs.catalogModelCheck, res?.found ? `Logitech knows this as ${res.model || mdl}` : "Not found under that name");
+      } catch (_) {
+        if (version === catalogState.modelVersion) setText(refs.catalogModelCheck, "");
+      } finally {
+        catalogState.modelInFlight = false;
+        catalogState.modelPending = null;
+      }
+    }, 600);
+  }
+
+  function handleCatalogError(error, fallback) {
+    if (/sign in/i.test(error?.message || "")) {
+      catalogState.signedIn = false;
+      renderCatalogAccount();
+    }
+    setMessage(refs.catalogStatus, error?.message || fallback, "error");
+  }
+
+  async function doCatalogSearch() {
+    if (!desktop || catalogState.busy) return;
+    const manufacturer = refs.catalogBrand.value.trim();
+    const model = refs.catalogModel.value.trim();
+    if (!manufacturer || !model) {
+      setMessage(refs.catalogStatus, "Enter both the brand and the model (part of the model is enough).", "error");
+      return;
+    }
+    setCatalogBusy(true);
+    catalogState.matches = [];
+    clearCatalogPackage();
+    renderCatalogResults();
     renderCatalogPreview();
-    setMessage(refs.catalogStatus,
-      protocols.length
-        ? `Loaded ${file.name}: ${describeCatalogRows(converted)}.`
-        : `Loaded ${file.name}, but the hub's protocol list couldn't be read, so no KeyCode can be checked yet.`,
-      converted.rows.length ? "ok" : "warn");
+    setMessage(refs.catalogStatus, "Searching Logitech's catalog…");
+    try {
+      const matches = await desktop.search({ manufacturer, model });
+      catalogState.signedIn = true;
+      renderCatalogAccount();
+      catalogState.matches = Array.isArray(matches) ? matches : [];
+      renderCatalogResults();
+      const n = catalogState.matches.length;
+      setMessage(refs.catalogStatus, n ? `Found ${n} catalog match${n === 1 ? "" : "es"}. Pick one to download its commands.` : `No catalog device matches ${manufacturer} ${model}`, n ? "ok" : "warn");
+    } catch (error) {
+      handleCatalogError(error, "Catalog search failed.");
+    } finally {
+      setCatalogBusy(false);
+    }
+  }
+
+  async function doCatalogDownload(match) {
+    if (!desktop || !match || catalogState.busy) return;
+    const manufacturer = String(match.manufacturer || refs.catalogBrand.value || "").trim();
+    const model = String(match.model || refs.catalogModel.value || "").trim();
+    setCatalogBusy(true);
+    clearCatalogPackage();
+    setMessage(refs.catalogStatus, `Downloading ${match.displayText || `${manufacturer} ${model}`.trim()} from Logitech…`);
+    try {
+      const pkg = await desktop.download({ id: Number(match.id), manufacturer, model });
+      catalogState.signedIn = true;
+      renderCatalogAccount();
+      await previewCatalogPackage(pkg, "Logitech catalog");
+    } catch (error) {
+      handleCatalogError(error, "Catalog download failed.");
+    } finally {
+      setCatalogBusy(false);
+    }
   }
 
   async function doCatalogImport() {
+    if (desktop && catalogState.busy) return;
     if (!catalogState.rows.length) {
       setMessage(refs.catalogStatus, "Nothing to import yet: open a catalog package with importable commands first.", "error");
       return;
     }
     importing = true;
+    if (desktop) setCatalogBusy(true);
     refs.catalogImportBtn.disabled = true;
     setMessage(refs.catalogStatus, "Importing… the hub backs up its device list first.");
     try {
@@ -447,9 +654,13 @@ export function openImportSheet({ device }) {
       refs.close();
       snackbar(`Imported to ${device.name}. ${j.message || ""}`.trim());
     } catch (error) {
-      setMessage(refs.catalogStatus, error.message || "Import failed.", "error");
+      const msg = desktop && error?.status === 404
+        ? "Your hub's Melodious software is older than this app; update the hub"
+        : error.message || "Import failed.";
+      setMessage(refs.catalogStatus, msg, "error");
     } finally {
       importing = false;
+      if (desktop) setCatalogBusy(false);
       refs.catalogImportBtn.disabled = false;
     }
   }
@@ -471,12 +682,24 @@ export function openImportSheet({ device }) {
 
   /* ---------------- tabs ---------------- */
   function showTab(tab) {
+    if (desktop && tab !== "catalog") {
+      clearTimeout(catalogState.modelTimer);
+      catalogState.modelVersion++;
+    }
     refs.tabs.forEach((b) => b.setAttribute("aria-selected", String(b.dataset.tab === tab)));
     for (const t of TABS) refs.panels[t.id].hidden = t.id !== tab;
+    if (tab === "catalog" && desktop) {
+      Promise.resolve(desktop.status()).then((s) => {
+        if (catalogState.busy || catalogState.closed) return;
+        catalogState.signedIn = Boolean(s?.signedIn);
+        renderCatalogAccount();
+      }).catch(() => {});
+    }
   }
 
   /* ---------------- mount (static skeleton) ---------------- */
   function mount(content, close) {
+    desktop = window.melodiousDesktop?.catalog;
     refs.close = close;
     refs.panels = {};
     refs.tabs = TABS.map((t) => {
@@ -601,24 +824,56 @@ export function openImportSheet({ device }) {
     refs.catalogPreview = el("div");
     refs.catalogImportBtn = button("Import", "btn-filled btn-block", doCatalogImport);
     refs.catalogImportBtn.hidden = true;
-    refs.panels.catalog = el("div", {
-      className: "import-panel",
-      children: [
-        el("p", { className: "sheet-text", text:
-          `Use the code set from Logitech's own catalog for ${device.manufacturer || "this maker"} ${device.model || ""}`.trim() + ". " +
-          "On your computer, run tools/catalog/harmony_catalog.py once to sign in and download the package, then open it here. " +
-          "Only commands whose IR protocol this hub already has are imported; the rest are listed below, not dropped silently." }),
-        el("div", { className: "import-file", children: [
-          el("label", { className: "btn btn-outlined", text: "Open a catalog package…", attrs: { for: refs.catalogFile.id } }),
-          refs.catalogFile,
-          el("p", { className: "m-field-hint", text:
-            "A harmony-catalog-*.json file from the helper. Your Logitech sign-in stays on your computer; the hub never sees it." }),
-        ] }),
-        refs.catalogStatus,
-        refs.catalogPreview,
-        refs.catalogImportBtn,
-      ],
-    });
+    const catalogIntro = `Use the code set from Logitech's own catalog for ${device.manufacturer || "this maker"} ${device.model || ""}`.trim() + ". ";
+    const catalogGateNote = "Only commands whose IR protocol this hub already has are imported; the rest are listed below, not dropped silently.";
+    const catalogFileWrap = el("div", { className: "import-file", children: [
+      el("label", { className: "btn btn-outlined", text: "Open a catalog package…", attrs: { for: refs.catalogFile.id } }),
+      refs.catalogFile,
+      el("p", { className: "m-field-hint", text:
+        (desktop ? "Or open a harmony-catalog-*.json file from tools/catalog/harmony_catalog.py." : "A harmony-catalog-*.json file from the helper.") +
+        " Your Logitech sign-in stays on your computer; the hub never sees it." }),
+    ] });
+    if (desktop) {
+      refs.catalogSignInBtn = button("Sign in", "btn-tonal btn-sm", doCatalogSignIn);
+      refs.catalogSignOutBtn = button("Sign out", "btn-outlined btn-sm", doCatalogSignOut);
+      refs.catalogAccount = el("div", { className: "m-row" });
+      renderCatalogAccount();
+      refs.catalogBrand = textInput("CatalogBrand", { value: device.manufacturer, placeholder: "e.g. Sony", maxlength: 64 });
+      refs.catalogModel = textInput("CatalogModel", { value: device.model, placeholder: "e.g. STR-DG720", maxlength: 64 });
+      refs.catalogModel.addEventListener("input", checkCatalogModel);
+      refs.catalogModelCheck = el("p", { className: "m-field-hint", attrs: { "aria-live": "polite" } });
+      const modelField = field("Model", refs.catalogModel);
+      modelField.appendChild(refs.catalogModelCheck);
+      refs.catalogSearchBtn = button("Search Logitech catalog", "btn-secondary", doCatalogSearch);
+      refs.catalogResults = el("div");
+      refs.panels.catalog = el("div", {
+        className: "import-panel",
+        children: [
+          el("p", { className: "sheet-text", text: catalogIntro + catalogGateNote }),
+          el("div", { className: "m-list", children: [refs.catalogAccount] }),
+          field("Brand", refs.catalogBrand),
+          modelField,
+          el("div", { className: "import-actions", children: [refs.catalogSearchBtn] }),
+          refs.catalogStatus,
+          refs.catalogResults,
+          refs.catalogPreview,
+          refs.catalogImportBtn,
+          catalogFileWrap,
+        ],
+      });
+    } else {
+      refs.panels.catalog = el("div", {
+        className: "import-panel",
+        children: [
+          el("p", { className: "sheet-text", text:
+            catalogIntro + "On your computer, run tools/catalog/harmony_catalog.py once to sign in and download the package, then open it here. " + catalogGateNote }),
+          catalogFileWrap,
+          refs.catalogStatus,
+          refs.catalogPreview,
+          refs.catalogImportBtn,
+        ],
+      });
+    }
 
     // Type a code
     const formHost = el("div");
@@ -654,5 +909,9 @@ export function openImportSheet({ device }) {
     updateImportPreview();
   }
 
-  return openSheet({ label: `Import codes to ${device.name}`, className: "import-sheet", render: mount });
+  return openSheet({ label: `Import codes to ${device.name}`, className: "import-sheet", render: mount, onClose: () => {
+    catalogState.closed = true;
+    catalogState.modelVersion++;
+    clearTimeout(catalogState.modelTimer);
+  } });
 }

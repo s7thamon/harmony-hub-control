@@ -18,6 +18,7 @@ test("isAllowedNavigationUrl locks navigation to melodious://app", () => {
   assert.equal(isAllowedNavigationUrl("melodious://app/index.html"), true);
 
   assert.equal(isAllowedNavigationUrl("melodious://other/"), false);
+  assert.equal(isAllowedNavigationUrl("melodious://user@app/"), false);
   assert.equal(isAllowedNavigationUrl("https://accounts.logi.com/"), false);
   assert.equal(isAllowedNavigationUrl("http://127.0.0.1:8799/"), false);
   assert.equal(isAllowedNavigationUrl("file:///etc/passwd"), false);
@@ -36,6 +37,7 @@ test("isTrustedIpcSender accepts only main window top frame on melodious://app",
   const subFrame = { url: "melodious://app/#remote" };
   const wc = { mainFrame, getURL: () => "melodious://app/#remote" };
   const win = { isDestroyed: () => false, webContents: wc };
+  assert.equal(isTrustedIpcSender({ sender: wc }, win), false);
 
   assert.equal(
     isTrustedIpcSender({ sender: wc, senderFrame: mainFrame }, win),

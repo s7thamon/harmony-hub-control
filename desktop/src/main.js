@@ -27,6 +27,9 @@ const {
   attachWindowSecurity,
   isTrustedIpcSender,
 } = require("./security");
+const { createCatalogService } = require("./catalog/client");
+const { runSignInWindow } = require("./catalog/signin-window");
+const { registerCatalogIpcHandlers } = require("./ipc");
 
 if (process.env.MELODIOUS_USER_DATA_DIR) {
   app.setPath("userData", process.env.MELODIOUS_USER_DATA_DIR);
@@ -80,8 +83,13 @@ function createE2eSafeStorage() {
 
 let mainWindow = null;
 let settingsStore = null;
+let catalogService = null;
 let pageMode = "connect";
 let lastUnreachableError = null;
+
+function getActiveCatalogService() {
+  return (process.env.MELODIOUS_E2E === "1" && globalThis.__melodiousCatalogService) || catalogService;
+}
 
 function openSettingsPage() {
   pageMode = "settings";
@@ -170,16 +178,19 @@ function registerIpcHandlers() {
     }
   };
 
-  ipcMain.handle("desktop:get-state", (event) => {
+  ipcMain.handle("desktop:get-state", async (event) => {
     checkSender(event);
     const hub = settingsStore.getHub();
     const hubAuth = settingsStore.getHubAuth();
     const settings = settingsStore.getSettings();
+    const catSvc = getActiveCatalogService();
+    const catStatus = catSvc ? await catSvc.status() : { signedIn: false };
     return {
       mode: pageMode,
       hub,
       hasHubAuth: Boolean(hubAuth?.header),
       hubUsername: hubAuth?.username || "",
+      logitechSignedIn: Boolean(catStatus?.signedIn),
       encryptionAvailable: settingsStore.isEncryptionAvailable(),
       clientId: settings.clientId,
       defaultClientId: DEFAULT_CLIENT_ID,
@@ -298,10 +309,12 @@ function registerIpcHandlers() {
     return { ok: true };
   });
 
-  ipcMain.handle("desktop:save-client-id", (event, args = {}) => {
+  ipcMain.handle("desktop:save-client-id", async (event, args = {}) => {
     checkSender(event);
     try {
+      const before = settingsStore.getSettings().effectiveClientId;
       const clientId = settingsStore.setClientId(args.clientId);
+      if (before !== settingsStore.getSettings().effectiveClientId) await getActiveCatalogService().signOut();
       return { ok: true, clientId };
     } catch (err) {
       return { ok: false, error: err?.message || "Invalid client_id." };
@@ -326,6 +339,12 @@ function registerIpcHandlers() {
     checkSender(event);
     pageMode = "settings";
     return { ok: true, mode: pageMode };
+  });
+
+  registerCatalogIpcHandlers({
+    ipcMain,
+    getMainWindow: () => mainWindow,
+    getCatalogService: () => getActiveCatalogService(),
   });
 }
 
@@ -370,6 +389,16 @@ app.whenReady().then(() => {
   settingsStore = createSettingsStore({
     dir: app.getPath("userData"),
     safeStorage: storageBackend,
+  });
+
+  catalogService = createCatalogService({
+    settingsStore,
+    openSignInWindow: ({ client, clientId }) =>
+      runSignInWindow({
+        client,
+        clientId,
+        parentWindow: mainWindow,
+      }),
   });
 
   if (process.env.MELODIOUS_INITIAL_HOST) {

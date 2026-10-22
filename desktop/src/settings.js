@@ -7,6 +7,7 @@ const DEFAULT_CLIENT_ID = "9d88df5e-7edf-4288-8634-26721cbe7add";
 const DEFAULT_PORT = 8080;
 const SETTINGS_FILE = "settings.json";
 const HUB_AUTH_FILE = "hub-auth.bin";
+const LOGITECH_TOKENS_FILE = "logitech-tokens.bin";
 
 function normalizeHost(value) {
   const s = String(value ?? "").trim();
@@ -64,6 +65,7 @@ function createSettingsStore({ dir, safeStorage = null, env = process.env } = {}
   }
   const settingsPath = path.join(dir, SETTINGS_FILE);
   const hubAuthPath = path.join(dir, HUB_AUTH_FILE);
+  const logitechTokensPath = path.join(dir, LOGITECH_TOKENS_FILE);
 
   function readSettingsFile() {
     try {
@@ -224,6 +226,80 @@ function createSettingsStore({ dir, safeStorage = null, env = process.env } = {}
     } catch {}
   }
 
+  function setLogitechTokens(tokens) {
+    if (
+      !tokens ||
+      typeof tokens !== "object" ||
+      typeof tokens.access_token !== "string" ||
+      !tokens.access_token ||
+      typeof tokens.id_token !== "string" ||
+      !tokens.id_token
+    ) {
+      throw new Error("access_token and id_token are required");
+    }
+    const clean = {
+      access_token: tokens.access_token,
+      id_token: tokens.id_token,
+      ...(typeof tokens.refresh_token === "string" && tokens.refresh_token
+        ? { refresh_token: tokens.refresh_token }
+        : {}),
+    };
+    if (!isEncryptionAvailable()) {
+      try {
+        fs.rmSync(logitechTokensPath, { force: true });
+      } catch {}
+      return { stored: false };
+    }
+    try {
+      const encrypted = safeStorage.encryptString(JSON.stringify(clean));
+      const buf = Buffer.isBuffer(encrypted) ? encrypted : Buffer.from(encrypted);
+      writeFileAtomic600(logitechTokensPath, buf);
+      return { stored: true };
+    } catch {
+      clearLogitechTokens();
+      return { stored: false };
+    }
+  }
+
+  function getLogitechTokens() {
+    if (!isEncryptionAvailable()) return null;
+    try {
+      if (!fs.existsSync(logitechTokensPath)) return null;
+      const encrypted = fs.readFileSync(logitechTokensPath);
+      const decrypted = safeStorage.decryptString(encrypted);
+      const parsed = JSON.parse(decrypted);
+      if (
+        !parsed ||
+        typeof parsed !== "object" ||
+        typeof parsed.access_token !== "string" ||
+        !parsed.access_token ||
+        typeof parsed.id_token !== "string" ||
+        !parsed.id_token
+      ) {
+        return null;
+      }
+      return {
+        access_token: parsed.access_token,
+        id_token: parsed.id_token,
+        ...(typeof parsed.refresh_token === "string" && parsed.refresh_token
+          ? { refresh_token: parsed.refresh_token }
+          : {}),
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  function clearLogitechTokens() {
+    try {
+      fs.rmSync(logitechTokensPath, { force: true });
+    } catch {}
+  }
+
+  function hasLogitechTokens() {
+    return Boolean(getLogitechTokens());
+  }
+
   return {
     getSettings,
     getHub,
@@ -235,6 +311,10 @@ function createSettingsStore({ dir, safeStorage = null, env = process.env } = {}
     getHubAuth,
     getHubAuthHeader,
     clearHubAuth,
+    setLogitechTokens,
+    getLogitechTokens,
+    clearLogitechTokens,
+    hasLogitechTokens,
   };
 }
 

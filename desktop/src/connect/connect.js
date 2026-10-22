@@ -2,6 +2,7 @@
 
 (() => {
   const bridge = window.melodiousDesktop?.hub;
+  const catalogBridge = window.melodiousDesktop?.catalog;
   const root = document.getElementById("connectRoot");
   const appbar = document.getElementById("connectAppbar");
   const backBtn = document.getElementById("settingsBackBtn");
@@ -17,6 +18,7 @@
     hub: null,
     hasHubAuth: false,
     hubUsername: "",
+    logitechSignedIn: false,
     encryptionAvailable: true,
     clientId: "",
     defaultClientId: "9d88df5e-7edf-4288-8634-26721cbe7add",
@@ -201,6 +203,27 @@
           }
         </div>
       </form>
+
+      <h3 class="m-section">Logitech account</h3>
+      <div class="m-list">
+        <div class="m-row" id="settingsLogitechRow">
+          <span class="m-row-text">
+            <span class="m-row-title" id="settingsLogitechStatus">${
+              state.logitechSignedIn ? "Signed in to Logitech" : "Not signed in"
+            }</span>
+            <span class="m-row-sub">${
+              !state.encryptionAvailable
+                ? "Keychain encryption is unavailable; sign-in lasts only while the app is open."
+                : "Used only to search and download device codes from Logitech's catalog."
+            }</span>
+          </span>
+          ${
+            state.logitechSignedIn
+              ? '<button type="button" class="btn btn-outlined btn-sm" id="settingsLogitechSignOutBtn">Sign out</button>'
+              : '<button type="button" class="btn btn-tonal btn-sm" id="settingsLogitechSignInBtn">Sign in</button>'
+          }
+        </div>
+      </div>
 
       <h3 class="m-section">Advanced</h3>
       <form id="clientIdForm" class="m-card m-form" novalidate>
@@ -390,6 +413,30 @@
       formPass = "";
       showSnackbar("Removed saved hub sign-in.");
       render();
+      return;
+    }
+    if (target.closest("#settingsLogitechSignOutBtn") && catalogBridge) {
+      try {
+        await catalogBridge.signOut();
+        state = await bridge.getState();
+        showSnackbar("Signed out of Logitech.");
+        render();
+      } catch (err) {
+        showSnackbar(err?.message || "Sign-out failed.", true);
+      }
+      return;
+    }
+    if (target.closest("#settingsLogitechSignInBtn") && catalogBridge) {
+      try {
+        const res = await catalogBridge.signIn();
+        state = await bridge.getState();
+        if (res && res.signedIn) {
+          showSnackbar("Signed in to Logitech.");
+        }
+        render();
+      } catch (err) {
+        showSnackbar(err?.message || "Sign-in failed.", true);
+      }
     }
   });
 

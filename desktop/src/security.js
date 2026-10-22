@@ -7,7 +7,7 @@ function isAllowedNavigationUrl(rawUrl) {
   if (!s || /[\r\n\u0000\\]/.test(s)) return false;
   try {
     const u = new URL(s);
-    return u.protocol === "melodious:" && u.host === "app";
+    return u.protocol === "melodious:" && u.host === "app" && !u.username && !u.password;
   } catch {
     return false;
   }
@@ -28,12 +28,10 @@ function isTrustedIpcSender(event, mainWindow) {
   if (!event || !mainWindow || mainWindow.isDestroyed?.()) return false;
   const wc = mainWindow.webContents;
   if (!wc || event.sender !== wc) return false;
-  if (wc.mainFrame && event.senderFrame && event.senderFrame !== wc.mainFrame) {
+  if (!wc.mainFrame || !event.senderFrame || event.senderFrame !== wc.mainFrame) {
     return false;
   }
-  const frameUrl =
-    event.senderFrame?.url ||
-    (typeof wc.getURL === "function" ? wc.getURL() : "");
+  const frameUrl = event.senderFrame.url;
   return isAllowedNavigationUrl(frameUrl);
 }
 

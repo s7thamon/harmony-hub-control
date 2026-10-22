@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { catalogRows, hubProtocolNames, describeCatalogRows } from "../public/js/logitech-catalog.js";
+import { catalogRows, hubProtocolNames, describeCatalogRows, isCatalogPackage } from "../public/js/logitech-catalog.js";
 
 const PKG = {
   schema_version: "0.2.0",
@@ -16,6 +16,12 @@ const PKG = {
     ],
   },
 };
+
+it("isCatalogPackage accepts only 0.2.0 packages with a commands array", () => {
+  assert.equal(isCatalogPackage(PKG), true);
+  assert.equal(isCatalogPackage({ schema_version: "0.2.0", resources: { global_language_commands: [] } }), true);
+  for (const bad of [null, [], {}, "0.2.0", { ...PKG, schema_version: "1.0" }, { schema_version: "0.2.0", resources: { global_language_commands: {} } }]) assert.equal(isCatalogPackage(bad), false);
+});
 
 describe("catalogRows", () => {
   it("imports only KeyCodes whose protocol is on the hub", () => {

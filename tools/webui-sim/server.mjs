@@ -987,6 +987,43 @@ function handleIrdbImport(res, params) {
   sendJson(res, 200, { ok: true, message: counts });
 }
 
+// Catalog test surface only: no Logitech connection. The named protocols
+// model what a fixture hub already has; they are not new protocol definitions.
+const CATALOG_PROTOCOLS = [
+  { Id: 2, Name: "Toshiba 32 Bit" },
+  { Id: 17, Name: "Sony 15 Bit" },
+  { Id: 18, Name: "Sony 20 Bit" },
+];
+
+function handleCatalogImport(res, params) {
+  const entry = findDeviceEntry(String(params.deviceId ?? ""));
+  if (!entry || !Array.isArray(params.commands) || !params.commands.length || params.commands.length > LIMITS.batchCommands) {
+    sendError(res, 400, "Catalog import needs a device and commands list within the request limit.");
+    return;
+  }
+  const staged = [];
+  const taken = new Set(deviceCommands(entry).map((c) => c.Name));
+  let rejected = 0;
+  let skipped = 0;
+  for (const row of params.commands) {
+    if (!row || typeof row.name !== "string" || !safeLabel(row.name)) { rejected++; continue; }
+    if (taken.has(row.name)) { skipped++; continue; }
+    const raw = typeof row.raw === "string" ? row.raw : "";
+    const code = typeof row.keycode === "string" ? row.keycode : "";
+    const name = /^G:([^:]+):/.exec(code)?.[1];
+    const protocolId = CATALOG_PROTOCOLS.find((p) => p.Name === name)?.Id;
+    if ((raw ? raw.length > 2047 || /[\u0000-\u001f\u007f]/.test(raw) : !protocolId || code.length > 511) ||
+        deviceCommands(entry).length + staged.length >= LIMITS.storedCommands) { rejected++; continue; }
+    staged.push(irCommand(nextCommandId() + staged.length, row.name, { mode: raw ? "raw" : "keycode", raw, code, protocolId }));
+    taken.add(row.name);
+  }
+  const message = `Submitted: ${params.commands.length}  Imported: ${staged.length}  Skipped existing: ${skipped}  Rejected: ${rejected}`;
+  if (!staged.length) { sendError(res, 400, message); return; }
+  deviceCommands(entry).push(...staged);
+  logEvent({ kind: "catalog-import", deviceId: String(params.deviceId), imported: staged.length });
+  sendJson(res, 200, { ok: true, message });
+}
+
 /* The hub fetches remotecentral.com itself; the sim never goes online and
    answers like a hub without internet access. */
 function handleRemoteCentralFetch(res, params) {
@@ -1057,6 +1094,7 @@ function handleControlButton(res, params) {
 }
 
 const EXPORTS = {
+  "/export/protocols": { file: "ProtocolList.json", resource: () => ({ Protocols: CATALOG_PROTOCOLS }) },
   "/export/activities": { file: "ActivityList.json", resource: () => state.activityList },
   "/export/maps": { file: "MapList.json", resource: () => state.mapList },
   "/export/functions": { file: "FunctionList.json", resource: () => state.functionList },
@@ -1204,6 +1242,9 @@ async function handleApi(req, res, pathname, url) {
       return;
     case "POST /api/irdb-import":
       handleIrdbImport(res, params);
+      return;
+    case "POST /api/catalog-import":
+      handleCatalogImport(res, params);
       return;
     case "GET /api/remotecentral-fetch":
     case "POST /api/remotecentral-fetch":

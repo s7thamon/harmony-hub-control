@@ -19,7 +19,7 @@ zig-distribution-sweep pilot reports):
 
   codex_webui.c          b48e532f92b2f83873dec227680f7c7243db9dad (box 2026-10-20 + LED + state-digest endpoints + system-status, delete guard, RAM agent logs, device settings, inputs + shell without the photo + hold-to-repeat + Logitech catalog)
   activity_ui_assets.h   5dad607f7c09a0d5cc0034969b76e6c5df1eb2bc
-  harmony_shell_assets.h 4f07f32e668f111eb4bf2ca09fb910f84d0e71e7 (box 2026-10-20 + state-digest liveness + integrity fixes + device settings + inputs + Melodious shell + Activities + Devices + hold-to-repeat + Logitech catalog)
+  harmony_shell_assets.h ddc265f65cfdbe42ef36fe10bad7811dca60955a (box 2026-10-20 + state-digest liveness + integrity fixes + device settings + inputs + Melodious shell + Activities + Devices + hold-to-repeat + Logitech catalog + desktop catalog)
   remote_skin_jpg.h      419611c5ff0713f1f5de2dd684d699f6d77238d5
   codex_hbus.c           d2bbcdef214369bff3dacf1836d6b5a0057f5ede (309cec3)
 
@@ -86,9 +86,9 @@ PINNED_SOURCES = {
         502204,
     ),
     "harmony_shell_assets.h": (
-        "4f07f32e668f111eb4bf2ca09fb910f84d0e71e7",
-        "03814c6a2e5972db8c04623d55166720327dc9b49acb5f1650f4d92a88678f71",
-        1998563,
+        "ddc265f65cfdbe42ef36fe10bad7811dca60955a",
+        "a4ded5bc05cfc8e6afb487cbda0bbf5486013f2db3d4c1d2f420d02a042df054",
+        2028275,
     ),
     "remote_skin_jpg.h": (
         "419611c5ff0713f1f5de2dd684d699f6d77238d5",
@@ -105,8 +105,8 @@ PINNED_SOURCES = {
 #: exact live binary targets (verified pilot reports)
 TARGETS = {
     "codex_webui": (
-        "55b6045f5eab25fbea9f6ceacfa7d32f1195f7e1069ce1cb9192e7a759b91ed4",
-        1109300,
+        "67948fce49eee7a8060d265e35fe442e18a0f547aa51b05f8f13e02cc5b889bf",
+        1115172,
     ),
     "codex_bt_pair_agent": (
         "563c6c58a3629edfebd7ec30ebcf14e6384a2d84e89669b1d7c3d79c75b619c8",
