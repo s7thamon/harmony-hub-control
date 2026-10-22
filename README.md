@@ -1,16 +1,9 @@
 # Melodious
 
-Melodious keeps a Logitech Harmony Hub working on your own network, with no
-Logitech app, account or cloud. It has three parts:
-
-- **Melodious on the hub**: software you install on a rooted Harmony Hub. It
-  serves the web app and an HTTP API, saves your changes to activities and
-  devices on the hub itself, adds a Bluetooth keyboard, an MQTT bridge and a
-  Wi-Fi recovery network, and blocks the Logitech cloud.
-- **The Melodious web app**: a remote and setup app that the hub serves at
-  `http://<hub-ip>:8080/`, for phones and computers. It works fully offline.
-- **The Melodious Android app**: a native remote for Android 8.0 and later that
-  connects to the same hub.
+Melodious turns a rooted Logitech Harmony Hub into a home-theater controller
+that you own outright. It's a framework that runs on the hub, plus a web app
+and an Android app built on it, and all of it runs on your local network with
+no Logitech app, account or cloud.
 
 Melodious is for owners of a Harmony Hub that is already rooted with
 [harmony-hub-root](https://github.com/Ripthulhu/harmony-hub-root) who want the
@@ -18,11 +11,88 @@ hub, and the Harmony remote paired with it, to run entirely on their local
 network. This repository contains no rooting tools, exploits, private keys or
 personal backups.
 
-<p align="center">
-  <img src="docs/screenshots/web/remote.png" alt="The web app's remote on a phone" height="540">
-  <img src="docs/screenshots/android/remote.png" alt="The Android app's remote" height="540">
-  <br><sub>The web app (left) and the Android app (right), on a real hub. Network addresses and the Wi-Fi name are masked in every screenshot.</sub>
-</p>
+## Why Melodious
+
+Logitech stopped making Harmony remotes in 2021. A Harmony Hub depends on
+Logitech's app and cloud for its whole setup: adding a device, building an
+activity and updating the paired remote all go through Logitech's servers. If
+that service changes or goes away, the hub's setup is frozen.
+
+Melodious makes the hub self-sufficient. It moves setup, control and remote
+sync onto the hub and your network, blocks the cloud, and adds tools of its
+own: saved keystroke scripts for the hub's Bluetooth keyboard, an MQTT bridge
+with Home Assistant discovery, a local HTTP API, downloadable backups and a
+Wi-Fi recovery network.
+
+## What's in it
+
+Melodious has three parts:
+
+- **The Melodious framework**, on the hub: software you install on a rooted
+  Harmony Hub. It serves the apps and a local HTTP API, saves your changes to
+  activities and devices on the hub itself, answers the paired remote's sync,
+  and blocks the Logitech cloud.
+- **The web app**: a remote and setup app that the hub serves at
+  `http://<hub-ip>:8080/` to any phone or computer. There's nothing to
+  install, and it works fully offline.
+- **The Android app**: a native remote for Android 8.0 and later, for the same
+  hub.
+
+## Features
+
+### Works without Logitech's cloud
+
+- Logitech's cloud services don't start and the hub has no route to the
+  internet, while local control, discovery and MQTT keep working.
+- Your Harmony remote gets its setup from the hub when it syncs, so a cloud
+  copy can't overwrite your changes.
+- The hub keeps its clock right over NTP.
+- System → Cloud egress turns the cloud blocker on; the web app has no control
+  to turn it off.
+
+### Set up everything yourself
+
+- **Activities**: a guided wizard for the devices, inputs and buttons, and an
+  advanced editor for roles, button maps and the activity's JSON. Each save is
+  checked and written on the hub as one transaction, and the paired remote
+  picks it up the next time it syncs.
+- **Devices**: add and edit devices, learn codes from your original remotes,
+  import codes (IRDB, Flipper `.ir` files, `name|mode|code` lines, Pronto hex
+  or RemoteCentral pages) or type them in, and set each device's power, inputs
+  and timing.
+- **Finding codes**: send every command a device has, in turn, to find the
+  ones it answers to, or try codes on the IR lab's scratch device.
+
+### Control it your way
+
+- **The web app** on any phone or computer, served by the hub.
+- **The Android app**, with a touchpad, press and hold, a sleep timer,
+  lock-screen controls, a home-screen widget and a Quick Settings tile.
+- **A Bluetooth keyboard**: the hub pairs with a TV, streaming box or computer
+  as a keyboard, so you can type searches and passwords from your phone, and
+  run saved keystroke scripts.
+
+### Connect it to your smart home
+
+- **MQTT and Home Assistant**: the bridge publishes the hub's status, the
+  current activity and device counts, and Home Assistant discovery (an
+  activity selector, sensors and a power-off button). It takes activity
+  changes, IR commands and raw hub-engine commands on its topics, under
+  `harmony/hub` by default. Set it up at install time or in Settings → MQTT.
+- **A local HTTP API** for scripts: start activities, send IR, and read the
+  hub's state and setup. See [docs/API.md](docs/API.md).
+
+### Keep it yours
+
+- **Backup and restore**: download ten single exports (devices, functions,
+  protocols, activities, button maps, automation, MQTT, Wi-Fi, cloud blocker
+  and Bluetooth) or one owner bundle with all ten, and restore from a file. A
+  restore is checked before it runs and asks you to confirm. The hub also
+  keeps its own backups before each change.
+- **Wi-Fi recovery**: if the hub can't join your Wi-Fi, hold its reset button.
+  The hub starts an open recovery network, `Harmony-Recovery-xxxxxx`, with a
+  page at `http://192.168.76.1/` where you enter the Wi-Fi details again.
+- **Sign-in**: an optional username and password for the web app and its API.
 
 ## Quick start
 
@@ -126,18 +196,29 @@ already on the hub, including any set up with the Logitech app before rooting.
 - To type on a TV, pair the hub as a keyboard in Settings → Bluetooth
   keyboard.
 
-## The web app
+## The apps
 
-The hub serves the web app from `codex_webui` itself: one page, one script and
-one stylesheet, plus the advanced editor's script and stylesheet when you open
-it. Nothing loads from the internet. There are four tabs, Remote, Activities,
-Devices and Settings: a bottom bar on phones and a navigation rail on screens
-840 px and wider. Every screen has its own address, such as `#devices/<id>`,
-so you can bookmark it.
+The web app and the Android app control the same hub and share one design.
+Both come with Melodious: the hub serves the web app, and the Android app is a
+download on the release page.
+
+<p align="center">
+  <img src="docs/screenshots/web/remote.png" alt="The web app's remote on a phone" height="540">
+  <img src="docs/screenshots/android/remote.png" alt="The Android app's remote" height="540">
+  <br><sub>The web app (left) and the Android app (right), on a real hub. Network addresses and the Wi-Fi name are masked in every screenshot.</sub>
+</p>
+
+### The web app
+
+The hub serves the web app to any browser on your network, and nothing loads
+from the internet. There are four tabs, Remote, Activities, Devices and
+Settings: a bottom bar on phones and a navigation rail on screens 840 px and
+wider. Every screen has its own address, such as `#devices/<id>`, so you can
+bookmark it.
 
 <p align="center"><img src="docs/screenshots/web/desktop-remote.png" alt="The web app on a computer, with the navigation rail and More keys beside the remote"><br><sub>On a computer: the navigation rail, the remote and More keys beside it</sub></p>
 
-### Remote
+#### Remote
 
 - **Nothing running**: "Everything's off" and one card per activity.
 - **An activity running**: its remote. Tap the activity's name to switch to
@@ -170,7 +251,7 @@ hold action fires it after 500 ms. Keys the activity doesn't use are dimmed.
 
 </details>
 
-### Activities
+#### Activities
 
 - The running activity's card, with Open remote and Turn off.
 - A row for each other activity, with Start and a ⋮ menu: Edit, Set up
@@ -197,7 +278,7 @@ hold action fires it after 500 ms. Keys the activity doesn't use are dimmed.
 
 </details>
 
-### Devices
+#### Devices
 
 - A list you can search by device or command, **+** (Add a device), and Tools
   → IR lab, a scratch device for trying codes.
@@ -235,7 +316,7 @@ hold action fires it after 500 ms. Keys the activity doesn't use are dimmed.
 
 </details>
 
-### Settings
+#### Settings
 
 - **Hub**: whether the hub is connected, and its activity and device counts.
 - **Bluetooth keyboard**: pair the hub with a TV, streaming box or computer as
@@ -261,7 +342,7 @@ hold action fires it after 500 ms. Keys the activity doesn't use are dimmed.
 
 </details>
 
-## The Android app
+### The Android app
 
 The app is in [`Android/`](Android/): Kotlin and Jetpack Compose, package
 `app.melodious`, for Android 8.0 (API 26) and later. Download
@@ -333,96 +414,6 @@ pages.
 
 </details>
 
-## Features
-
-### Offline by default
-
-With the cloud blocker on, as a clean install sets it:
-
-- the hub doesn't start Logitech's cloud tasks (cloudapi, PubNub, the package
-  manager), and requests to Logitech and PubNub hosts fail;
-- the WAN default route is removed and kept off, while LAN and multicast
-  routes stay, so local control, discovery and MQTT keep working;
-- the paired Harmony remote gets its setup from the hub's own files when it
-  syncs, so a cloud copy can't overwrite your changes;
-- the hub still sets its clock over NTP (pool.ntp.org, time.google.com,
-  time.cloudflare.com), through a temporary route for each query;
-- activity and device-settings changes are refused unless the blocker is on,
-  so a local edit can't race a cloud sync.
-
-System → Cloud egress turns the blocker on. The web app has no control to turn
-it off.
-
-### Activities and your Harmony remote
-
-Every change to activities, from the wizard, the advanced editor, a reorder or
-a delete, is one transaction on the hub. It checks the activities, button maps
-and command maps against the hub's devices, backs up the hub's resource files,
-writes the three activity files, reads them back and restores the old ones if
-anything fails. If the setup changed since the page loaded, the hub refuses
-the save and the page loads the latest copy.
-
-Each save is published as a fresh configuration revision for the paired
-Harmony remote, which picks it up the next time it syncs with the hub. The
-advanced editor's "Refresh remote locally" publishes the stored setup again
-without changing it.
-
-### IR codes
-
-- Learn codes from the original remote; import IRDB codes, Flipper `.ir`
-  files, `name|mode|code` lines, Pronto hex or RemoteCentral pages; or type a
-  keycode, NEC or raw code.
-- IRDB search and preview run in your browser and fetch from the jsDelivr CDN
-  only when you click Search IRDB or Preview. The hub fetches a RemoteCentral
-  page only when you click Fetch, and that needs a route to the internet,
-  which the cloud blocker removes.
-- Limits: 32 devices, 2,048 commands per device and 1,024 commands per import.
-  The hub backs up its device list before each write.
-
-### Bluetooth keyboard
-
-The hub pairs with a TV, streaming box or computer as a Bluetooth keyboard,
-with its own pairing agent and the link keys kept on the hub. The web app and
-the Android app then type text and send keys through it, and the Bluetooth
-page runs saved keystroke scripts.
-
-### MQTT and Home Assistant
-
-The MQTT bridge publishes the hub's status, the current activity and device
-counts, and Home Assistant discovery (an activity selector, sensors and a
-power-off button). It takes activity changes, IR commands and raw hub-engine
-commands on its topics, under `harmony/hub` by default. Set it up at install
-time or in Settings → MQTT; the page never shows the stored password.
-
-### Backup and restore
-
-Settings → Backup downloads ten single exports (devices, functions, protocols,
-activities, button maps, automation, MQTT, Wi-Fi, cloud blocker and Bluetooth)
-or one owner bundle with all ten. A restore is checked before it runs and asks
-you to confirm. The hub also keeps its own backups:
-
-| Backups | Folder | Kept |
-| --- | --- | --- |
-| Resource backups (`YYYYMMDD_HHMMSS`), taken before each write | `/data/codex/resource-backups` | Newest 5 |
-| Software-update backups | `/data/codex/update-backups` | Newest 3 |
-| Installer handoffs (`webui-handoff-*`) | `/data/codex-backups` | Newest 3 |
-
-Only folders with those exact names are ever removed.
-
-### Wi-Fi and recovery
-
-Settings → Wi-Fi changes the network the hub joins. If the hub can't join it,
-hold the hub's reset button: the hub starts an open recovery network,
-`Harmony-Recovery-xxxxxx`, with a setup page at `http://192.168.76.1/` where
-you enter the Wi-Fi details again.
-
-### Sign-in
-
-System → Sign-in adds an optional username and password (HTTP Basic) to the
-web app and its API. It's off by default. If you're locked out, the Android
-app's SSH recovery clears it, or you can delete `/data/codex/webui_auth.conf`
-over SSH and restart `codex_webui`.
-
 ## How it works
 
 ```text
@@ -443,7 +434,8 @@ recovery_ap.sh (recovery network)
 - **Web app**: plain JavaScript modules in `tools/webui-sim/public/`, with no
   framework. `tools/package_harmony_shell.sh` bundles them with bun into
   `payload/source/harmony_shell_assets.h`, which is compiled into
-  `codex_webui`.
+  `codex_webui`. The hub serves one page, one script and one stylesheet, plus
+  the advanced editor's script and stylesheet when you open it.
 - **Server**: `payload/source/codex_webui.c`, built with Zig as a static,
   stripped MIPS32 big-endian binary. It listens on port 8080 and forks for
   each request.
@@ -454,6 +446,37 @@ recovery_ap.sh (recovery network)
   with their MD5s, that go to `/data/codex/bin/`.
 - **Data**: activities, devices and settings stay in the hub's own JSON files
   under `/data`; the backups download them.
+- **Offline mode**: with the cloud blocker on, the hub doesn't start
+  Logitech's cloud tasks (cloudapi, PubNub, the package manager), and requests
+  to Logitech and PubNub hosts fail. The WAN default route is removed and kept
+  off, while LAN and multicast routes stay. The paired remote's sync is
+  answered from the hub's own files. NTP queries to pool.ntp.org,
+  time.google.com and time.cloudflare.com each get a temporary route. Activity
+  and device-settings changes are refused unless the blocker is on, so a local
+  edit can't race a cloud sync.
+- **Activity saves**: every change to activities, from the wizard, the
+  advanced editor, a reorder or a delete, is one transaction. The hub checks
+  the activities, button maps and command maps against its devices, backs up
+  its resource files, writes the three activity files, reads them back and
+  restores the old ones if anything fails. If the setup changed since the page
+  loaded, the hub refuses the save and the page loads the latest copy. Each
+  save is published as a fresh configuration revision for the paired remote;
+  the advanced editor's "Refresh remote locally" publishes the stored setup
+  again without changing it.
+- **Network access**: the apps load nothing from the internet. IRDB search and
+  preview run in your browser and fetch from the jsDelivr CDN only when you
+  click Search IRDB or Preview. The hub fetches a RemoteCentral page only when
+  you click Fetch, and that needs a route to the internet, which the cloud
+  blocker removes.
+- **Backups on the hub**:
+
+  | Backups | Folder | Kept |
+  | --- | --- | --- |
+  | Resource backups (`YYYYMMDD_HHMMSS`), taken before each write | `/data/codex/resource-backups` | Newest 5 |
+  | Software-update backups | `/data/codex/update-backups` | Newest 3 |
+  | Installer handoffs (`webui-handoff-*`) | `/data/codex-backups` | Newest 3 |
+
+  Only folders with those exact names are ever removed.
 
 ## Safety and limits
 
@@ -476,6 +499,10 @@ recovery_ap.sh (recovery network)
   big import.
 - **Offline is the supported mode.** Using the Logitech app or cloud sync
   alongside Melodious isn't supported and can overwrite local changes.
+- **Limits.** 32 devices, 2,048 commands per device and 1,024 commands per
+  import. The hub backs up its device list before each write.
+- **Locked out of sign-in?** The Android app's SSH recovery clears it, or
+  delete `/data/codex/webui_auth.conf` over SSH and restart `codex_webui`.
 - **Hand-edited activity JSON must follow the remote's rules.** For example,
   an activity button without an action makes the paired remote stop
   responding until it's power-cycled. The wizard and the advanced editor
