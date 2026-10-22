@@ -112,16 +112,18 @@ function rev8(v) {
   return v & 255;
 }
 
+// Mirrors the hub page's keyFromParts: only the NEC family is a KeyCode on
+// the Toshiba 32 Bit protocol (NECx, Samsung32 and Pioneer have other timing).
 function keyFromParts(proto, d, s, f) {
-  if (!/^(NEC|Samsung32|Pioneer)/i.test(proto || '')) return '';
+  if (!/^(NEC|NEC1|NEC1-f16|NEC2|NECext)$/i.test(proto || '')) return '';
   d = Number(d);
   const ss = String(s === undefined ? '' : s).trim();
   s = ss === '' || ss === '-1' ? (d ^ 255) : Number(s);
   f = Number(f);
   if ([d, s, f].some((x) => !Number.isFinite(x) || x < 0 || x > 255)) return '';
-  if (/^Samsung32/i.test(proto)) s = d;
   const val = ((rev8(d) << 24) | (rev8(s) << 16) | (rev8(f) << 8) | rev8((~f) & 255)) >>> 0;
-  return `G:Toshiba 32 Bit:(0x${val.toString(16).toUpperCase().padStart(8, '0')})(Repeat)():3`;
+  const hex = `0x${val.toString(16).toUpperCase().padStart(8, '0')}`;
+  return `G:Toshiba 32 Bit:(${hex})(${/^NEC2$/i.test(proto) ? hex : 'Repeat'})():3`;
 }
 
 function csvCells(line) {

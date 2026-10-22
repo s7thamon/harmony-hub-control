@@ -3,6 +3,7 @@
    through POST /api/irdb-import. Parsers align with tools/ir_database_smoke_test.mjs
    and the hub's bulk_import_irdb_commands line shapes. */
 
+import { ENCODABLE, encodeIr } from "./ir-encode.js";
 import { LIMITS, parseIrdbLines, prontoToHarmonyRaw, harmonyRawFromTimings, isSafeLabel } from "./views/ir-model.js";
 
 /**
@@ -46,63 +47,38 @@ export const KNOWN_DEAD_PACKAGE_INDEXES = Object.freeze([
   },
 ]);
 
-function rev8(v) {
-  v = ((v & 240) >> 4) | ((v & 15) << 4);
-  v = ((v & 204) >> 2) | ((v & 51) << 2);
-  v = ((v & 170) >> 1) | ((v & 85) << 1);
-  return v & 255;
-}
-
-function lsbBits(value, count) {
-  const out = [];
-  for (let i = 0; i < count; i += 1) out.push((value >> i) & 1);
-  return out;
-}
-
-/** Sony SIRC (12/15/20-bit) IRDB row to Harmony raw timings at 40 kHz.
-    IRDB device is the address; for 20-bit codes, subdevice is the extension
-    byte above the 5 low device bits. The command is always 7 bits. */
-function sonyRawFromParts(device, subdevice, fn, proto) {
-  const d = Number(device);
-  const f = Number(fn);
-  if (!Number.isFinite(d) || !Number.isFinite(f) || d < 0 || f < 0) return "";
-  const bits = /20/i.test(String(proto || "")) ? 20 : /15/i.test(proto) ? 15 : 12;
-  const command = f & 127;
-  if (f > 127) return "";
-  let address = d;
-  if (bits === 20) {
-    const sub = String(subdevice === undefined ? "" : subdevice).trim();
-    if (sub !== "" && sub !== "-1") {
-      const ext = Number(sub);
-      if (Number.isFinite(ext) && ext >= 0) address = (d & 31) | ((ext & 255) << 5);
-      else return "";
-    }
-  }
-  const addressBits = bits - 7;
-  if (address < 0 || address >= 1 << addressBits) return "";
-  const timings = [2400, 600];
-  lsbBits(command, 7).concat(lsbBits(address, addressBits)).forEach((bit) => {
-    timings.push(bit ? 1200 : 600, 600);
-  });
-  return harmonyRawFromTimings(40000, timings);
-}
-
-function isSonyProtocol(proto) {
-  return /^Sony(?:12|15|20)?$/i.test(String(proto || ""));
-}
-
-/** NEC-family compact keycode used by IRDB CSV rows (same shape as hub/smoke). */
+/** NEC-family KeyCode for an IRDB row, or "" when the protocol isn't
+    stored as a KeyCode (see ir-encode.js for everything it encodes). */
 export function keyFromParts(proto, d, s, f) {
-  if (!/^(NEC|Samsung32|Pioneer)/i.test(proto || "")) return "";
-  d = Number(d);
-  const ss = String(s === undefined ? "" : s).trim();
-  s = ss === "" || ss === "-1" ? (d ^ 255) : Number(s);
-  f = Number(f);
-  if ([d, s, f].some((x) => !Number.isFinite(x) || x < 0 || x > 255)) return "";
-  if (/^Samsung32/i.test(proto)) s = d;
-  const val = ((rev8(d) << 24) | (rev8(s) << 16) | (rev8(f) << 8) | rev8((~f) & 255)) >>> 0;
-  return `G:Toshiba 32 Bit:(0x${val.toString(16).toUpperCase().padStart(8, "0")})(Repeat)():3`;
+  const encoded = encodeIr(proto, d, s, f);
+  return encoded?.mode === "keycode" ? encoded.code : "";
 }
+
+const ENCODABLE_RE = new RegExp(`^(?:${ENCODABLE.map((p) => p.replace(/[-]/g, "\\-")).join("|")})$`, "i");
+
+/* A Flipper file's parsed signal as an IRDB-style row. Address and command
+   are little-endian hex bytes. */
+function flipperParsed(protocol, a, c) {
+  const p = String(protocol || "").toUpperCase();
+  if (p === "NEC") return encodeIr("NEC1", a[0], -1, c[0]);
+  if (p === "NECEXT") return encodeIr("NEC1-f16", a[0], a[1], c[0], c[1]); // 16-bit command: F, then E
+  if (p === "SAMSUNG32") return encodeIr("Samsung32", a[0], -1, c[0]);
+  if (p === "PIONEER") return encodeIr("Pioneer", a[0], -1, c[0]);
+  if (p === "RC5") return encodeIr("RC5", a[0], -1, c[0]);
+  if (p === "RC5X") return encodeIr("RC5", a[0], -1, (c[0] & 63) | 64); // extended: command 64-127
+  if (p === "RC6") return encodeIr("RC6", a[0], -1, c[0]);
+  if (p === "SIRC") return encodeIr("Sony12", a[0], -1, c[0]);
+  if (p === "SIRC15") return encodeIr("Sony15", a[0], -1, c[0]);
+  if (p === "SIRC20") {
+    const address = (a[0] | (a[1] << 8)) & 0x1fff;
+    return encodeIr("Sony20", address & 31, address >> 5, c[0]);
+  }
+  return null;
+}
+
+/* Gap appended after a Flipper raw signal that ends on a mark: the hub loops
+   a Raw code while a key is held, so it must end with a space. */
+const FLIPPER_RAW_GAP_US = 50000;
 
 export function detectFormat(text, filename = "") {
   const t = String(text ?? "");
@@ -165,12 +141,10 @@ function irdbCsvRow(rawName, proto, device, subdevice, fn) {
   const sub = String(subdevice === undefined ? "" : subdevice).trim();
   const f = String(fn || "").trim();
   const meta = `${protocol} ${d},${sub},${f}`;
-  if (isSonyProtocol(protocol)) {
-    const raw = sonyRawFromParts(Number(d), sub, Number(f), protocol);
-    return { name, mode: raw ? "raw" : "skip", code: raw, meta, supported: Boolean(raw) };
-  }
-  const keycode = keyFromParts(protocol, d, sub, f);
-  return { name, mode: keycode ? "keycode" : "skip", code: keycode, meta, supported: Boolean(keycode) };
+  const encoded = encodeIr(protocol, d, sub, f);
+  return encoded
+    ? { name, mode: encoded.mode, code: encoded.code, meta, supported: true }
+    : { name, mode: "skip", code: "", meta, supported: false };
 }
 
 /** Headerless IRDB CSV: any 5-cell row with a known protocol and numeric codes. */
@@ -192,7 +166,7 @@ function looksLikeIrdbCsv(text) {
     const p = csvCells(line);
     if (p.length < 5) continue;
     const row = irdbCsvRow(p[0], p[1], p[2], p[3], p[4]);
-    if (row && row.name && (row.supported || /^(NEC|Samsung32|Pioneer|Sony(?:12|15|20)?)$/i.test(p[1] || ""))) {
+    if (row && row.name && (row.supported || ENCODABLE_RE.test(String(p[1] || "").trim()))) {
       const d = Number(p[2]);
       const f = Number(p[4]);
       const sub = String(p[3] === undefined ? "" : p[3]).trim();
@@ -217,12 +191,12 @@ function parseFlipper(text) {
     if (cur.type === "parsed") {
       const a = String(cur.address || "").trim().split(/\s+/).map((x) => parseInt(x, 16) || 0);
       const c = String(cur.command || "").trim().split(/\s+/).map((x) => parseInt(x, 16) || 0);
-      if (/^Samsung32/i.test(protocol)) keycode = keyFromParts(protocol, a[0], a[0], c[0]);
-      else if (/^NECext/i.test(protocol)) keycode = keyFromParts(protocol, a[0], a[1], c[0]);
-      else if (/^NEC/i.test(protocol)) keycode = keyFromParts(protocol, a[0], a[0] ^ 255, c[0]);
-      else if (/^Pioneer/i.test(protocol)) keycode = keyFromParts(protocol, a[0], a[0] ^ 255, c[0]);
+      const encoded = flipperParsed(protocol, a, c);
+      if (encoded?.mode === "keycode") keycode = encoded.code;
+      else if (encoded?.mode === "raw") raw = encoded.code;
     } else if (cur.type === "raw") {
       const vals = String(cur.data || "").trim().split(/\s+/).filter(Boolean).map(Number);
+      if (vals.length % 2) vals.push(FLIPPER_RAW_GAP_US);
       const freq = Math.max(10000, Math.min(60000, Math.round(Number(cur.frequency) || 38000)));
       if (vals.length >= 4) {
         let r = `F${freq.toString(16).toUpperCase()}`;
@@ -282,18 +256,16 @@ function parsePronto(text) {
 
 function parsePipe(text) {
   const { rows } = parseIrdbLines(text);
-  return rows.map((r) => ({
-    name: safeName(r.name),
-    mode: r.mode === "irdb" ? "keycode" : r.mode,
-    code: r.mode === "irdb"
-      ? (() => {
-          const p = String(r.code).split(",");
-          return keyFromParts(p[0], p[1], p[2], p[3]);
-        })()
-      : r.code,
-    meta: r.mode,
-    supported: true,
-  })).map((r) => ({
+  return rows.map((r) => {
+    let { mode, code } = r;
+    if (mode === "irdb") {
+      const p = String(code).split(",");
+      const encoded = encodeIr(p[0], p[1], p[2], p[3]);
+      mode = encoded ? encoded.mode : "skip";
+      code = encoded ? encoded.code : "";
+    }
+    return { name: safeName(r.name), mode, code, meta: r.mode, supported: true };
+  }).map((r) => ({
     ...r,
     supported: Boolean(r.code) && r.mode !== "skip",
     mode: r.code ? r.mode : "skip",
