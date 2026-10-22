@@ -896,9 +896,11 @@ function handleIrLabClear(res, params) {
   sendJson(res, 200, { ok: true, deviceId, message: `Cleared ${count} commands from device ${deviceId}.` });
 }
 
-// build_irdb_nec_keycode(): IRDB's NEC/Pioneer rows, each byte bit-reversed.
+// build_irdb_nec_keycode(): IRDB's NEC, NEC1, NEC1-f16 and NEC2 rows, each
+// byte bit-reversed; NEC2 repeats the whole frame.
 function irdbKeycode(protocol, device, subdevice, fn) {
-  if (!/^(nec|pioneer)/i.test(protocol)) return null;
+  const nec2 = /^nec2$/i.test(protocol);
+  if (!nec2 && !/^(nec|nec1|nec1-f16)$/i.test(protocol)) return null;
   const d = parseInt(device, 10) || 0;
   const s = !subdevice || subdevice === "-1" ? d ^ 0xff : parseInt(subdevice, 10) || 0;
   const f = parseInt(fn, 10) || 0;
@@ -906,7 +908,15 @@ function irdbKeycode(protocol, device, subdevice, fn) {
   if (![d, s, f].every((n) => n >= 0 && n <= 255)) return null;
   const rev = (n) => parseInt(n.toString(2).padStart(8, "0").split("").reverse().join(""), 2);
   const byte = (n) => rev(n).toString(16).toUpperCase().padStart(2, "0");
-  return `G:Toshiba 32 Bit:(0x${byte(d)}${byte(s)}${byte(f)}${byte(~f & 0xff)})(Repeat)():3`;
+  const value = `0x${byte(d)}${byte(s)}${byte(f)}${byte(~f & 0xff)}`;
+  return `G:Toshiba 32 Bit:(${value})(${nec2 ? value : "Repeat"})():3`;
+}
+
+// keycode_protocol_id(): the protocol a KeyCode names. The sim has no
+// ProtocolList, so only the two the hub can add itself are known here.
+function keycodeProtocolId(code) {
+  const name = /^G:([^:]+):/.exec(String(code || ""))?.[1];
+  return name === "Toshiba 32 Bit" ? 2 : name === "MemorexO1 32 Bit" ? 679 : 0;
 }
 
 // bulk_import_irdb_commands(): name|keycode, name|keycode|code, name|raw|data, or IRDB CSV.
@@ -954,12 +964,12 @@ function handleIrdbImport(res, params) {
       skippedExisting += 1;
     } else if (signal.mode === "raw"
       ? !signal.raw || signal.raw.length > 4096 || /[\u0000-\u001f\u007f]/.test(signal.raw)
-      : !signal.code) {
+      : !signal.code || !keycodeProtocolId(signal.code)) {
       rejected += 1;
     } else if (staged.length >= remaining) {
       rejected += 1;
     } else {
-      staged.push(irCommand(firstId + staged.length, name, { protocolId: 2, ...signal }));
+      staged.push(irCommand(firstId + staged.length, name, { protocolId: keycodeProtocolId(signal.code) || 2, ...signal }));
       taken.add(name);
     }
   }

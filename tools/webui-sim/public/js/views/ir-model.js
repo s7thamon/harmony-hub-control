@@ -231,14 +231,17 @@ export function harmonyRawFromTimings(freq, vals) {
   return raw.length <= LIMITS.rawImport ? raw : "";
 }
 
-/* Mirror of prontoToHarmonyRaw(): only learned (0000) frames convert. */
+/* Only learned (0000) Pronto frames convert. The hub loops a whole Raw code
+   while a key is held, so it takes one burst: the once burst, or the repeat
+   burst when there is no once burst. Joining both would replay the once
+   burst on every repeat. */
 export function prontoToHarmonyRaw(hex) {
   const words = String(hex || "").trim().split(/\s+/).filter(Boolean).map((x) => Number.parseInt(x, 16));
   if (words.length < 8 || words.some((x) => !Number.isFinite(x))) return "";
   if (words[0] !== 0) return "";
   const unit = (words[1] || 1) * 0.241246;
   const frequency = Math.round(1000000 / unit);
-  const pairs = (words[2] || 0) + (words[3] || 0);
+  const pairs = words[2] || words[3] || 0;
   const vals = words.slice(4, 4 + pairs * 2).map((w) => Math.round(w * unit));
   return harmonyRawFromTimings(frequency, vals);
 }

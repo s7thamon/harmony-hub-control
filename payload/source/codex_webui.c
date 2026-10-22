@@ -3797,7 +3797,99 @@ static int extract_nec_hex(const char *src, char *out, size_t outlen) {
     return 0;
 }
 
+/* The ProtocolList Id- of the protocol named `name`, or -1.  The two
+ * protocols the hub can add itself (ensure_builtin_protocol_for_id) count
+ * as present. */
+/* The Id- of the protocol whose own (top-level) Name is `name`: a segment
+ * inside another protocol can carry the same name. */
+static int protocol_id_in_list(const char *raw, const char *name) {
+    const char *arr, *p, *end;
+    size_t name_len;
+    if (!raw || !name || !name[0] || strchr(name, '"') || strchr(name, '\\')) return -1;
+    name_len = strlen(name);
+    arr = strstr(raw, "\"Protocols\"");
+    arr = arr ? strchr(arr, '[') : NULL;
+    for (p = arr ? strchr(arr + 1, '{') : NULL; p; p = strchr(end + 1, '{')) {
+        const char *q;
+        int depth = 0, in_string = 0;
+        end = find_matching_json(p, '{', '}');
+        if (!end) break;
+        for (q = p; q < end; q++) {
+            if (in_string) {
+                if (*q == '\\') q++;
+                else if (*q == '"') in_string = 0;
+                continue;
+            }
+            if (*q == '"') {
+                if (depth == 1 && strncmp(q, "\"Name\"", 6) == 0) {
+                    const char *v = q + 6;
+                    while (isspace((unsigned char)*v)) v++;
+                    if (*v == ':') {
+                        v++;
+                        while (isspace((unsigned char)*v)) v++;
+                        if (*v == '"' && strncmp(v + 1, name, name_len) == 0 && v[1 + name_len] == '"') {
+                            return (int)json_long_range(p, end, "Id-", -1);
+                        }
+                    }
+                }
+                in_string = 1;
+            } else if (*q == '{' || *q == '[') {
+                depth++;
+            } else if (*q == '}' || *q == ']') {
+                depth--;
+            }
+        }
+    }
+    return -1;
+}
+
+/* A ProtocolList read once per import (bulk_import_irdb_commands), so a
+ * thousand KeyCodes don't read the file a thousand times. */
+static char *protocol_list_cache = NULL;
+
+static int protocol_id_for_name(const char *name) {
+    char *raw;
+    int id;
+    if (!name || !name[0]) return -1;
+    if (strcmp(name, "Toshiba 32 Bit") == 0) return 2;
+    if (strcmp(name, "MemorexO1 32 Bit") == 0) return 679;
+    if (protocol_list_cache) return protocol_id_in_list(protocol_list_cache, name);
+    raw = read_file_alloc(PROTOCOL_LIST, MAX_RESOURCE_FILE, NULL);
+    id = protocol_id_in_list(raw, name);
+    free(raw);
+    return id;
+}
+
+/* The protocol a KeyCode ("G:<protocol name>:...") is written for, or -1. */
+static int keycode_protocol_id(const char *keycode) {
+    char name[128];
+    const char *colon;
+    size_t n;
+    if (!keycode || strncmp(keycode, "G:", 2) != 0) return -1;
+    colon = strchr(keycode + 2, ':');
+    if (!colon) return -1;
+    n = (size_t)(colon - (keycode + 2));
+    if (n == 0 || n >= sizeof(name)) return -1;
+    memcpy(name, keycode + 2, n);
+    name[n] = 0;
+    return protocol_id_for_name(name);
+}
+
+/* The protocol to store a KeyCode with: the one its G:<name>: names, which
+ * the hub must have; `fallback` for a code without that prefix.  -1 (with
+ * msg) when the named protocol isn't on this hub: stamping another one
+ * would send the wrong signal. */
+static int keycode_storage_protocol(const char *code, int fallback, char *msg, size_t msglen) {
+    int id;
+    if (!code || strncmp(code, "G:", 2) != 0) return fallback;
+    id = keycode_protocol_id(code);
+    if (id <= 0) snprintf(msg, msglen, "This KeyCode is for an IR protocol the hub doesn't have.");
+    return id > 0 ? id : -1;
+}
+
 static int infer_capture_protocol(const char *raw_code, const char *keycode) {
+    int id = keycode_protocol_id(keycode);
+    if (id > 0) return id;
     if (contains_ci(keycode, "MemorexO1") || contains_ci(raw_code, "MemorexO1")) return 679;
     return 2;
 }
@@ -3816,7 +3908,8 @@ static void analyze_capture_storage(const char *raw_code, const char *keycode_in
         copy_text(summary, summary_len, "Decoded Harmony KeyCode; storing compact protocol/keycode data.");
     } else if (extract_nec_hex(nec_in, nec_out, nec_len) ||
                extract_nec_hex(raw_code, nec_out, nec_len)) {
-        protocol_id = infer_capture_protocol(raw_code, keycode_in);
+        /* A NEC value is always built as a Toshiba (or MemorexO1) KeyCode. */
+        protocol_id = contains_ci(raw_code, "MemorexO1") ? 679 : 2;
         copy_text(mode_out, mode_len, "nec");
         if (build_nec_keycode(nec_out, protocol_id, keycode_out, keycode_len) == 0) {
             copy_text(summary, summary_len, "Decoded NEC-style 32-bit value; storing as compact Harmony KeyCode.");
@@ -3837,10 +3930,16 @@ static unsigned int reverse8(unsigned int v) {
     return v & 0xff;
 }
 
+/* An IRDB row as a KeyCode on the Toshiba 32 Bit protocol (2): only NEC,
+ * NEC1, NEC1-f16 and NEC2 have that frame.  NECx and Samsung32 (4.5 ms
+ * leader) and Pioneer (40 kHz) don't, so they return -1; the web app sends
+ * those as Raw (ir-encode.js). */
 static int build_irdb_nec_keycode(const char *protocol, const char *device, const char *subdevice, const char *function, char *out, size_t outlen) {
     unsigned long d, s, fn, inv;
     unsigned long value;
-    if (strncasecmp(protocol, "NEC", 3) != 0 && strncasecmp(protocol, "Pioneer", 7) != 0) return -1;
+    int nec2 = strcasecmp(protocol, "NEC2") == 0;
+    if (!nec2 && strcasecmp(protocol, "NEC") != 0 && strcasecmp(protocol, "NEC1") != 0 &&
+        strcasecmp(protocol, "NEC1-f16") != 0) return -1;
     d = strtoul(device, NULL, 10);
     s = (!subdevice[0] || strcmp(subdevice, "-1") == 0) ? (d ^ 0xff) : strtoul(subdevice, NULL, 10);
     fn = strtoul(function, NULL, 10);
@@ -3850,7 +3949,12 @@ static int build_irdb_nec_keycode(const char *protocol, const char *device, cons
             (reverse8((unsigned int)s) << 16) |
             (reverse8((unsigned int)fn) << 8) |
             reverse8((unsigned int)inv);
-    snprintf(out, outlen, "G:Toshiba 32 Bit:(0x%08lX)(Repeat)():3", value & 0xffffffffUL);
+    if (nec2) {
+        /* NEC2 repeats the whole frame, not NEC1's short repeat. */
+        snprintf(out, outlen, "G:Toshiba 32 Bit:(0x%08lX)(0x%08lX)():3", value & 0xffffffffUL, value & 0xffffffffUL);
+    } else {
+        snprintf(out, outlen, "G:Toshiba 32 Bit:(0x%08lX)(Repeat)():3", value & 0xffffffffUL);
+    }
     return 0;
 }
 
@@ -3954,6 +4058,11 @@ static int update_ir_command(const char *device_id, const char *old_name, const 
         }
         copy_text(code, sizeof(code), keycode);
     }
+    if (strcmp(effective_mode, "raw") != 0 &&
+        (protocol_id = keycode_storage_protocol(code, protocol_id, msg, msglen)) < 0) {
+        free(raw);
+        return -1;
+    }
     cmd = build_ir_command_json(id, new_name, effective_mode, protocol_id, code, raw_code);
     if (!cmd) {
         free(raw);
@@ -4044,6 +4153,10 @@ static int add_ir_command(const char *device_id, const char *name, const char *m
         return -1;
     }
     free(raw);
+    if (strcmp(effective_mode, "raw") != 0 &&
+        (protocol_id = keycode_storage_protocol(code, protocol_id, msg, msglen)) < 0) {
+        return -1;
+    }
     id = max_command_id + 1;
     if (id < 39000000) id = 39000000 + (long)(time(NULL) % 9000000);
     cmd = build_ir_command_json(id, name, effective_mode, protocol_id, code, raw_code);
@@ -4138,7 +4251,8 @@ static int bulk_import_irdb_commands(const char *device_id, char *payload, char 
     const char *arr, *arr_end, *scan;
     size_t joined_len = 0, joined_cap = 0, raw_len, prefix_len, suffix_len, out_len;
     long next_id, max_command_id = 0;
-    int imported = 0, empty = 1, remaining, imported_keycodes = 0, submitted = 0, skipped_existing = 0, existing_commands = 0, rejected = 0;
+    int imported = 0, empty = 1, remaining, submitted = 0, skipped_existing = 0, existing_commands = 0, rejected = 0;
+    int uses_toshiba = 0, uses_memorex = 0;
     if (!safe_label(device_id)) {
         snprintf(msg, msglen, "Invalid device for IRDB import.");
         return -1;
@@ -4159,12 +4273,13 @@ static int bulk_import_irdb_commands(const char *device_id, char *payload, char 
     }
     next_id = max_command_id + 1;
     if (next_id < 39000000) next_id = 39000000 + (long)(time(NULL) % 9000000);
+    protocol_list_cache = read_file_alloc(PROTOCOL_LIST, MAX_RESOURCE_FILE, NULL);
     line = strtok_r(payload, "\n", &save);
     while (line) {
         char *fields[8], *name = NULL, *mode = "keycode", *keycode = NULL, *raw_code = NULL;
-        char generated[512];
+        char generated[512], why[96];
         char *cmd_json;
-        int field_count;
+        int field_count, protocol_id = 0;
         line = trim_in_place(line);
         if (!line[0]) {
             line = strtok_r(NULL, "\n", &save);
@@ -4217,6 +4332,15 @@ static int bulk_import_irdb_commands(const char *device_id, char *payload, char 
             line = strtok_r(NULL, "\n", &save);
             continue;
         }
+        /* A KeyCode only plays right on the protocol it names: stamping
+         * another one (it used to always be 2, NEC) sends the wrong signal.
+         * Refuse KeyCodes for protocols this hub doesn't have. */
+        if (strcasecmp(mode, "raw") != 0 &&
+            (protocol_id = keycode_storage_protocol(keycode, 2, why, sizeof(why))) <= 0) {
+            rejected++;
+            line = strtok_r(NULL, "\n", &save);
+            continue;
+        }
         if (imported >= remaining) {
             rejected++;
             line = strtok_r(NULL, "\n", &save);
@@ -4224,19 +4348,24 @@ static int bulk_import_irdb_commands(const char *device_id, char *payload, char 
         }
         cmd_json = strcasecmp(mode, "raw") == 0 ?
             build_ir_command_json(next_id++, name, "raw", 2, "", raw_code) :
-            build_ir_command_json(next_id++, name, "keycode", 2, keycode, "");
+            build_ir_command_json(next_id++, name, "keycode", protocol_id, keycode, "");
         if (!cmd_json || append_text(&joined, &joined_len, &joined_cap, cmd_json, imported > 0) != 0) {
             free(cmd_json);
             free(joined);
             free(raw);
+            free(protocol_list_cache);
+            protocol_list_cache = NULL;
             snprintf(msg, msglen, "Failed to stage IRDB commands.");
             return -1;
         }
         free(cmd_json);
         imported++;
-        if (strcasecmp(mode, "raw") != 0) imported_keycodes++;
+        if (protocol_id == 2) uses_toshiba = 1;
+        if (protocol_id == 679) uses_memorex = 1;
         line = strtok_r(NULL, "\n", &save);
     }
+    free(protocol_list_cache);
+    protocol_list_cache = NULL;
     if (imported == 0) {
         free(joined);
         free(raw);
@@ -4265,11 +4394,12 @@ static int bulk_import_irdb_commands(const char *device_id, char *payload, char 
     memcpy(out + prefix_len + joined_len, raw + (arr_end - raw), suffix_len);
     out[out_len] = 0;
     backup_resources();
-    if (imported_keycodes > 0 && ensure_builtin_protocol_for_id(2) != 0) {
+    if ((uses_toshiba && ensure_builtin_protocol_for_id(2) != 0) ||
+        (uses_memorex && ensure_builtin_protocol_for_id(679) != 0)) {
         free(raw);
         free(joined);
         free(out);
-        snprintf(msg, msglen, "Failed to ensure NEC-compatible IR protocol.");
+        snprintf(msg, msglen, "Failed to add the IR protocol these commands need.");
         return -1;
     }
     if (write_file_atomic(DEVICE_LIST, out, out_len) != 0) {
@@ -5263,7 +5393,7 @@ static void page_end(FILE *f) {
         "const LIRC_BASE='https://raw.githubusercontent.com/probonopd/lirc-remotes/master/';const LIRC_INDEX='https://api.github.com/repos/probonopd/lirc-remotes/git/trees/master?recursive=1';"
         "const SMARTIR_BASE='https://raw.githubusercontent.com/smartHomeHub/SmartIR/master/';const SMARTIR_INDEX='https://api.github.com/repos/smartHomeHub/SmartIR/git/trees/master?recursive=1';let irdbIndex=[],irdbCache={irdb:null,flipper:null,lirc:null,smartir:null};"
         "function rev8(v){v=((v&240)>>4)|((v&15)<<4);v=((v&204)>>2)|((v&51)<<2);v=((v&170)>>1)|((v&85)<<1);return v&255;}"
-        "function keyFromParts(proto,d,s,f){if(!/^(NEC|Samsung32|Pioneer)/i.test(proto))return '';d=Number(d);const ss=String(s===undefined?'':s).trim();s=(ss===''||ss==='-1')?(d^255):Number(s);f=Number(f);if([d,s,f].some(x=>!Number.isFinite(x)||x<0||x>255))return '';if(/^Samsung32/i.test(proto))s=d;const val=((rev8(d)<<24)|(rev8(s)<<16)|(rev8(f)<<8)|rev8((~f)&255))>>>0;return 'G:Toshiba 32 Bit:(0x'+val.toString(16).toUpperCase().padStart(8,'0')+')(Repeat)():3';}"
+        "function keyFromParts(proto,d,s,f){if(!/^(NEC|NEC1|NEC1-f16|NEC2|NECext)$/i.test(proto))return '';d=Number(d);const ss=String(s===undefined?'':s).trim();s=(ss===''||ss==='-1')?(d^255):Number(s);f=Number(f);if([d,s,f].some(x=>!Number.isFinite(x)||x<0||x>255))return '';const val=((rev8(d)<<24)|(rev8(s)<<16)|(rev8(f)<<8)|rev8((~f)&255))>>>0,hex='0x'+val.toString(16).toUpperCase().padStart(8,'0');return 'G:Toshiba 32 Bit:('+hex+')('+(/^NEC2$/i.test(proto)?hex:'Repeat')+')():3';}"
         "function csvCells(line){const out=[];let cur='',q=false;for(let i=0;i<line.length;i++){const ch=line[i];if(ch==='\"'){if(q&&line[i+1]==='\"'){cur+='\"';i++;}else q=!q;}else if(ch===','&&!q){out.push(cur);cur='';}else cur+=ch;}out.push(cur);return out.map(x=>x.trim());}"
         "function csvEntries(t){return t.replace(/\\r/g,'').split('\\n').map(x=>x.trim()).filter(Boolean).map(line=>{const p=csvCells(line),proto=p[1]||'',key=p[0]==='functionname'?'':keyFromParts(proto,p[2]||'',p[3]||'',p[4]||''),raw=p[0]==='functionname'?'':csvProtocolRaw(proto,p[2]||'',p[3]||'',p[4]||'',p[0]||'');return{name:p[0]||'',meta:proto+' '+(p[2]||'')+','+(p[3]||'')+','+(p[4]||''),protocol:proto,keycode:key,raw:raw};}).filter(r=>r.name&&r.name!=='functionname');}"
         "function hexBytes(v){return String(v||'').trim().split(/\\s+/).filter(Boolean).map(x=>parseInt(x,16)||0);}"
@@ -5320,7 +5450,7 @@ static void page_end(FILE *f) {
         "function sejinRaw(proto,d,s,f){d=Number(d);const ss=String(s===undefined?'':s).trim();s=(ss===''||ss==='-1')?0:Number(s);f=Number(f);if(!Number.isFinite(d)||!Number.isFinite(s)||!Number.isFinite(f)||d<0||d>255||s<0||s>255||f<0||f>255)return'';const freq=/-38$/i.test(proto)?38800:56300,u=310,dx=d||1,fx=s,fy=f,e=0,c=((dx&15)+((dx>>4)&15)+(fx&15)+((fx>>4)&15)+(fy&15)+((fy>>4)&15)+e)&15,seq=[],bits=msbBits(3,2).concat(msbBits(dx,8),msbBits(fx,8),msbBits(fy,8),msbBits(e,4),msbBits(c,4));function slot(b){pulse(seq,b?1:0,u);}function pair(v){msbBits([8,4,2,1][v&3],4).forEach(slot);}pulse(seq,1,u*3);for(let i=0;i<bits.length;i+=2)pair((bits[i]<<1)|bits[i+1]);pulse(seq,0,76000);return seqRaw(freq,seq);}"
         "function zenithRaw(d,s,f){d=Number(d);const ss=String(s===undefined?'':s).trim();s=(ss===''||ss==='-1')?0:Number(s);f=Number(f);if(!Number.isFinite(d)||!Number.isFinite(s)||!Number.isFinite(f)||d<1||d>12||s<0||s>1||f<0||f>=Math.pow(2,d))return'';const seq=[],u=520;function zbit(b){if(b){pulse(seq,1,u);pulse(seq,0,u);pulse(seq,1,u);pulse(seq,0,u*8);}else{pulse(seq,1,u);pulse(seq,0,u*10);}}zbit(s&1);for(let i=d-1;i>=0;i--){const b=(Math.floor(f/Math.pow(2,i))&1);if(b){zbit(1);zbit(0);}else{zbit(0);zbit(1);}}pulse(seq,0,90000);return seqRaw(40000,seq);}"
         "function csvProtocolRaw(proto,d,s,f,name=''){proto=String(proto||'');const D=Number(d),F=Number(f),S=String(s===undefined?'':s).trim();if(!Number.isFinite(D)||!Number.isFinite(F)||D<0||F<0)return'';if(/^RC5X?/i.test(proto))return rc5Raw({address:D.toString(16),command:F.toString(16),toggle:'0'});if(/^RC6/i.test(proto))return rc6Raw({address:D.toString(16),command:F.toString(16),toggle:'0'});if(/^MCE$/i.test(proto))return mceRaw(D,S,F);if(/^RECS80$/i.test(proto))return recs80Raw(D,S,F,name);if(/^Akai$/i.test(proto))return akaiRaw(D,F);if(/^Denon-K$/i.test(proto))return denonKRaw(D,S,F);if(/^Denon(?:\\{[12]\\})?$/i.test(proto))return denonRaw(D,F);if(/^Mitsubishi$/i.test(proto))return mitsubishiRaw(D,F);if(/^Velleman$/i.test(proto))return vellemanRaw(D,F);if(/^Fujitsu$/i.test(proto))return fujitsuRaw(D,S,F);if(/^SharpDVD$/i.test(proto))return sharpDvdRaw(D,S,F);if(/^Sharp(?:\\{[12]\\})?$/i.test(proto))return sharpRaw(D,F);if(/^DirecTV$/i.test(proto))return directvRaw(D,F);if(/^GXB$/i.test(proto))return gxbRaw(D,S,F);if(/^G\\.I\\.Cable(?:\\{[12]\\})?$/i.test(proto))return giCableRaw(D,F);if(/^Proton$/i.test(proto))return protonRaw(D,F);if(/^F12$/i.test(proto))return f12Raw(D,S,F);if(/^NRC17$/i.test(proto))return nrc17Raw(D,F);if(/^Nokia32$/i.test(proto))return nokia32Raw(D,S,F);if(/^Nokia$/i.test(proto))return nokiaRaw(D,S,F);if(/^Nokia12$/i.test(proto))return nokia12Raw(D,F);if(/^StreamZap$/i.test(proto))return streamZapRaw(D,F);if(/^Logitech$/i.test(proto))return logitechRaw(D,F);if(/^JVC-48$/i.test(proto))return jvc48Raw(D,S,F);if(/^JVC(?:\\{[12]\\})?$/i.test(proto))return jvcRaw(D,F);if(/^Konka$/i.test(proto))return konkaRaw(D,F);if(/^Tivo\\s+unit\\s*=\\s*\\d+$/i.test(proto))return tivoRaw(proto,D,S,F);if(/^XMP(?:-[12])?$/i.test(proto))return xmpRaw(proto,D,S,F);if(/^Apple$/i.test(proto))return appleRaw(D,S,F);if(/^(?:Emerson|ScAtl-6)$/i.test(proto))return emersonLikeRaw(proto,D,F);if(/^PaceMSS$/i.test(proto))return paceMssRaw(D,F);if(/^Sejin-1-(?:38|56)$/i.test(proto))return sejinRaw(proto,D,S,F);if(/^Zenith$/i.test(proto))return zenithRaw(D,S,F);if(/^Barco$/i.test(proto))return barcoRaw(D,S,F);if(/^Thomson7?$/i.test(proto))return thomsonRaw(proto,D,F);if(/^Panasonic2$/i.test(proto))return panasonic2Raw(D,S,F);if(/^Panasonic$/i.test(proto))return panasonicRaw(D,S,F);if(/^Aiwa$/i.test(proto))return aiwaRaw(D,S,F);if(/^Panasonic_Old$/i.test(proto))return panasonicOldRaw(D,S,F);if(/^Dish_Network$/i.test(proto))return dishRaw(D,S,F);if(/^48-NEC1$/i.test(proto))return nec48Raw(D,S,F,0);if(/^Blaupunkt$/i.test(proto))return blaupunktRaw(D,S,F);if(/^RCA(?:-38)?(?:\\(Old\\))?$/i.test(proto))return rcaRaw(proto,D,F);if(/^Sony(12|15|20)?/i.test(proto)){const bits=(proto.match(/Sony(\\d+)/i)||[])[1]||'12';let addr=D;if(bits==='20'&&S&&S!=='-1'){const sub=Number(S);if(Number.isFinite(sub)&&sub>=0)addr=(D&31)|((sub&255)<<5);}return sircRaw({address:addr,command:F},'SIRC'+bits);}return'';}"
-        "function prontoToHarmonyRaw(hex){const words=String(hex||'').trim().split(/\\s+/).filter(Boolean).map(x=>parseInt(x,16));if(words.length<8||words.some(x=>!Number.isFinite(x)))return'';if(words[0]!==0)return'';const unit=(words[1]||1)*0.241246,freq=Math.round(1000000/unit),pairs=(words[2]||0)+(words[3]||0),vals=words.slice(4,4+pairs*2).map(w=>Math.round(w*unit));return harmonyRawFromTimings(freq,vals);}"
+        "function prontoToHarmonyRaw(hex){const words=String(hex||'').trim().split(/\\s+/).filter(Boolean).map(x=>parseInt(x,16));if(words.length<8||words.some(x=>!Number.isFinite(x)))return'';if(words[0]!==0)return'';const unit=(words[1]||1)*0.241246,freq=Math.round(1000000/unit),pairs=(words[2]||words[3]||0),vals=words.slice(4,4+pairs*2).map(w=>Math.round(w*unit));return harmonyRawFromTimings(freq,vals);}"
         "function kaseikyoRaw(cur){const a=hexBytes(cur.address),c=hexBytes(cur.command);if(a.length<4||c.length<1)return'';const bytes=[a[1],a[2],a[0],a[3],c[0],(a[0]^a[3]^c[0])&255],seq=[];pulse(seq,1,3456);pulse(seq,0,1728);bytes.flatMap(b=>lsbBits(b,8)).forEach(b=>{pulse(seq,1,432);pulse(seq,0,b?1296:432);});pulse(seq,1,432);pulse(seq,0,74736);return seqRaw(38000,seq);}"
         "function flipperEntries(t,path=''){const out=[],src=String(path||'');let cur={};function push(){if(!cur.name){cur={};return;}let key='',raw='',meta=(cur.protocol||cur.type||'raw');if(String(cur.type||'').toLowerCase()==='parsed'){const a=hexBytes(cur.address),c=hexBytes(cur.command),p=cur.protocol||'';if(/^Samsung32/i.test(p))key=keyFromParts(p,a[0],a[0],c[0]);else if(/^NECext/i.test(p)){key=keyFromParts(p,a[0],a[1],c[0]);if(!key&&/_Converted_\\/CSV\\/D\\/Denon\\//i.test(src)){raw=denonKRaw(a[0],a[1],c[0]);meta=raw?'Denon-K converted timing':'NECext unsupported';}}else if(/^NEC/i.test(p))key=keyFromParts(p,a[0],a[0]^255,c[0]);else if(/^Pioneer/i.test(p))key=keyFromParts(p,a[0],a[0]^255,c[0]);else if(/^RCA/i.test(p)){raw=rcaRaw(p,a[0],c[0]);meta=raw?p+' converted timing':p+' unsupported';}else if(/^RC5/i.test(p)){raw=rc5Raw(cur);meta=raw?'RC5 converted timing':'RC5 unsupported';}else if(/^RC6/i.test(p)){raw=rc6Raw(cur);meta=raw?'RC6 converted timing':'RC6 unsupported';}else if(/^SIRC/i.test(p)){raw=sircRaw(cur,p);meta=raw?p+' converted timing':p+' unsupported';}else if(/^Kaseikyo/i.test(p)){raw=kaseikyoRaw(cur);meta=raw?'Kaseikyo converted timing':'Kaseikyo unsupported';}}else if(String(cur.type||'').toLowerCase()==='raw'){const vals=String(cur.data||'').trim().split(/\\s+/).filter(Boolean).map(Number);raw=harmonyRawFromTimings(cur.frequency||38000,vals);meta='raw timings '+(cur.frequency||38000)+' Hz ('+vals.length+' durations)';}out.push({name:cur.name,meta:meta,keycode:key,raw:raw});cur={};}t.replace(/\\r/g,'').split('\\n').forEach(line=>{line=line.trim();if(!line)return;if(line[0]==='#'){push();return;}const i=line.indexOf(':');if(i<0)return;const k=line.slice(0,i).trim().toLowerCase(),v=line.slice(i+1).trim();if(k==='name'&&cur.name)push();cur[k]=cur[k]&&k==='data'?cur[k]+' '+v:v;});push();return out;}"
         "function base64Bytes(s){try{const bin=atob(String(s||'').replace(/\\s+/g,''));return Array.from(bin,c=>c.charCodeAt(0));}catch(e){return[];}}"

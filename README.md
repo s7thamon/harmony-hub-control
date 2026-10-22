@@ -295,7 +295,9 @@ use are dimmed.
     button, then test and save it.
   - **Import codes**: Find codes (search IRDB, or open a code file), Paste
     (IRDB CSV, `name|mode|code` lines or Pronto hex, plus Fetch from
-    RemoteCentral) or Type a code.
+    RemoteCentral) or Type a code. IRDB's NEC, NECx, Samsung, Pioneer, Sony,
+    RC5, RC6, Panasonic, JVC, Denon and Sharp codes are converted with each
+    protocol's frame timing. Held keys repeat the whole frame, except on NEC.
   - **Send all commands**: sends every command in turn to find the ones the
     device answers to, with a dry run, the gap and commands per request, Stop
     and a run log.

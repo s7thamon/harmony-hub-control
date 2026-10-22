@@ -273,6 +273,17 @@ Raw timing imports use:
 CommandName|raw|F9470P20D0S1068...
 ```
 
+A KeyCode is stored with the protocol it names (`G:<protocol>:`), looked up in
+the hub's ProtocolList; a KeyCode for a protocol the hub doesn't have is
+refused. IRDB CSV lines (`name,protocol,device,subdevice,function`) are
+accepted for NEC, NEC1, NEC1-f16 and NEC2. The web app converts other IRDB
+protocols to Raw itself (NECx1/2, Samsung32, Pioneer, Sony12/15/20, RC5, RC6,
+Panasonic, JVC, Denon, Sharp), with each frame padded to its full period and
+three frames for Sony, because the hub plays a Raw code once per press and
+loops all of it while a key is held. So a held NECx1 or JVC key repeats its
+full frame rather than the protocol's short repeat, and RC5/RC6 codes keep the
+same toggle bit on every press.
+
 ## IR Learning
 
 Capture from a remote:
