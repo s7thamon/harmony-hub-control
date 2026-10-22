@@ -17,9 +17,9 @@ official Zig 0.16.0 pin:
 The exact source tuples (from the verified webui-repro and
 zig-distribution-sweep pilot reports):
 
-  codex_webui.c          fb699bfb8b2f1c0aac1bf1fc2acb68ae087097e5 (box 2026-10-20 + LED + state-digest endpoints + system-status, delete guard, RAM agent logs, device settings, inputs + shell without the photo + hold-to-repeat + IR encoding)
+  codex_webui.c          fb699bfb8b2f1c0aac1bf1fc2acb68ae087097e5 (box 2026-10-20 + LED + state-digest endpoints + system-status, delete guard, RAM agent logs, device settings, inputs + shell without the photo + hold-to-repeat + IRDB search)
   activity_ui_assets.h   5dad607f7c09a0d5cc0034969b76e6c5df1eb2bc
-  harmony_shell_assets.h 93e274e620f524bfa27f8666aec8270141764f23 (box 2026-10-20 + state-digest liveness + integrity fixes + device settings + inputs + Melodious shell + Activities + Devices + hold-to-repeat + IR encoding)
+  harmony_shell_assets.h 314a173f734e96faa8c929be952cdd450fc14a5d (box 2026-10-20 + state-digest liveness + integrity fixes + device settings + inputs + Melodious shell + Activities + Devices + hold-to-repeat + IRDB search)
   remote_skin_jpg.h      419611c5ff0713f1f5de2dd684d699f6d77238d5
   codex_hbus.c           d2bbcdef214369bff3dacf1836d6b5a0057f5ede (309cec3)
 
@@ -86,9 +86,9 @@ PINNED_SOURCES = {
         502204,
     ),
     "harmony_shell_assets.h": (
-        "93e274e620f524bfa27f8666aec8270141764f23",
-        "d50262162a6fafddf79b5cf55dff139f0211e7e4fc3a2562ca1da6d8c7a5ce5c",
-        1957420,
+        "314a173f734e96faa8c929be952cdd450fc14a5d",
+        "498cedb362d3bceec290268ced5cbae63bb0d0d85a513b4a60eff48a4e27765a",
+        1972957,
     ),
     "remote_skin_jpg.h": (
         "419611c5ff0713f1f5de2dd684d699f6d77238d5",
@@ -105,8 +105,8 @@ PINNED_SOURCES = {
 #: exact live binary targets (verified pilot reports)
 TARGETS = {
     "codex_webui": (
-        "e121a8ba7402bc7923273dd1dcba72912f3f3269d5d9f172aec7856a86c6de1c",
-        1097124,
+        "1fd443131c54a701f6340996de02ccbb204f5302dde39f48e7e37072594a1bb9",
+        1100180,
     ),
     "codex_bt_pair_agent": (
         "563c6c58a3629edfebd7ec30ebcf14e6384a2d84e89669b1d7c3d79c75b619c8",
