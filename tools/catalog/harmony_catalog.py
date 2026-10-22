@@ -80,6 +80,12 @@ class JsonClient:
         self._opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(self._jar))
         self._timeout = timeout
 
+    def __enter__(self) -> "JsonClient":
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        return None
+
     def cookies(self) -> dict[str, str]:
         return {c.name: c.value or "" for c in self._jar}
 
