@@ -15,6 +15,7 @@ import { changeNote, renderCommandForm, saveCommand, setMessage } from "./device
 import { LIMITS, normalizeRemoteCentralPath, remoteCentralCommands } from "./ir-model.js";
 import {
   DOC_LINKS,
+  describeCodeSet,
   fetchLibraryFile,
   filterLibraryIndex,
   formatSourceErrors,
@@ -209,12 +210,17 @@ export function openImportSheet({ device }) {
     const list = el("div", { className: "m-list import-results" });
     findState.matches.forEach((m) => {
       const btn = button("Preview", "btn-outlined btn-sm", () => previewLibraryEntry(m));
+      const detail = m.summary
+        ? `${m.source} · ${describeCodeSet(m.summary.rows).label}`
+        : m.summaryError
+          ? `${m.source} · couldn't load this file`
+          : m.source;
       list.appendChild(el("div", {
         className: "m-row",
         children: [
           el("span", { className: "m-row-text", children: [
             el("span", { className: "m-row-title mono", text: m.path }),
-            el("span", { className: "m-row-sub", text: `${m.source} · score ${m.score}` }),
+            el("span", { className: "m-row-sub", text: detail }),
           ] }),
           btn,
         ],
@@ -252,7 +258,11 @@ export function openImportSheet({ device }) {
   }
 
   async function doFindSearch() {
-    const q = [refs.findMfr.value, refs.findModel.value].map((s) => s.trim()).filter(Boolean).join(" ");
+    const q = {
+      manufacturer: refs.findMfr.value.trim(),
+      model: refs.findModel.value.trim(),
+      type: device.typeLabel || "",
+    };
     refs.findSearchBtn.disabled = true;
     findState.indexError = "";
     findState.sourceErrors = [];
@@ -264,13 +274,38 @@ export function openImportSheet({ device }) {
     try {
       const { entries, errors, skipped } = await loadLibraryIndex({ sources: ["irdb"] });
       findState.sourceErrors = errors;
-      const { matches, message: text } = filterLibraryIndex(entries, q, { sourceErrors: errors });
+      const { matches, totalMatches, message: text } = filterLibraryIndex(entries, q, { sourceErrors: errors });
       findState.matches = matches;
+      /* Annotate the best few code sets with what they actually contain
+         (discrete power? inputs? how many commands?) so the owner can pick
+         without previewing 40 files. Only the top rows are fetched. */
+      const annotated = matches.slice(0, 8);
+      await Promise.all(annotated.map(async (m) => {
+        try {
+          const text = await fetchLibraryFile(m);
+          const parsed = parseLibraryText(text, { filename: m.path, formatHint: "irdb-csv" });
+          m.summary = parsed;
+        } catch (error) {
+          m.summaryError = error.message || String(error);
+        }
+      }));
+      if (annotated.length) {
+        annotated.sort((a, b) =>
+          (describeCodeSet(b.summary?.rows ?? []).rank - describeCodeSet(a.summary?.rows ?? []).rank)
+          || b.score - a.score || a.path.localeCompare(b.path));
+        findState.matches = [...annotated, ...matches.slice(annotated.length)];
+      }
       /* Skipped rows describe the index, not a failed source, so they only add a
          note; the severity still follows the matches and the errors. */
-      const statusText = skipped
+      let statusText = skipped
         ? `${text} Skipped ${skipped} index entr${skipped === 1 ? "y" : "ies"} with unusable file names.`
         : text;
+      if (q.model && totalMatches) {
+        statusText +=
+          ` IRDB files code sets by maker, type and remote address, not by model — ` +
+          `code sets that match ${device.typeLabel || "this type"} of device come first. ` +
+          "Preview one, then try Power and an input before you rely on it.";
+      }
       setMessage(refs.findStatus, statusText, !matches.length || errors.length ? "warn" : "ok");
       renderFindResults();
     } catch (error) {
@@ -404,8 +439,11 @@ export function openImportSheet({ device }) {
       className: "import-panel",
       children: [
         el("p", { className: "sheet-text", text:
-          `Search the IRDB library for ${device.name}'s codes. The search runs in this browser, so the hub stays offline, ` +
-          "and nothing is saved until you import." }),
+          `Search the IRDB library for ${device.name}'s codes. IRDB files code sets by maker and type, not by model, ` +
+          `so code sets for ${device.typeLabel || "this type"} of device come first. The search runs in this browser, ` +
+          "so the hub stays offline, and nothing is saved until you import. " +
+          "Contains/accesses irdb by Simon Peter and contributors, used under permission. For licensing details and " +
+          "for information on how to contribute to the database, see https://github.com/probonopd/irdb" }),
         field("Manufacturer", refs.findMfr),
         field("Model", refs.findModel),
         el("div", { className: "import-actions", children: [refs.findSearchBtn] }),

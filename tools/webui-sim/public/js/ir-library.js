@@ -299,32 +299,106 @@ export function parseLibraryText(text, { filename = "", formatHint = "" } = {}) 
   };
 }
 
-/** Score a library path against free-text manufacturer/model query. */
+/* IRDB is keyed by brand / category / protocol address, never by model
+   (device-db.md §3). The search therefore ranks in that order: brand match
+   first, category match second, filename tokens last. Model fragments such
+   as "str" or "dg720" only reorder inside the brand+category group; they
+   never widen or narrow it. */
+
+function normalizeToken(value) {
+  return String(value || "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+function pathSegments(path) {
+  return String(path || "").split(/[/\\]+/).filter(Boolean);
+}
+
+/* Split "STR-DG720" into a compact form plus sub-prefixes so a partial
+   model in a filename can still score: ["strdg720", "str", "dg720"]. */
+function modelKeys(value) {
+  const raw = String(value || "").toLowerCase();
+  const parts = raw.split(/[^a-z0-9]+/).filter(Boolean);
+  const compact = normalizeToken(raw);
+  const keys = new Set();
+  if (compact) keys.add(compact);
+  for (const part of parts) if (part.length >= 2) keys.add(part);
+  return [...keys];
+}
+
+function brandMatches(pathBrand, manufacturer) {
+  const a = normalizeToken(pathBrand);
+  const b = normalizeToken(manufacturer);
+  if (!a || !b) return false;
+  return a === b || a.startsWith(b) || b.startsWith(a);
+}
+
+/* Category aliases between the device form's types and IRDB folders.
+   Keys are the normalized (alphanumeric-only) type strings. */
+const CATEGORY_KEYS = Object.freeze({
+  television: ["tv", "television", "plasma", "monitor", "video projector", "projector"],
+  tv: ["tv", "television", "plasma", "monitor"],
+  amplifier: ["receiver", "amplifier", "surround processor", "multi-zone receiver", "6 zone receiver", "pre-amplifier", "av receiver"],
+  mediaplayer: ["media player", "dvd player", "bluray player", "cd player", "dvr", "streaming"],
+  gameconsole: ["game console", "games console"],
+  homeappliance: [],
+});
+
+/** Score a library path against a structured manufacturer/type/model query. */
 export function scoreLibraryPath(path, query) {
-  const p = String(path || "").toLowerCase().replace(/[\\/_-]+/g, " ");
-  const tokens = String(query || "")
-    .toLowerCase()
-    .split(/[^a-z0-9]+/)
-    .filter((t) => t.length >= 2);
-  if (!tokens.length) return 0;
+  const segments = pathSegments(path);
+  const brand = segments[0] || "";
+  const category = segments[1] || "";
+  const filename = (segments[segments.length - 1] || "").replace(/\.csv$/i, "");
+
+  const isText = typeof query === "string";
+  const manufacturer = isText ? query : query?.manufacturer || "";
+  const type = isText ? "" : query?.type || "";
+  const model = isText ? "" : query?.model || "";
+
   let score = 0;
-  let hits = 0;
-  for (const t of tokens) {
-    if (p.includes(t)) {
-      hits += 1;
-      score += t.length >= 4 ? 12 : 6;
-      if (p.split(/\s+/).includes(t)) score += 4;
-    }
+  let brandHit = false;
+  let categoryHit = false;
+
+  if (String(manufacturer || "").trim()) {
+    if (!brandMatches(brand, manufacturer)) return -1;
+    brandHit = true;
+    score += 100;
   }
-  if (hits === 0) return -1;
-  if (hits === tokens.length) score += 20;
+  if (String(type || "").trim()) {
+    const aliases = CATEGORY_KEYS[normalizeToken(type)] || CATEGORY_KEYS[String(type).toLowerCase()] || [normalizeToken(type)];
+    categoryHit = aliases.some((alias) => normalizeToken(category) === normalizeToken(alias));
+    if (categoryHit) score += 60;
+  }
+  const filenameKey = normalizeToken(filename);
+  const categoryKey = normalizeToken(category);
+  for (const key of modelKeys(model)) {
+    if (!key) continue;
+    if (filenameKey.includes(key)) score += key.length >= 4 ? 30 : 15;
+    else if (categoryKey.includes(key)) score += 5;
+  }
+  /* Free-text fallback for direct callers: every token must appear
+     somewhere in the path (the old any-token match flooded results). */
+  if (isText && String(query || "").trim()) {
+    const p = segments.join(" ").toLowerCase();
+    const tokens = String(query).toLowerCase().split(/[^a-z0-9]+/).filter((t) => t.length >= 2);
+    if (!tokens.length) return 0;
+    for (const t of tokens) {
+      if (!p.includes(t)) return -1;
+    }
+    return tokens.length;
+  }
+  if (!brandHit && !categoryHit && score <= 0) return -1;
   return score;
 }
 
 export function filterLibraryIndex(entries, query, { limit = 40, sourceErrors = [] } = {}) {
-  const q = String(query || "").trim();
+  const isText = typeof query === "string";
+  const manufacturer = isText ? "" : String(query?.manufacturer || "").trim();
+  const type = isText ? "" : String(query?.type || "").trim();
+  const model = isText ? "" : String(query?.model || "").trim();
+  const textQuery = isText ? String(query || "").trim() : "";
   const incomplete = formatSourceErrors(sourceErrors);
-  if (!q) {
+  if ((isText && !textQuery) || (!isText && !manufacturer && !type && !model)) {
     return {
       matches: [],
       totalMatches: 0,
@@ -335,17 +409,18 @@ export function filterLibraryIndex(entries, query, { limit = 40, sourceErrors = 
   }
   const scored = [];
   for (const e of entries) {
-    const score = scoreLibraryPath(e.path, q);
+    const score = scoreLibraryPath(e.path, query);
     if (score < 0) continue;
     scored.push({ ...e, score });
   }
   scored.sort((a, b) => b.score - a.score || a.path.localeCompare(b.path));
   if (!scored.length) {
+    const label = isText ? textQuery : [manufacturer, model].filter(Boolean).join(" ") || type;
     return {
       matches: [],
       totalMatches: 0,
       message:
-        `No library files matched “${q}”. Spelling in open databases varies — try fewer words, ` +
+        `No library files matched “${label}”. Spelling in open databases varies — try fewer words, ` +
         "a different manufacturer spelling, or drop a code file instead." +
         (incomplete ? ` ${incomplete}` : ""),
       incomplete,
@@ -363,6 +438,28 @@ export function filterLibraryIndex(entries, query, { limit = 40, sourceErrors = 
     incomplete,
     sourceErrors: sourceErrors.slice(),
   };
+}
+
+/** Summarise what a previewed code set actually offers, for ranking rows. */
+export function describeCodeSet(rows) {
+  const list = Array.isArray(rows) ? rows : [];
+  const supportedRows = list.filter((r) => r?.supported && r.code);
+  const names = supportedRows.map((r) => normalizeToken(r.name));
+  const has = (...needles) => names.some((n) => needles.some((needle) => n.includes(needle)));
+  const hasDiscretePower = has("poweron") && has("poweroff");
+  const hasTogglePower = has("powertoggle") || (has("power") && !hasDiscretePower);
+  const inputs = supportedRows.filter((r) => normalizeToken(r.name).startsWith("input")).length;
+  const commands = supportedRows.length;
+  let rank = commands;
+  if (hasDiscretePower) rank += 1000;
+  else if (hasTogglePower) rank += 400;
+  rank += Math.min(inputs, 20) * 10;
+  const bits = [];
+  if (hasDiscretePower) bits.push("discrete power");
+  else if (hasTogglePower) bits.push("toggle power");
+  if (inputs) bits.push(`${inputs} input${inputs === 1 ? "" : "s"}`);
+  bits.push(`${commands} command${commands === 1 ? "" : "s"}`);
+  return { commands, inputs, hasDiscretePower, hasTogglePower, rank, label: bits.join(" · ") };
 }
 
 /** Human partial-failure copy when some sources load and others do not. */

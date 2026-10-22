@@ -745,11 +745,13 @@ check(
     !/\bloadLibraryIndex\s*\(/.test(findViewWithoutUserFetchHandlers)
 );
 check(
-  "device-import.js: fetchLibraryFile is invoked only from previewLibraryEntry",
+  "device-import.js: fetchLibraryFile is invoked only from previewLibraryEntry and the search annotation",
   Boolean(previewLibraryEntrySrc) &&
+    Boolean(doFindSearchSrc) &&
     /\bfetchLibraryFile\s*\(/.test(previewLibraryEntrySrc) &&
-    (findView.match(/\bfetchLibraryFile\s*\(/g) ?? []).length === 1 &&
-    !/\bfetchLibraryFile\s*\(/.test(findViewWithoutUserFetchHandlers)
+    /\bfetchLibraryFile\s*\(/.test(doFindSearchSrc) &&
+    (findView.match(/\bfetchLibraryFile\s*\(/g) ?? []).length === 2 &&
+    !/\bfetchLibraryFile\s*\(/.test(findViewWithoutUserFetchHandlers.replace(doFindSearchSrc, ""))
 );
 // Handler identity is the contract; CSS class names and loop identifiers are not.
 check(
@@ -930,6 +932,11 @@ function irdbReferenceBudgets(src) {
           role: "awaited call inside previewLibraryEntry",
           pattern: /\bawait\s+fetchLibraryFile\s*\(/,
           within: previewSpan,
+        },
+        {
+          role: "awaited call inside doFindSearch (top-match annotation)",
+          pattern: /\bawait\s+fetchLibraryFile\s*\(/,
+          within: doFindSearchSpan,
         },
       ],
     },

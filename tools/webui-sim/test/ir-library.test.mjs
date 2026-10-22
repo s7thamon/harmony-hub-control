@@ -11,6 +11,7 @@ import {
   fetchLibraryFile,
   irdbFileUrl,
   formatSourceErrors,
+  describeCodeSet,
   keyFromParts,
   resetLibraryCache,
   LIBRARY_SOURCES,
@@ -95,6 +96,52 @@ describe("search scoring", () => {
     assert.ok(scoreLibraryPath("LG/Television/OLED.csv", "lg oled") > scoreLibraryPath("Sony/AV/STR.csv", "lg oled"));
   });
 
+  it("ranks brand+category above brand-only, whatever the model says", () => {
+    const entries = [
+      { source: "irdb", path: "Sony/Boombox/100,-1.csv" },
+      { source: "irdb", path: "Sony/CD Player/1,-1.csv" },
+      { source: "irdb", path: "Sony/Receiver/26,66.csv" },
+      { source: "irdb", path: "Sony/Receiver/48,-1.csv" },
+      { source: "irdb", path: "Sony/TV/1,-1.csv" },
+    ];
+    const { matches } = filterLibraryIndex(entries, {
+      manufacturer: "Sony",
+      type: "Amplifier",
+      model: "STR-DG720",
+    });
+    assert.ok(matches.length >= 2);
+    assert.match(matches[0].path, /^Sony\/Receiver\//);
+    assert.match(matches[1].path, /^Sony\/Receiver\//);
+    assert.ok(matches[0].score > matches.at(-1).score);
+  });
+
+  it("never lets model fragments widen a brand search", () => {
+    const entries = [
+      { source: "irdb", path: "Sony/Boombox/100,-1.csv" },
+      { source: "irdb", path: "Sony/Receiver/48,-1.csv" },
+    ];
+    const { matches } = filterLibraryIndex(entries, { manufacturer: "Sony", model: "STR-DG720" });
+    /* No category hint: both stay, tied — the model must not promote one. */
+    assert.equal(matches.length, 2);
+    assert.equal(matches[0].score, matches[1].score);
+  });
+
+  it("rejects a wrong brand even when the model matches the filename", () => {
+    assert.equal(
+      scoreLibraryPath("Sony/Receiver/STR-DG720.csv", { manufacturer: "LG", model: "STR-DG720" }),
+      -1,
+    );
+  });
+
+  it("free-text search requires every token, so an exact model cannot flood", () => {
+    const entries = [
+      { source: "irdb", path: "Sony/Boombox/100,-1.csv" },
+      { source: "irdb", path: "Sony/Receiver/48,-1.csv" },
+    ];
+    assert.equal(filterLibraryIndex(entries, "Sony STR-DG720").matches.length, 0);
+    assert.ok(filterLibraryIndex(entries, "Sony Receiver").matches.length >= 1);
+  });
+
   it("returns an informative empty result for nonsense queries", () => {
     const entries = [
       { source: "irdb", path: "Samsung/TV/A.csv" },
@@ -115,6 +162,28 @@ describe("search scoring", () => {
     assert.ok(matches.length >= 1);
     assert.ok(matches[0].path.toLowerCase().includes("samsung"));
     assert.match(message, /Showing/);
+  });
+
+  it("summarises a code set by power, inputs and command count", () => {
+    const rows = [
+      { name: "PowerOn", supported: true, code: "x" },
+      { name: "PowerOff", supported: true, code: "x" },
+      { name: "InputHdmi1", supported: true, code: "x" },
+      { name: "InputHdmi2", supported: true, code: "x" },
+      { name: "VolumeUp", supported: true, code: "x" },
+      { name: "VolumeDown", supported: false, code: "" },
+    ];
+    const summary = describeCodeSet(rows);
+    assert.equal(summary.commands, 5);
+    assert.equal(summary.inputs, 2);
+    assert.equal(summary.hasDiscretePower, true);
+    assert.match(summary.label, /discrete power/);
+    assert.match(summary.label, /2 inputs/);
+
+    const toggleOnly = describeCodeSet([{ name: "Power", supported: true, code: "x" }]);
+    assert.equal(toggleOnly.hasDiscretePower, false);
+    assert.equal(toggleOnly.hasTogglePower, true);
+    assert.ok(summary.rank > toggleOnly.rank);
   });
 
   it("surfaces partial source failures in the search message", () => {
