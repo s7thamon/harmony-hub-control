@@ -139,7 +139,7 @@ test("filterForwardResponseHeaders strips WWW-Authenticate and Set-Cookie", () =
   assert.equal("Set-Cookie" in filtered, false);
 });
 
-test("scheme handler serves the 5 bundle files and forwards other paths with 401/502 handling, streaming and abort", async () => {
+test("scheme handler serves the 5 bundle files and forwards other paths with 401/502 handling, Content-Length framing and abort", async () => {
   const { dir } = makeTempShellDir();
   let lastReq = null;
   let nextStatus = 200;
@@ -153,6 +153,16 @@ test("scheme handler serves the 5 bundle files and forwards other paths with 401
   let upstreamAborted = false;
 
   const server = http.createServer((req, res) => {
+    const declaredLength = Number(req.headers["content-length"] ?? 0);
+    if (
+      req.method !== "GET" &&
+      req.method !== "HEAD" &&
+      (!Number.isInteger(declaredLength) || req.headers["transfer-encoding"])
+    ) {
+      res.writeHead(411, { "Content-Type": "application/json; charset=utf-8" });
+      res.end(JSON.stringify({ ok: false, error: "hub requires Content-Length" }));
+      return;
+    }
     const chunks = [];
     req.on("data", (c) => chunks.push(c));
     req.on("aborted", () => {
@@ -162,16 +172,47 @@ test("scheme handler serves the 5 bundle files and forwards other paths with 401
       if (!res.writableEnded) upstreamAborted = true;
     });
     req.on("end", async () => {
+      const body = Buffer.concat(chunks).toString("utf8");
       lastReq = {
         method: req.method,
         url: req.url,
         headers: req.headers,
-        body: Buffer.concat(chunks).toString("utf8"),
+        body,
       };
       if (holdOpenMs > 0) {
         await new Promise((r) => setTimeout(r, holdOpenMs));
       }
       if (res.destroyed) return;
+
+      if (declaredLength !== Buffer.byteLength(body)) {
+        res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ ok: false, error: "content-length mismatch" }));
+        return;
+      }
+      if (req.method === "POST" && req.url === "/api/activity-run") {
+        const params = new URLSearchParams(body);
+        if (!/^-?\d+$/.test(params.get("activityId") ?? "")) {
+          res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+          res.end(
+            JSON.stringify({
+              ok: false,
+              error: "activityId must be -1 or a non-negative integer",
+            })
+          );
+          return;
+        }
+      }
+      if (req.method === "POST" && req.url === "/api/ir-send") {
+        const params = new URLSearchParams(body);
+        if (!params.get("deviceId") || !params.get("command")) {
+          res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+          res.end(
+            JSON.stringify({ ok: false, error: "invalid IR command request" })
+          );
+          return;
+        }
+      }
+
       res.writeHead(nextStatus, nextHeaders);
       if (nextStatus === 304 || nextStatus === 204) {
         res.end();
@@ -259,18 +300,97 @@ test("scheme handler serves the 5 bundle files and forwards other paths with 401
     const res304 = await handler.handle(new Request("melodious://app/api/state?version=1"));
     assert.equal(res304.status, 304);
 
-    // 6. Streams POST body
+    // 6. Forwards form POST bodies with an exact Content-Length and no chunked encoding
     nextStatus = 200;
+    const activityBody = "activityId=123";
+    const activityRes = await handler.handle(
+      new Request("melodious://app/api/activity-run", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: activityBody,
+      })
+    );
+    assert.equal(activityRes.status, 200);
+    assert.equal(lastReq.method, "POST");
+    assert.equal(lastReq.body, activityBody);
+    assert.equal(lastReq.headers["content-length"], String(Buffer.byteLength(activityBody)));
+    assert.equal(lastReq.headers["transfer-encoding"], undefined);
+
+    const powerOffBody = "activityId=-1";
+    const powerOffRes = await handler.handle(
+      new Request("melodious://app/api/activity-run", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: powerOffBody,
+      })
+    );
+    assert.equal(powerOffRes.status, 200);
+    assert.equal(lastReq.body, powerOffBody);
+    assert.equal(lastReq.headers["content-length"], String(Buffer.byteLength(powerOffBody)));
+    assert.equal(lastReq.headers["transfer-encoding"], undefined);
+
+    const irBody = "deviceId=42&command=PowerOff";
     const postRes = await handler.handle(
       new Request("melodious://app/api/ir-send", {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: "deviceId=1&command=PowerOn",
+        body: irBody,
       })
     );
     assert.equal(postRes.status, 200);
     assert.equal(lastReq.method, "POST");
-    assert.equal(lastReq.body, "deviceId=1&command=PowerOn");
+    assert.equal(lastReq.body, irBody);
+    assert.equal(lastReq.headers["content-length"], String(Buffer.byteLength(irBody)));
+    assert.equal(lastReq.headers["transfer-encoding"], undefined);
+
+    // 6a. An empty POST still carries Content-Length: 0
+    const emptyRes = await handler.handle(
+      new Request("melodious://app/api/ir-cancel", { method: "POST" })
+    );
+    assert.equal(emptyRes.status, 200);
+    assert.equal(lastReq.body, "");
+    assert.equal(lastReq.headers["content-length"], "0");
+    assert.equal(lastReq.headers["transfer-encoding"], undefined);
+
+    // 6b. Forwards JSON POST bodies with an exact Content-Length
+    const jsonBody = '{"deviceId":"42","settings":{"powerType":"toggle"}}';
+    const jsonRes = await handler.handle(
+      new Request("melodious://app/api/device-settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: jsonBody,
+      })
+    );
+    assert.equal(jsonRes.status, 200);
+    assert.equal(lastReq.body, jsonBody);
+    assert.equal(lastReq.headers["content-type"], "application/json");
+    assert.equal(lastReq.headers["content-length"], String(Buffer.byteLength(jsonBody)));
+    assert.equal(lastReq.headers["transfer-encoding"], undefined);
+
+    // 6c. Rejects bodies over the forwarding limit
+    const tooBigBody = "x".repeat(64 * 1024 * 1024 + 1);
+    const tooBigRes = await handler.handle(
+      new Request("melodious://app/api/device-settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: tooBigBody,
+      })
+    );
+    assert.equal(tooBigRes.status, 413);
+    assert.equal(lastReq.body, jsonBody);
+
+    // 6d. A pre-aborted POST body settles as 499 instead of a body read error
+    const acPre = new AbortController();
+    acPre.abort();
+    const preAbortedRes = await handler.handle(
+      new Request("melodious://app/api/ir-send", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: "deviceId=42&command=PowerOff",
+        signal: acPre.signal,
+      })
+    );
+    assert.equal(preAbortedRes.status, 499);
 
     // 7. Aborting page request aborts upstream request
     holdOpenMs = 500;

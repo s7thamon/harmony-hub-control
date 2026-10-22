@@ -8,6 +8,7 @@ const { Readable } = require("node:stream");
 
 const CONNECT_TIMEOUT_MS = 10_000;
 const TOTAL_TIMEOUT_MS = 120_000;
+const MAX_FORWARD_BODY_BYTES = 64 * 1024 * 1024;
 const SCHEME_PREFIX = "melodious://app";
 
 function computeInlineScriptSha256(html) {
@@ -207,6 +208,33 @@ function extractRawTargetFromUrl(rawUrl) {
   return validateForwardPath(withoutHash);
 }
 
+async function readRequestBody(request, maxBytes = MAX_FORWARD_BODY_BYTES) {
+  if (request.signal?.aborted) return Buffer.alloc(0);
+  if (!request.body && typeof request.arrayBuffer !== "function") {
+    return Buffer.alloc(0);
+  }
+
+  if (typeof request.arrayBuffer === "function") {
+    const value = await request.arrayBuffer();
+    const body = Buffer.from(value);
+    if (body.length > maxBytes) {
+      throw new Error("Request body is too large for this hub");
+    }
+    return body;
+  }
+
+  const chunks = [];
+  let total = 0;
+  for await (const chunk of request.body) {
+    if (request.signal?.aborted) throw new Error("Request aborted");
+    const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    total += buf.length;
+    if (total > maxBytes) throw new Error("Request body is too large for this hub");
+    chunks.push(buf);
+  }
+  return Buffer.concat(chunks, total);
+}
+
 function forwardToHub({
   request,
   targetPath,
@@ -218,162 +246,176 @@ function forwardToHub({
   onHubAuthRequired,
   onHubUnreachable,
 }) {
-  return new Promise((resolve) => {
+  return (async () => {
     if (!hub || !hub.host || !hub.port) {
       onHubUnreachable?.({ host: "", port: 0, path: targetPath });
-      resolve(jsonResponse(502, { ok: false, error: "No hub configured" }));
-      return;
+      return jsonResponse(502, { ok: false, error: "No hub configured" });
     }
 
+    const method = String(request.method || "GET").toUpperCase();
     const { headers, hadExplicitAuth } = buildForwardRequestHeaders(
       request.headers,
       savedAuthHeader
     );
-    const method = String(request.method || "GET").toUpperCase();
 
-    let settled = false;
-    let headersReceived = false;
-    let connectTimer = null;
-    let totalTimer = null;
-
-    const clearTimers = () => {
-      if (connectTimer) {
-        clearTimeout(connectTimer);
-        connectTimer = null;
+    let body;
+    if (method !== "GET" && method !== "HEAD") {
+      if (request.signal?.aborted) {
+        return jsonResponse(499, { ok: false, error: "Request aborted" });
       }
-      if (totalTimer) {
-        clearTimeout(totalTimer);
-        totalTimer = null;
+      try {
+        body = await readRequestBody(request);
+      } catch (err) {
+        if (request.signal?.aborted || /aborted/i.test(err?.message || "")) {
+          return jsonResponse(499, { ok: false, error: "Request aborted" });
+        }
+        return jsonResponse(413, { ok: false, error: err.message || "Request body is too large for this hub" });
       }
-    };
-
-    const failUpstream = (reason) => {
-      if (settled) return;
-      settled = true;
-      clearTimers();
-      if (!request.signal?.aborted) {
-        onHubUnreachable?.({
-          host: hub.host,
-          port: hub.port,
-          path: targetPath,
-          error: reason,
-        });
+      if (request.signal?.aborted) {
+        return jsonResponse(499, { ok: false, error: "Request aborted" });
       }
-      resolve(jsonResponse(502, { ok: false, error: "Hub not reachable" }));
-    };
+    } else {
+      body = Buffer.alloc(0);
+    }
 
-    const upReq = requestImpl(
-      {
-        host: hub.host,
-        port: hub.port,
-        path: targetPath,
-        method,
-        headers,
-      },
-      (upRes) => {
-        headersReceived = true;
+    return new Promise((resolve) => {
+      // codex_webui reads a body only by Content-Length (no chunked parsing),
+      // so every non-GET request carries an explicit length, even 0.
+      if (method !== "GET" && method !== "HEAD") {
+        headers["Content-Length"] = String(body.length);
+      }
+
+      let settled = false;
+      let headersReceived = false;
+      let connectTimer = null;
+      let totalTimer = null;
+
+      const clearTimers = () => {
         if (connectTimer) {
           clearTimeout(connectTimer);
           connectTimer = null;
         }
-        upRes.once("close", clearTimers);
-        upRes.once("end", clearTimers);
-        upRes.once("error", clearTimers);
+        if (totalTimer) {
+          clearTimeout(totalTimer);
+          totalTimer = null;
+        }
+      };
 
-        const status = upRes.statusCode || 502;
-        if (status === 401 && !hadExplicitAuth) {
-          onHubAuthRequired?.({
+      const failUpstream = (reason) => {
+        if (settled) return;
+        settled = true;
+        clearTimers();
+        if (!request.signal?.aborted) {
+          onHubUnreachable?.({
             host: hub.host,
             port: hub.port,
             path: targetPath,
+            error: reason,
           });
         }
-
-        const outHeaders = filterForwardResponseHeaders(upRes.headers);
-        settled = true;
-
-        if (status === 204 || status === 205 || status === 304 || method === "HEAD") {
-          upRes.resume();
-          resolve(new Response(null, { status, headers: outHeaders }));
-          return;
-        }
-
-        const webStream = Readable.toWeb(upRes);
-        resolve(new Response(webStream, { status, headers: outHeaders }));
-      }
-    );
-
-    upReq.once("socket", (socket) => {
-      const onConnect = () => {
-        if (connectTimer) {
-          clearTimeout(connectTimer);
-          connectTimer = null;
-        }
+        resolve(jsonResponse(502, { ok: false, error: "Hub not reachable" }));
       };
-      if (socket && socket.connecting === false) {
-        onConnect();
-      } else if (socket && typeof socket.once === "function") {
-        socket.once("connect", onConnect);
-      }
-    });
 
-    connectTimer = setTimeout(() => {
-      if (!headersReceived) {
-        upReq.destroy(new Error("Connect timeout"));
-        failUpstream("connect_timeout");
-      }
-    }, connectTimeoutMs);
+      const upReq = requestImpl(
+        {
+          host: hub.host,
+          port: hub.port,
+          path: targetPath,
+          method,
+          headers,
+        },
+        (upRes) => {
+          headersReceived = true;
+          if (connectTimer) {
+            clearTimeout(connectTimer);
+            connectTimer = null;
+          }
+          upRes.once("close", clearTimers);
+          upRes.once("end", clearTimers);
+          upRes.once("error", clearTimers);
 
-    totalTimer = setTimeout(() => {
-      upReq.destroy(new Error("Total request timeout"));
-      failUpstream("total_timeout");
-    }, totalTimeoutMs);
+          const status = upRes.statusCode || 502;
+          if (status === 401 && !hadExplicitAuth) {
+            onHubAuthRequired?.({
+              host: hub.host,
+              port: hub.port,
+              path: targetPath,
+            });
+          }
 
-    upReq.on("error", (err) => {
-      failUpstream(err?.message || "request_error");
-    });
+          const outHeaders = filterForwardResponseHeaders(upRes.headers);
+          settled = true;
 
-    if (request.signal) {
-      if (request.signal.aborted) {
-        clearTimers();
-        upReq.destroy();
-        settled = true;
-        resolve(jsonResponse(499, { ok: false, error: "Request aborted" }));
-        return;
-      }
-      request.signal.addEventListener(
-        "abort",
-        () => {
+          if (status === 204 || status === 205 || status === 304 || method === "HEAD") {
+            upRes.resume();
+            resolve(new Response(null, { status, headers: outHeaders }));
+            return;
+          }
+
+          const webStream = Readable.toWeb(upRes);
+          resolve(new Response(webStream, { status, headers: outHeaders }));
+        }
+      );
+
+      upReq.once("socket", (socket) => {
+        const onConnect = () => {
+          if (connectTimer) {
+            clearTimeout(connectTimer);
+            connectTimer = null;
+          }
+        };
+        if (socket && socket.connecting === false) {
+          onConnect();
+        } else if (socket && typeof socket.once === "function") {
+          socket.once("connect", onConnect);
+        }
+      });
+
+      connectTimer = setTimeout(() => {
+        if (!headersReceived) {
+          upReq.destroy(new Error("Connect timeout"));
+          failUpstream("connect_timeout");
+        }
+      }, connectTimeoutMs);
+
+      totalTimer = setTimeout(() => {
+        upReq.destroy(new Error("Total request timeout"));
+        failUpstream("total_timeout");
+      }, totalTimeoutMs);
+
+      upReq.on("error", (err) => {
+        failUpstream(err?.message || "request_error");
+      });
+
+      if (request.signal) {
+        if (request.signal.aborted) {
           clearTimers();
           upReq.destroy();
-          if (!settled) {
-            settled = true;
-            resolve(jsonResponse(499, { ok: false, error: "Request aborted" }));
-          }
-        },
-        { once: true }
-      );
-    }
-
-    if (request.body && method !== "GET" && method !== "HEAD") {
-      (async () => {
-        try {
-          for await (const chunk of request.body) {
-            if (request.signal?.aborted || upReq.destroyed) break;
-            const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-            if (!upReq.write(buf)) {
-              await new Promise((r) => upReq.once("drain", r));
-            }
-          }
-          if (!upReq.destroyed) upReq.end();
-        } catch {
-          if (!upReq.destroyed) upReq.destroy();
+          settled = true;
+          resolve(jsonResponse(499, { ok: false, error: "Request aborted" }));
+          return;
         }
-      })();
-    } else {
-      upReq.end();
-    }
-  });
+        request.signal.addEventListener(
+          "abort",
+          () => {
+            clearTimers();
+            upReq.destroy();
+            if (!settled) {
+              settled = true;
+              resolve(jsonResponse(499, { ok: false, error: "Request aborted" }));
+            }
+          },
+          { once: true }
+        );
+      }
+
+      if (body.length > 0) {
+        upReq.end(body);
+      } else {
+        upReq.end();
+      }
+    });
+  })();
 }
 
 function createSchemeHandler({
@@ -459,6 +501,7 @@ function createSchemeHandler({
 module.exports = {
   CONNECT_TIMEOUT_MS,
   TOTAL_TIMEOUT_MS,
+  MAX_FORWARD_BODY_BYTES,
   computeInlineScriptSha256,
   buildCsp,
   validateForwardPath,

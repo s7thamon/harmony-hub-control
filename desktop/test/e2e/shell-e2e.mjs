@@ -111,6 +111,17 @@ function startAuthProxyServer(simPort) {
   const expectedHeader = `Basic ${Buffer.from("owner:hubpass", "utf8").toString("base64")}`;
 
   const server = http.createServer((req, res) => {
+    // Frame bodies like codex_webui: it reads a body only by Content-Length
+    // and never parses chunked encoding, so a chunked POST arrives empty.
+    if (
+      req.method !== "GET" &&
+      req.method !== "HEAD" &&
+      (req.headers["content-length"] == null || req.headers["transfer-encoding"])
+    ) {
+      res.writeHead(411, { "Content-Type": "application/json; charset=utf-8" });
+      res.end(JSON.stringify({ ok: false, error: "hub requires Content-Length" }));
+      return;
+    }
     if (requireAuth && req.headers.authorization !== expectedHeader) {
       res.writeHead(401, {
         "Content-Type": "application/json; charset=utf-8",
@@ -409,6 +420,30 @@ test("Playwright _electron end-to-end shell suite against webui-sim", async () =
       return res.status;
     });
     assert.equal(statusAfterAuth, 200);
+
+    // Form POSTs from the page reach the hub with a Content-Length body
+    // (activity start and power off, as js/api.js sends them).
+    const runReplies = await page.evaluate(async () => {
+      const config = await (await fetch("/api/activity-config")).json();
+      const first = (config.activityList?.Activities || []).find(
+        (a) => String(a["Id-"] ?? a.Id) !== "-1"
+      );
+      const out = [];
+      for (const id of ["-1", String(first["Id-"] ?? first.Id)]) {
+        const res = await fetch("/api/activity-run", {
+          method: "POST",
+          cache: "no-store",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams({ activityId: id }).toString(),
+        });
+        out.push({ status: res.status, body: await res.json() });
+      }
+      return out;
+    });
+    for (const reply of runReplies) {
+      assert.equal(reply.status, 200, JSON.stringify(reply.body));
+      assert.equal(reply.body.ok, true, JSON.stringify(reply.body));
+    }
 
     // 6. Navigation to another origin is cancelled; https: window.open goes to shell.openExternal
     await electronApp.evaluate(() => {
