@@ -141,6 +141,9 @@ emoji icons.
 - A key fires when the finger lifts. Sliding off cancels it.
 - A key with a long-press action fires that action after 500 ms instead.
   Those keys carry a small dot.
+- Volume, channel and the D-pad (unless they have a long-press action) fire on
+  touch-down instead. Held past 380 ms, they repeat until the finger lifts or
+  slides off: the hub's native press-and-hold, kept alive every 200 ms.
 - Menu or Exit is labelled "Home" when it really sends Home.
 - Unmapped keys are dimmed and inert.
 - Feedback: the pressed key brightens, phones that can vibrate tick, and a

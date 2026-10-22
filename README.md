@@ -66,8 +66,8 @@ Melodious has three parts:
 ### Control it your way
 
 - **The web app** on any phone or computer, served by the hub.
-- **The Android app**, with a touchpad, press and hold, a sleep timer,
-  lock-screen controls, a home-screen widget and a Quick Settings tile.
+- **The Android app**, with a touchpad, a sleep timer, lock-screen
+  controls, a home-screen widget and a Quick Settings tile.
 - **A Bluetooth keyboard**: the hub pairs with a TV, streaming box or computer
   as a keyboard, so you can type searches and passwords from your phone, and
   run saved keystroke scripts.
@@ -236,7 +236,10 @@ bookmark it.
 - A status line shows what each key sends, as "key → device · command".
 
 Keys fire when you lift your finger, and sliding off cancels. A key with a
-hold action fires it after 500 ms. Keys the activity doesn't use are dimmed.
+hold action fires it after 500 ms. Volume, channel and the D-pad fire as soon
+as you touch them and repeat while you hold them, the way a Harmony remote
+does: the hub keeps the IR going until you let go. Keys the activity doesn't
+use are dimmed.
 
 <table>
 <tr><td align="center"><img src="docs/screenshots/web/remote.png" alt="The web app's remote with an activity running" width="200"><br><sub>Remote</sub></td><td align="center"><img src="docs/screenshots/web/remote-more-keys.png" alt="The More keys sheet with on-screen buttons, colour keys and the number pad" width="200"><br><sub>More keys</sub></td><td align="center"><img src="docs/screenshots/web/remote-fix-it.png" alt="The Fix it sheet with power and input resends for each device" width="200"><br><sub>Fix it</sub></td><td align="center"><img src="docs/screenshots/web/remote-switch.png" alt="The Switch activity sheet with Turn everything off" width="200"><br><sub>Switch activity</sub></td></tr>
@@ -370,8 +373,7 @@ hold, and the hub's sleep timer and help.
 What the app adds:
 
 - **Touchpad**: a remote mode where you swipe to move and tap for OK.
-- **Press and hold**: volume, channel and the D-pad repeat while held, and the
-  hub pushes state changes to the app.
+- **Live state**: the hub pushes state changes to the app.
 - **Sleep timer**: the hub turns everything off after 15 minutes to 2 hours,
   even if the phone is off.
 - **Fix it → Resend everything**: the hub checks each device and resends only

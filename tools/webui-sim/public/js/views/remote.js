@@ -34,6 +34,7 @@ import {
   flash,
   moreKeysMarkup,
   padMarkup,
+  repeatCommand,
   sendCommand,
   wireKeys,
   wireMoreKeys,
@@ -254,6 +255,16 @@ export function createRemoteView(section) {
     sendAction(action, which === "hold" ? `${entry.label} (held)` : entry.label, el);
   }
 
+  function repeatKey(entry, el) {
+    flash(el);
+    return repeatCommand(entry.press, {
+      label: entry.label,
+      activityId: ctx?.activity ? String(ctx.activity["Id-"]) : undefined,
+      status: setStatus,
+      note: sendNote,
+    });
+  }
+
   async function start(id) {
     vibrate();
     previewId = "";
@@ -281,7 +292,7 @@ export function createRemoteView(section) {
       onClose: () => { if (sheet === opened) sheet = null; },
       render: (content) => {
         content.innerHTML = moreKeysMarkup(ctx.keys, { title: hub.activityName(ctx.activity), softButtons: ctx.soft });
-        wireMoreKeys(content, { source: panelSource, send: sendAction, onPress: pressKey });
+        wireMoreKeys(content, { source: panelSource, send: sendAction, onPress: pressKey, onRepeat: repeatKey });
       },
     });
     sheet = opened;
@@ -456,6 +467,7 @@ export function createRemoteView(section) {
   wireKeys(root, {
     keyFor: (k) => ctx?.keys.get(k) ?? null,
     onPress: pressKey,
+    onRepeat: repeatKey,
     onPreview: (entry) => {
       if (entry) setStatus(describe(entry.label, entry.press), "preview");
     },

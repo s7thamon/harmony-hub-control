@@ -2,11 +2,14 @@
    the Buttons surface, the "More keys" content, the all-commands list, key
    wiring, and sending (with the send log). Mirrors the app's RemoteKeys and
    RemoteSurfaces: keys fire when the finger lifts; a key with a long-press
-   action fires that action after 500 ms instead; unmapped keys are dimmed. */
+   action fires that action after 500 ms instead; volume, channel and the
+   D-pad fire on touch-down and, held, repeat until let go or slid off
+   (key-repeat.js); unmapped keys are dimmed. */
 
 import * as api from "../api.js";
 import * as hub from "../state.js";
 import { escapeHtml, icon, snackbar, vibrate } from "../ui/shell.js";
+import { MAX_REPEAT_MS, REPEATABLE_KEYS, startRepeat } from "./key-repeat.js";
 import { KEY_LABELS, sendsHome } from "./remote-model.js";
 
 const HOLD_MS = 500;
@@ -73,6 +76,61 @@ export async function sendCommand(action, { label, activityId, status, note } = 
     addLog({ target: `${hub.deviceName(action.deviceId)} · ${action.command}`, note: message, ok: false });
     return false;
   }
+}
+
+/**
+ * Send one command for as long as its key is held (key-repeat.js): a quick
+ * tap sends it once, a longer hold repeats it. Returns stop(), or null if
+ * the action can't be held. Logged once; a failure shows like a failed send.
+ */
+export function repeatCommand(action, { label, activityId, status, note } = {}) {
+  if (!action?.deviceId || !action?.command) return null;
+  const line = describe(label ?? action.command, action);
+  const target = `${hub.deviceName(action.deviceId)} · ${action.command}`;
+  vibrate();
+  status?.(line, "sending");
+  let ended = false;
+  let sent = false;
+  const stop = startRepeat(
+    (which, holdId) =>
+      api.irSend({
+        deviceId: action.deviceId,
+        command: action.command,
+        functionId: action.functionId,
+        activityId,
+        status: which,
+        holdId,
+      }).then((reply) => {
+        if (which === "press") {
+          sent = true;
+          const extra = note ? note() : "";
+          addLog({ target, note: extra || "sent", ok: true });
+        }
+        return reply;
+      }),
+    {
+      onEnd: (error, reason) => {
+        ended = true;
+        if (reason === "superseded") return; // the newer key reports itself
+        if (reason !== "failed") {
+          const why = reason === "cap" ? `stopped after ${MAX_REPEAT_MS / 1000} s` : error?.message || "hold ended";
+          status?.(`${line} · ${why}`, "ok");
+          return;
+        }
+        const message = error?.message || "network error";
+        status?.(`${line} · ${message}`, "error");
+        snackbar(`Couldn't send ${action.command} to ${hub.deviceName(action.deviceId)} — ${message}`, { error: true });
+        addLog({ target, note: message, ok: false });
+      },
+    },
+  );
+  return () => {
+    stop().then(() => {
+      if (ended || !sent) return;
+      const extra = note ? note() : "";
+      status?.(extra ? `${line} · ${extra}` : line, "ok");
+    });
+  };
 }
 
 /* -- Markup ------------------------------------------------------------------- */
@@ -229,8 +287,8 @@ onSendLog(() => {
  * { keys, softButtons, devices, title }; `send(action, label, el)` sends.
  * Pass keyEvents: false when an ancestor already wires the keys.
  */
-export function wireMoreKeys(panel, { source, send, onPress, keyEvents = true }) {
-  if (keyEvents) wireKeys(panel, { keyFor: (k) => source()?.keys.get(k) ?? null, onPress });
+export function wireMoreKeys(panel, { source, send, onPress, onRepeat, keyEvents = true }) {
+  if (keyEvents) wireKeys(panel, { keyFor: (k) => source()?.keys.get(k) ?? null, onPress, onRepeat });
   panel.addEventListener("click", (event) => {
     const src = source();
     if (!src) return;
@@ -282,15 +340,27 @@ export function wireMoreKeys(panel, { source, send, onPress, keyEvents = true })
  * Wire press / long-press on every [data-key] inside root.
  * keyFor(key) returns the resolved entry; onPress(entry, "press"|"hold", el)
  * sends it; onPreview(entry|null) shows what a key would send (hover, focus).
+ * onRepeat(entry, el), when given, makes the repeatable keys (volume,
+ * channel, D-pad) without a long-press action fire on touch-down as a hold
+ * that repeats until let go; it returns a function that ends the hold (or
+ * null when the key can't be held, and it is sent once instead).
  */
-export function wireKeys(root, { keyFor, onPress, onPreview }) {
+export function wireKeys(root, { keyFor, onPress, onPreview, onRepeat }) {
   let active = null;
 
+  // While a key is down, a hidden page or a lost window lets it go: a key
+  // must never keep repeating where nobody can see it.
+  const onHidden = () => {
+    if (document.hidden) clear();
+  };
   const clear = () => {
     if (!active) return;
     clearTimeout(active.timer);
+    active.stopRepeat?.();
     active.el.classList.remove("is-pressed");
     active = null;
+    window.removeEventListener("blur", clear);
+    document.removeEventListener("visibilitychange", onHidden);
   };
 
   root.addEventListener("pointerdown", (event) => {
@@ -301,9 +371,16 @@ export function wireKeys(root, { keyFor, onPress, onPreview }) {
     clear();
     el.classList.add("is-pressed");
     el.setPointerCapture?.(event.pointerId);
-    active = { el, entry, pointerId: event.pointerId, held: false, timer: null };
-    if (entry.hold) {
-      const pressed = active;
+    active = { el, entry, pointerId: event.pointerId, held: false, timer: null, stopRepeat: null };
+    window.addEventListener("blur", clear);
+    document.addEventListener("visibilitychange", onHidden);
+    const pressed = active;
+    if (!entry.hold && onRepeat && REPEATABLE_KEYS.has(el.dataset.key)) {
+      // Like the app: fire now, and keep going while the finger stays down.
+      pressed.held = true;
+      pressed.stopRepeat = onRepeat(entry, el);
+      if (!pressed.stopRepeat) onPress(entry, "press", el);
+    } else if (entry.hold) {
       pressed.timer = setTimeout(() => {
         if (active !== pressed) return;
         pressed.held = true;
@@ -325,6 +402,13 @@ export function wireKeys(root, { keyFor, onPress, onPreview }) {
   });
 
   root.addEventListener("pointercancel", clear);
+
+  // Sliding off a held repeat key lets it go, as in the app.
+  root.addEventListener("pointermove", (event) => {
+    if (!active || event.pointerId !== active.pointerId || !active.stopRepeat) return;
+    const box = active.el.getBoundingClientRect();
+    if (event.clientX < box.left || event.clientX > box.right || event.clientY < box.top || event.clientY > box.bottom) clear();
+  });
 
   // Keyboard activation (Enter / Space) arrives as a click with no pointer.
   root.addEventListener("click", (event) => {

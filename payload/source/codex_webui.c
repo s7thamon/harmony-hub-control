@@ -10,6 +10,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#include <sys/file.h>
 #include <sys/select.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
@@ -4446,6 +4447,12 @@ static int ensure_ir_bluetooth_connection(const char *device_id, char *detail, s
     return 1;
 }
 
+/* The holdaction "action" value: an IRCommand, as a JSON string inside the
+ * params JSON (so its quotes are escaped). */
+static void format_ir_action(char *buf, size_t len, const char *device_id, const char *command) {
+    snprintf(buf, len, "{\\\"type\\\":\\\"IRCommand\\\",\\\"deviceId\\\":\\\"%s\\\",\\\"command\\\":\\\"%s\\\"}", device_id, command);
+}
+
 static void send_ir_command_action_ex(const char *device_id, const char *command, const char *source, const char *run_id, char *out, size_t outlen) {
     char hub_id[64];
     char action[512], params[768], esc_id[128], esc_params[1024], cmd[1400];
@@ -4466,7 +4473,7 @@ static void send_ir_command_action_ex(const char *device_id, const char *command
     if (bt_connection > 0) {
         log_ir_note_event("bt_preconnect", source, run_id, bt_detail);
     }
-    snprintf(action, sizeof(action), "{\\\"type\\\":\\\"IRCommand\\\",\\\"deviceId\\\":\\\"%s\\\",\\\"command\\\":\\\"%s\\\"}", device_id, command);
+    format_ir_action(action, sizeof(action), device_id, command);
     snprintf(params, sizeof(params), "{\"status\":\"pressrelease\",\"count\":1,\"action\":\"%s\"}", action);
     shell_escape_single(hub_id, esc_id, sizeof(esc_id));
     shell_escape_single(params, esc_params, sizeof(esc_params));
@@ -4477,6 +4484,666 @@ static void send_ir_command_action_ex(const char *device_id, const char *command
 
 static void send_ir_command_action(const char *device_id, const char *command, char *out, size_t outlen) {
     send_ir_command_action_ex(device_id, command, "webui", "", out, outlen);
+}
+
+/* -- Hold-to-repeat -----------------------------------------------------------
+ * The engine's holdaction takes status press (start the IR; the hardware
+ * keeps repeating it), hold (a heartbeat: the hardware stops by itself if
+ * none arrives within 500 ms) and release (finish).  These must reach the
+ * engine in order, so one holder process per hold owns a single engine
+ * WebSocket (the connection codex_hbus makes, kept open) and sends all three.
+ * The browser only drives a lease:
+ *   press    starts the holder, which does the same Bluetooth pre-connect and
+ *            protocol repair as a tap, sends press and answers once it is out;
+ *   hold     keeps the lease alive (a byte appended to the lease file, every
+ *            200 ms); the holder sends the engine a heartbeat every 200 ms
+ *            from 380 ms after the press, as the app does;
+ *   release  ends it.  So does a lease left alone for 700 ms (closed tab,
+ *            lost Wi-Fi) and a 30 s cap.  Release goes out at least 170 ms
+ *            after press, the engine's own spacing for a tap.
+ * A connection failure or an engine refusal comes back as 502 (left in
+ * <id>.error when it happens mid-hold); a hold that has ended answers 410
+ * with the reason (<id>.ended).  One hold at a time: a new press releases
+ * any other, and a press taken over before it went out answers 410. */
+#define HOLD_DIR "/var/volatile/codex-hold"
+#define HOLD_REPEAT_AFTER_MS 380
+#define HOLD_HEARTBEAT_MS 200
+#define HOLD_LEASE_MS 700
+#define HOLD_MAX_MS 30000
+#define HOLD_MIN_PRESS_MS 170
+#define HOLD_PRESS_WAIT_MS 15000
+#define HOLD_REFUSAL_WAIT_MS 150
+
+static long long hold_now_ms(void) {
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    return (long long)tv.tv_sec * 1000LL + tv.tv_usec / 1000;
+}
+
+static int hold_id_valid(const char *id) {
+    size_t n = strlen(id), i;
+    if (n < 8 || n > 40) return 0;
+    for (i = 0; i < n; i++) {
+        if (!isalnum((unsigned char)id[i])) return 0;
+    }
+    return 1;
+}
+
+static void hold_path(char *out, size_t len, const char *id, const char *ext) {
+    snprintf(out, len, "%s/%s.%s", HOLD_DIR, id, ext);
+}
+
+static int hold_file_exists(const char *id, const char *ext) {
+    char path[160];
+    struct stat st;
+    hold_path(path, sizeof(path), id, ext);
+    return stat(path, &st) == 0;
+}
+
+static void hold_write_file(const char *id, const char *ext, const char *text) {
+    char path[160];
+    FILE *f;
+    hold_path(path, sizeof(path), id, ext);
+    f = fopen(path, "a");
+    if (!f) return;
+    fputs(text, f);
+    fclose(f);
+}
+
+static long hold_file_size(const char *id, const char *ext) {
+    char path[160];
+    struct stat st;
+    hold_path(path, sizeof(path), id, ext);
+    return stat(path, &st) == 0 ? (long)st.st_size : -1;
+}
+
+static void hold_unlink(const char *id, const char *ext) {
+    char path[160];
+    hold_path(path, sizeof(path), id, ext);
+    unlink(path);
+}
+
+/* Seconds since the hold file was last written, or -1 if it's missing. */
+static long hold_file_age_s(const char *id, const char *ext) {
+    char path[160];
+    struct stat st;
+    hold_path(path, sizeof(path), id, ext);
+    return stat(path, &st) == 0 ? (long)(time(NULL) - st.st_mtime) : -1;
+}
+
+/* Is this hold's holder still running?  A holder killed mid-hold (a
+ * restart of codex_webui kills its children) leaves its lease behind: that
+ * one is cleaned up instead.  A lease without a pid yet is a holder still
+ * starting, unless it is old. */
+static int hold_live(const char *id) {
+    char path[160], text[24] = "";
+    FILE *f;
+    long pid = 0;
+    if (!hold_file_exists(id, "lease")) return 0;
+    hold_path(path, sizeof(path), id, "pid");
+    f = fopen(path, "r");
+    if (f) {
+        if (fgets(text, sizeof(text), f)) pid = atol(text);
+        fclose(f);
+    }
+    if (pid > 0 ? kill((pid_t)pid, 0) == 0 || errno == EPERM : hold_file_age_s(id, "lease") <= 5) return 1;
+    hold_unlink(id, "lease");
+    hold_unlink(id, "release");
+    hold_unlink(id, "pid");
+    return 0;
+}
+
+/* A note no browser has come back for in 10 s. */
+static int hold_file_stale(const char *id, const char *ext) {
+    char path[160];
+    struct stat st;
+    hold_path(path, sizeof(path), id, ext);
+    return stat(path, &st) == 0 && time(NULL) - st.st_mtime > 10;
+}
+
+/* Ask every other live hold to release, and drop stale notes.  Returns how
+ * many holds are still live besides keep_id. */
+static int hold_release_others(const char *keep_id) {
+    DIR *d = opendir(HOLD_DIR);
+    struct dirent *e;
+    int live = 0;
+    if (!d) return 0;
+    while ((e = readdir(d)) != NULL) {
+        char id[64], *dot;
+        snprintf(id, sizeof(id), "%s", e->d_name);
+        dot = strrchr(id, '.');
+        if (!dot) continue;
+        *dot = 0;
+        if (!hold_id_valid(id) || strcmp(id, keep_id) == 0) continue;
+        if (strcmp(dot + 1, "lease") == 0) {
+            if (!hold_live(id)) continue;
+            if (!hold_file_exists(id, "release")) hold_write_file(id, "release", "other");
+            live++;
+        }
+        else if (strcmp(dot + 1, "pid") == 0 && !hold_file_exists(id, "lease")) hold_unlink(id, "pid");
+        else if ((strcmp(dot + 1, "error") == 0 || strcmp(dot + 1, "ended") == 0) && hold_file_stale(id, dot + 1)) hold_unlink(id, dot + 1);
+        else if (strcmp(dot + 1, "release") == 0 && !hold_file_exists(id, "lease")) hold_unlink(id, "release");
+    }
+    closedir(d);
+    return live;
+}
+
+/* The top-level "code" of an engine reply ({"cmd","id","code","msg",...});
+ * the engine writes it as a number or as a quoted string.  A "code" nested
+ * deeper (inside data or msg) is skipped.  No code, or one that isn't a
+ * number, counts as 200. */
+static int engine_reply_code(const char *reply) {
+    const char *p = reply;
+    int depth = 0;
+    while (*p) {
+        if (*p == '"') {
+            const char *key = ++p;
+            while (*p && *p != '"') {
+                if (*p == '\\' && p[1]) p++;
+                p++;
+            }
+            if (!*p) break;
+            if (depth == 1 && p - key == 4 && strncmp(key, "code", 4) == 0) {
+                const char *v = p + 1;
+                while (isspace((unsigned char)*v)) v++;
+                if (*v == ':') {
+                    v++;
+                    while (isspace((unsigned char)*v) || *v == '"') v++;
+                    return isdigit((unsigned char)*v) ? atoi(v) : 200;
+                }
+            }
+        } else if (*p == '{' || *p == '[') {
+            depth++;
+        } else if (*p == '}' || *p == ']') {
+            depth--;
+        }
+        p++;
+    }
+    return 200;
+}
+
+static int hold_send_all(int fd, const unsigned char *data, size_t len) {
+    size_t sent = 0;
+    while (sent < len) {
+        ssize_t n = send(fd, data + sent, len - sent, 0);
+        if (n < 0 && errno == EINTR) continue;
+        if (n <= 0) return -1;
+        sent += (size_t)n;
+    }
+    return 0;
+}
+
+/* One masked text frame (client frames must be masked). */
+static int hold_ws_send_text(int fd, const char *text) {
+    unsigned char hdr[8], mask[4] = {0x5a, 0x21, 0x9c, 0x3e}, buf[2048];
+    size_t len = strlen(text), hlen = 0, i;
+    if (len > sizeof(buf)) return -1;
+    hdr[hlen++] = 0x81;
+    if (len < 126) {
+        hdr[hlen++] = (unsigned char)(0x80 | len);
+    } else {
+        hdr[hlen++] = 0x80 | 126;
+        hdr[hlen++] = (unsigned char)(len >> 8);
+        hdr[hlen++] = (unsigned char)(len & 0xff);
+    }
+    memcpy(hdr + hlen, mask, 4);
+    hlen += 4;
+    for (i = 0; i < len; i++) buf[i] = (unsigned char)text[i] ^ mask[i & 3];
+    if (hold_send_all(fd, hdr, hlen) != 0) return -1;
+    return hold_send_all(fd, buf, len);
+}
+
+static int hold_ws_open(const char *hub_id) {
+    struct sockaddr_in addr;
+    struct timeval tv = {2, 0};
+    char req[512], resp[2048];
+    size_t got = 0;
+    int fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (fd < 0) return -1;
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(8088);
+    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
+        close(fd);
+        return -1;
+    }
+    /* The same upgrade request codex_hbus sends. */
+    snprintf(req, sizeof(req),
+        "GET /?domain=svcs.myharmony.com&hubId=%s HTTP/1.1\r\n"
+        "Host: 127.0.0.1:8088\r\n"
+        "Upgrade: websocket\r\n"
+        "Connection: Upgrade\r\n"
+        "Sec-WebSocket-Key: MDEyMzQ1Njc4OWFiY2RlZg==\r\n"
+        "Sec-WebSocket-Version: 13\r\n\r\n", hub_id);
+    if (hold_send_all(fd, (const unsigned char *)req, strlen(req)) != 0) {
+        close(fd);
+        return -1;
+    }
+    while (got + 1 < sizeof(resp)) {
+        ssize_t n = recv(fd, resp + got, 1, 0);
+        if (n < 0 && errno == EINTR) continue;
+        if (n <= 0) break;
+        got += (size_t)n;
+        if (got >= 4 && memcmp(resp + got - 4, "\r\n\r\n", 4) == 0) break;
+    }
+    resp[got] = 0;
+    if (!strstr(resp, " 101 ")) {
+        close(fd);
+        return -1;
+    }
+    return fd;
+}
+
+/* Incoming frames, read without ever blocking the hold loop: bytes are
+ * buffered until a whole frame is there, and fragmented text messages are
+ * put back together.  Messages up to HOLD_RX_MAX are inspected; anything
+ * larger is skipped as it streams past. */
+#define HOLD_RX_MAX 16384
+struct hold_rx {
+    unsigned char buf[HOLD_RX_MAX];
+    size_t len;
+    unsigned long long skip;
+    char msg[HOLD_RX_MAX + 1];
+    size_t msg_len;
+    int msg_open, msg_dropped;
+};
+
+/* Inspect one complete text message. */
+static int hold_rx_message(struct hold_rx *rx, const char *id_prefix, char *err, size_t errlen) {
+    rx->msg[rx->msg_len] = 0;
+    /* The engine only answers a hold request to refuse it. */
+    if (strstr(rx->msg, id_prefix) && engine_reply_code(rx->msg) != 200) {
+        snprintf(err, errlen, "%s", rx->msg);
+        return -1;
+    }
+    return 0;
+}
+
+/* Read what is waiting.  Answers pings.  Returns -1 if the connection is gone
+ * or the engine refused one of our requests (its message is copied into
+ * err), else 0. */
+static int hold_ws_drain(int fd, struct hold_rx *rx, const char *id_prefix, char *err, size_t errlen) {
+    for (;;) {
+        ssize_t got;
+        size_t hlen, i, plen;
+        unsigned long long wire;
+        unsigned char op;
+        int fin;
+        if (rx->len < sizeof(rx->buf)) {
+            got = recv(fd, rx->buf + rx->len, sizeof(rx->buf) - rx->len, MSG_DONTWAIT);
+            if (got == 0) return -1;
+            if (got < 0 && errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR) return -1;
+            if (got > 0) rx->len += (size_t)got;
+        }
+        if (rx->skip) {
+            size_t n = rx->skip < rx->len ? (size_t)rx->skip : rx->len;
+            memmove(rx->buf, rx->buf + n, rx->len - n);
+            rx->len -= n;
+            rx->skip -= n;
+            if (rx->skip) return 0;
+            continue;
+        }
+        if (rx->len < 2) return 0;
+        fin = (rx->buf[0] & 0x80) != 0;
+        op = rx->buf[0] & 0x0f;
+        wire = rx->buf[1] & 0x7f;
+        hlen = 2;
+        if (wire == 126) {
+            if (rx->len < 4) return 0;
+            wire = ((unsigned long long)rx->buf[2] << 8) | rx->buf[3];
+            hlen = 4;
+        } else if (wire == 127) {
+            if (rx->len < 10) return 0;
+            for (wire = 0, i = 0; i < 8; i++) wire = (wire << 8) | rx->buf[2 + i];
+            hlen = 10;
+        }
+        if (rx->buf[1] & 0x80) hlen += 4;
+        if (wire > 0x7fffffffULL) return -1; /* malformed */
+        if (rx->len < hlen) return 0;
+        if (op == 0x8) return -1;
+        if (hlen + wire > sizeof(rx->buf)) {
+            /* Too big to inspect (a large broadcast): let it stream past. */
+            rx->skip = hlen + wire;
+            if (op == 0x1 || op == 0x0) {
+                rx->msg_dropped = 1;
+                rx->msg_open = !fin;
+            }
+            continue;
+        }
+        plen = (size_t)wire;
+        if (rx->len < hlen + plen) return 0;
+        if (rx->buf[1] & 0x80) {
+            for (i = 0; i < plen; i++) rx->buf[hlen + i] ^= rx->buf[hlen - 4 + (i & 3)];
+        }
+        if (op == 0x9 && plen <= 125) {
+            /* A pong carries the ping's data back (masked with zeros). */
+            unsigned char pong[6 + 125] = {0x8a, 0, 0, 0, 0, 0};
+            pong[1] = (unsigned char)(0x80 | plen);
+            memcpy(pong + 6, rx->buf + hlen, plen);
+            hold_send_all(fd, pong, 6 + plen);
+        } else if (op == 0x1 || (op == 0x0 && rx->msg_open)) {
+            if (op == 0x1) {
+                rx->msg_len = 0;
+                rx->msg_dropped = 0;
+            }
+            if (rx->msg_len + plen > HOLD_RX_MAX) rx->msg_dropped = 1;
+            if (!rx->msg_dropped) {
+                memcpy(rx->msg + rx->msg_len, rx->buf + hlen, plen);
+                rx->msg_len += plen;
+            }
+            rx->msg_open = !fin;
+            if (fin && !rx->msg_dropped && hold_rx_message(rx, id_prefix, err, errlen) != 0) return -1;
+        }
+        memmove(rx->buf, rx->buf + hlen + plen, rx->len - hlen - plen);
+        rx->len -= hlen + plen;
+    }
+}
+
+static int hold_ws_request(int fd, const char *hub_id, const char *id_prefix, int seq, const char *status, const char *action) {
+    char msg[1600];
+    snprintf(msg, sizeof(msg),
+        "{\"hubId\":\"%s\",\"timeout\":90,\"hbus\":{\"id\":\"%s-%d\",\"cmd\":\"harmony.engine?holdaction\","
+        "\"params\":{\"status\":\"%s\",\"action\":\"%s\"}}}",
+        hub_id, id_prefix, seq, status, action);
+    return hold_ws_send_text(fd, msg);
+}
+
+/* True once this hold should not (or no longer) run: released, or its
+ * lease gone. */
+static int hold_cancelled(const char *hold_id) {
+    return hold_file_exists(hold_id, "release") || !hold_file_exists(hold_id, "lease");
+}
+
+/* Released by a newer press (hold_release_others) rather than by its own
+ * browser? */
+static int hold_superseded(const char *hold_id) {
+    char path[160], text[16] = "";
+    FILE *f;
+    hold_path(path, sizeof(path), hold_id, "release");
+    f = fopen(path, "r");
+    if (!f) return 0;
+    if (!fgets(text, sizeof(text), f)) text[0] = 0;
+    fclose(f);
+    return strncmp(text, "other", 5) == 0;
+}
+
+/* The holder: runs detached, reports "ok", "error <text>" or (taken over by
+ * a newer press before its own went out) "gone <text>" on report_fd once
+ * the press is out, then holds until released.  A hold that ends by itself
+ * leaves the reason in <id>.ended for the browser's next request. */
+static void hold_run(const char *hold_id, const char *device_id, const char *command, int report_fd) {
+    char hub_id[64], action[512], err[1024], id_prefix[64], bt_detail[256];
+    long long pressed_at, last_beat = 0, last_change, now;
+    long lease_size, size;
+    const char *ended = NULL;
+    struct hold_rx *rx = calloc(1, sizeof(*rx));
+    int fd, seq = 0, bt;
+    err[0] = 0;
+    snprintf(id_prefix, sizeof(id_prefix), "codex-hold-%s", hold_id);
+    {
+        char pid_text[24];
+        snprintf(pid_text, sizeof(pid_text), "%ld", (long)getpid());
+        hold_write_file(hold_id, "pid", pid_text);
+    }
+    if (!rx) {
+        snprintf(err, sizeof(err), "Out of memory.");
+        goto fail;
+    }
+    if (!load_hub_id(hub_id, sizeof(hub_id))) {
+        snprintf(err, sizeof(err), "Hub ID is missing.");
+        goto fail;
+    }
+    bt = ensure_ir_bluetooth_connection(device_id, bt_detail, sizeof(bt_detail));
+    if (bt < 0) {
+        snprintf(err, sizeof(err), "%s", bt_detail[0] ? bt_detail : "Bluetooth target could not be connected.");
+        goto fail;
+    }
+    repair_known_protocols_for_current_commands();
+    format_ir_action(action, sizeof(action), device_id, command);
+    /* hold_start may have given up waiting, or a newer press taken over:
+     * then never send this press. */
+    if (hold_cancelled(hold_id)) {
+        if (write(report_fd, "gone Another key took over.", 27) < 0) {}
+        close(report_fd);
+        free(rx);
+        hold_unlink(hold_id, "lease");
+        hold_unlink(hold_id, "release");
+        hold_unlink(hold_id, "pid");
+        return;
+    }
+    fd = hold_ws_open(hub_id);
+    if (fd < 0) {
+        snprintf(err, sizeof(err), "The hub's engine is not answering on its local bus.");
+        goto fail;
+    }
+    if (hold_ws_request(fd, hub_id, id_prefix, ++seq, "press", action) != 0) {
+        close(fd);
+        snprintf(err, sizeof(err), "The engine connection closed before the press was sent.");
+        goto fail;
+    }
+    pressed_at = last_change = hold_now_ms();
+    log_ir_event("api-hold", hold_id, device_id, command, "press");
+    /* An unknown command or device is refused at once: wait a moment for
+     * that, so even a quick tap hears about it. */
+    while (hold_now_ms() - pressed_at < HOLD_REFUSAL_WAIT_MS) {
+        if (hold_ws_drain(fd, rx, id_prefix, err, sizeof(err)) != 0) {
+            if (!err[0]) snprintf(err, sizeof(err), "The engine connection closed after the press.");
+            break;
+        }
+        usleep(20000);
+    }
+    if (err[0]) {
+        close(fd);
+        goto fail;
+    }
+    if (write(report_fd, "ok", 2) < 0) {}
+    close(report_fd);
+    /* The browser starts renewing once it has this answer: start the lease
+     * clock now, not at the press. */
+    last_change = hold_now_ms();
+    lease_size = hold_file_size(hold_id, "lease");
+    for (;;) {
+        usleep(80000);
+        now = hold_now_ms();
+        if (hold_ws_drain(fd, rx, id_prefix, err, sizeof(err)) != 0) {
+            if (!err[0]) snprintf(err, sizeof(err), "The engine connection closed during the hold.");
+            break;
+        }
+        size = hold_file_size(hold_id, "lease");
+        if (size != lease_size) {
+            lease_size = size;
+            last_change = now;
+        }
+        if (hold_cancelled(hold_id)) {
+            if (hold_superseded(hold_id)) ended = "Another key took over.";
+            break;
+        }
+        if (now - last_change > HOLD_LEASE_MS) {
+            ended = "Lost touch with the browser, so the hold stopped.";
+            break;
+        }
+        if (now - pressed_at > HOLD_MAX_MS) {
+            ended = "Stopped after 30 s.";
+            break;
+        }
+        if (now - pressed_at >= HOLD_REPEAT_AFTER_MS && now - last_beat >= HOLD_HEARTBEAT_MS) {
+            if (hold_ws_request(fd, hub_id, id_prefix, ++seq, "hold", action) != 0) {
+                snprintf(err, sizeof(err), "The engine connection closed during the hold.");
+                break;
+            }
+            last_beat = now;
+        }
+    }
+    now = hold_now_ms();
+    if (now - pressed_at < HOLD_MIN_PRESS_MS) usleep((useconds_t)((HOLD_MIN_PRESS_MS - (now - pressed_at)) * 1000));
+    hold_ws_request(fd, hub_id, id_prefix, ++seq, "release", action);
+    /* Give the release a moment to leave before closing; whatever the
+     * engine says now is no longer the browser's concern. */
+    usleep(100000);
+    close(fd);
+    free(rx);
+    log_ir_event("api-hold", hold_id, device_id, command, err[0] ? err : "release");
+    if (err[0]) hold_write_file(hold_id, "error", err);
+    else if (ended) hold_write_file(hold_id, "ended", ended);
+    hold_unlink(hold_id, "lease");
+    hold_unlink(hold_id, "release");
+    hold_unlink(hold_id, "pid");
+    return;
+fail:
+    free(rx);
+    log_ir_event("api-hold", hold_id, device_id, command, err);
+    if (write(report_fd, "error ", 6) < 0 || write(report_fd, err, strlen(err)) < 0) {}
+    close(report_fd);
+    hold_unlink(hold_id, "lease");
+    hold_unlink(hold_id, "release");
+    hold_unlink(hold_id, "pid");
+}
+
+/* Start a hold: returns 0 once the press is out, -2 if a newer press took
+ * over first (nothing was sent), else -1 with the reason. */
+static int hold_start(const char *hold_id, const char *device_id, const char *command, char *out, size_t outlen) {
+    char lock_path[160];
+    int pipefd[2], fd, lock_fd;
+    size_t n = 0;
+    long long deadline;
+    pid_t pid;
+    mkdir(HOLD_DIR, 0700);
+    /* Release the others and claim this lease under one lock, so two
+     * presses arriving together still leave a single hold. */
+    snprintf(lock_path, sizeof(lock_path), "%s/lock", HOLD_DIR);
+    lock_fd = open(lock_path, O_RDWR | O_CREAT, 0600);
+    if (lock_fd >= 0) flock(lock_fd, LOCK_EX);
+    /* The engine keeps one IR state for everyone: an older hold's release
+     * arriving after this press would cancel it, so wait until those holders
+     * have sent their release and gone (normally about 300 ms; a holder
+     * still connecting can take up to 2 s more). */
+    deadline = hold_now_ms() + 3000;
+    while (hold_release_others(hold_id) > 0 && hold_now_ms() < deadline) usleep(20000);
+    if (hold_file_exists(hold_id, "lease")) {
+        if (lock_fd >= 0) close(lock_fd);
+        snprintf(out, outlen, "This hold has already started.");
+        return -1;
+    }
+    hold_unlink(hold_id, "error");
+    hold_unlink(hold_id, "release");
+    hold_write_file(hold_id, "lease", "");
+    if (lock_fd >= 0) close(lock_fd);
+    if (pipe(pipefd) != 0) {
+        snprintf(out, outlen, "Could not start the hold.");
+        hold_unlink(hold_id, "lease");
+        return -1;
+    }
+    pid = fork();
+    if (pid < 0) {
+        close(pipefd[0]);
+        close(pipefd[1]);
+        hold_unlink(hold_id, "lease");
+        snprintf(out, outlen, "Could not start the hold.");
+        return -1;
+    }
+    if (pid == 0) {
+        /* Detach: the HTTP child answers and exits; the holder lives on. */
+        pid_t holder = fork();
+        if (holder < 0) {
+            if (write(pipefd[1], "error Could not start the hold.", 31) < 0) {}
+            hold_unlink(hold_id, "lease");
+            _exit(0);
+        }
+        if (holder != 0) _exit(0);
+        setsid();
+        /* Never hand the report pipe to a daemon the holder starts. */
+        fcntl(pipefd[1], F_SETFD, FD_CLOEXEC);
+        for (fd = 3; fd < 256; fd++) {
+            if (fd != pipefd[1]) close(fd);
+        }
+        hold_run(hold_id, device_id, command, pipefd[1]);
+        _exit(0);
+    }
+    close(pipefd[1]);
+    while (waitpid(pid, NULL, 0) < 0 && errno == EINTR) {}
+    deadline = hold_now_ms() + HOLD_PRESS_WAIT_MS;
+    out[0] = 0;
+    for (;;) {
+        fd_set rfds;
+        struct timeval tv;
+        long long left = deadline - hold_now_ms();
+        ssize_t got;
+        if (left <= 0) break;
+        FD_ZERO(&rfds);
+        FD_SET(pipefd[0], &rfds);
+        tv.tv_sec = (time_t)(left / 1000);
+        tv.tv_usec = (suseconds_t)((left % 1000) * 1000);
+        if (select(pipefd[0] + 1, &rfds, NULL, NULL, &tv) <= 0) {
+            if (errno == EINTR) continue;
+            break;
+        }
+        got = read(pipefd[0], out + n, outlen - n - 1);
+        if (got < 0 && errno == EINTR) continue;
+        if (got <= 0) break;
+        n += (size_t)got;
+        out[n] = 0;
+        if (n + 1 >= outlen || strcmp(out, "ok") == 0) break;
+    }
+    close(pipefd[0]);
+    if (strncmp(out, "ok", 2) == 0) return 0;
+    if (strncmp(out, "gone ", 5) == 0) {
+        memmove(out, out + 5, strlen(out + 5) + 1);
+        return -2;
+    }
+    if (strncmp(out, "error ", 6) == 0) {
+        memmove(out, out + 6, strlen(out + 6) + 1);
+    } else {
+        /* Gave up waiting: make sure the holder never sends a late press. */
+        hold_write_file(hold_id, "release", "1");
+        snprintf(out, outlen, "The hold did not start in time.");
+    }
+    return -1;
+}
+
+/* Read and remove a note the holder left (<id>.error or <id>.ended). */
+static int hold_take_note(const char *hold_id, const char *ext, char *out, size_t outlen) {
+    char path[160];
+    FILE *f;
+    size_t got;
+    hold_path(path, sizeof(path), hold_id, ext);
+    f = fopen(path, "r");
+    if (!f) return 0;
+    got = fread(out, 1, outlen - 1, f);
+    out[got] = 0;
+    fclose(f);
+    unlink(path);
+    return 1;
+}
+
+/* A browser heartbeat: 0 while the hold runs; else -1 with why it ended
+ * (gone: it ended normally, rather than failed). */
+static int hold_keepalive(const char *hold_id, char *out, size_t outlen, int *gone) {
+    char path[160];
+    int fd;
+    *gone = 0;
+    out[0] = 0;
+    if (hold_take_note(hold_id, "error", out, outlen)) return -1;
+    *gone = 1;
+    if (hold_take_note(hold_id, "ended", out, outlen)) return -1;
+    /* Append only to a lease that still exists: a late heartbeat must not
+     * bring back one the holder has already removed. */
+    hold_path(path, sizeof(path), hold_id, "lease");
+    fd = open(path, O_WRONLY | O_APPEND);
+    if (fd < 0) {
+        snprintf(out, outlen, "The hold has ended.");
+        return -1;
+    }
+    if (write(fd, ".", 1) < 0) {}
+    close(fd);
+    *gone = 0;
+    return 0;
+}
+
+static void hold_release(const char *hold_id) {
+    if (hold_file_exists(hold_id, "lease")) hold_write_file(hold_id, "release", "1");
 }
 
 static void capture_ir_command_action(char *out, size_t outlen) {
@@ -6569,14 +7236,38 @@ static void handle_ir_send(int fd, const struct request *req) {
 }
 
 static void render_ir_send_json(int fd, const struct request *req) {
-    char device_id[64], command[128], reply[4096];
+    char device_id[64], command[128], status[16], hold_id[48], reply[4096];
     FILE *f;
     form_value(req->body, "deviceId", device_id, sizeof(device_id));
     form_value(req->body, "command", command, sizeof(command));
-    if (!safe_label(device_id) || !safe_label(command)) {
+    form_value(req->body, "status", status, sizeof(status));
+    form_value(req->body, "holdId", hold_id, sizeof(hold_id));
+    if (!safe_label(device_id) || !safe_label(command) ||
+        (status[0] && ((strcmp(status, "press") != 0 && strcmp(status, "hold") != 0 &&
+                        strcmp(status, "release") != 0) || !hold_id_valid(hold_id)))) {
         f = send_json_start(fd, "400 Bad Request");
         if (!f) return;
         fputs("{\"ok\":false,\"error\":\"invalid IR command request\"}\n", f);
+        fclose(f);
+        return;
+    }
+    if (status[0]) {
+        /* Hold-to-repeat: see hold_run(). */
+        int rc = 0, gone = 0;
+        reply[0] = 0;
+        if (strcmp(status, "press") == 0) {
+            rc = hold_start(hold_id, device_id, command, reply, sizeof(reply));
+            if (rc == -2) gone = 1;
+        }
+        else if (strcmp(status, "hold") == 0) rc = hold_keepalive(hold_id, reply, sizeof(reply), &gone);
+        else hold_release(hold_id);
+        f = send_json_start(fd, rc == 0 ? "200 OK" : gone ? "410 Gone" : "502 Bad Gateway");
+        if (!f) return;
+        fputs(rc == 0 ? "{\"ok\":true" : "{\"ok\":false,\"error\":", f);
+        if (rc != 0) json_write_string(f, reply);
+        fputs(",\"status\":", f); json_write_string(f, status);
+        fputs(",\"holdId\":", f); json_write_string(f, hold_id);
+        fputs("}\n", f);
         fclose(f);
         return;
     }

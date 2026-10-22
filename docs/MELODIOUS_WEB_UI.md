@@ -165,7 +165,12 @@ on Apple, Segoe on Windows. That costs 0 bytes. Sizes follow the app:
 - Plain keys fire on release.
 - Keys with a hold action fire it after 500 ms (the web used 550 ms).
 - Unmapped keys dim to 35% and do nothing.
-- Keys don't repeat while held (the owner chose not to port that).
+- Keys didn't repeat while held at first (the owner chose not to port that).
+  Owner, 2026-10-22: they do now, as in the app. Volume, channel and the
+  D-pad fire on touch-down and, held, repeat through the hub's native
+  press-and-hold: `/api/ir-send` with `status` press, hold every 200 ms and
+  release, and a `holdId`. The hub runs the hold over one engine connection
+  and repeats from 380 ms, as the app does.
 - Menu or Exit is relabelled "Home" when it really sends Home.
 - The remote's Back key is stored as `PrevChannel`, and the wizard lets you
   set it like any other key, as the app does (approved 2026-10-21).
@@ -186,8 +191,9 @@ on Apple, Segoe on Windows. That costs 0 bytes. Sizes follow the app:
 - The app's keyboard and voice drawer. The web keyboard surface uses the
   phone's own keyboard, whose mic button dictates.
 - SSH recovery (`core-ssh`); hub discovery and the connect screen.
-- Anything on the stock :8088 bus: native press-and-hold, the sleep timer,
-  "Resend everything" (hub Help), instant state push. That bus wants a
+- Anything else on the stock :8088 bus: the sleep timer, "Resend
+  everything" (hub Help), instant state push. (Native press-and-hold now
+  goes through `/api/ir-send`, which relays it to the bus.) That bus wants a
   Logitech `Origin` header, which a browser can't send. Reaching it would
   need a hub-side proxy route, which is a backend change. The web keeps
   polling `/api/state`.
@@ -317,6 +323,8 @@ CSS that only the unported Settings pages still use.
 
    The touchpad and repeat-while-held were not chosen. Keys fire once,
    except keys with a hold action, which fire it after 500 ms.
+   (Superseded 2026-10-22: the owner asked for repeat-while-held; it matches
+   the app.)
 3. **Wide screens:** navigation rail with the content centred.
 4. **Icons:** the 64 px favicon and the 180 px home-screen icon, together
    about 26 KB per page load.

@@ -214,6 +214,20 @@ Invoke-RestMethod "http://<hub-ip>:8080/api/ir-send" -Method Post -Body @{
 }
 ```
 
+Hold a command down, as a remote does while a key is held. Add `status` and a
+`holdId` you choose (8 to 40 letters and digits, new for each hold):
+
+- `press` starts the hold: the hub sends the command and, from 380 ms on,
+  keeps repeating it. The answer comes once the press is out
+  (`ok: false` with HTTP 502 if it failed).
+- `hold` keeps it going: send one at least every 700 ms (the web app sends one
+  every 200 ms). It answers `ok: false` with 502 if the engine refused the
+  command, or 410 once the hold has ended.
+- `release` ends it. A hold also ends 700 ms after its last `hold`, and after
+  30 s. A quick press and release sends the command once.
+
+The hub runs one hold at a time; a new `press` releases the previous one.
+
 Send a cancellable batch:
 
 ```powershell
