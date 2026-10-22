@@ -28,20 +28,20 @@ personal backups.
 
 1. Root the hub with harmony-hub-root. Keep the SSH key it creates
    (`harmony_owner_*` in `~/.ssh`) and the numeric Hub ID it prints.
-2. From a computer on the same network, run a clean install:
+2. From a computer on the same network, install Melodious:
 
    ```bash
-   python3 install_webui.py --hub-host <hub-ip> --hub-id <hub-id> --clean-install
+   python3 install_webui.py --hub-host <hub-ip> --hub-id <hub-id>
    ```
 
-   On Windows, in PowerShell:
+   On Windows, double-click `Install_Harmony_Control.cmd`, or in PowerShell:
 
    ```powershell
-   .\install_webui.ps1 -HubHost <hub-ip> -HubId <hub-id> -CleanInstall
+   .\install_webui.ps1 -HubHost <hub-ip> -HubId <hub-id>
    ```
 
-   The installer asks for an MQTT broker (leave it blank to skip MQTT), turns
-   on the cloud blocker and reboots the hub once.
+   The first install turns on the cloud blocker, leaves MQTT off, and reboots
+   the hub once.
 3. Open `http://<hub-ip>:8080/` on your phone or computer.
 
 ## Requirements
@@ -60,10 +60,10 @@ personal backups.
 
 ### Install
 
-Run a clean install the first time, as in the quick start. It writes
-Melodious's configuration on the hub: the Hub ID, the cloud blocker (on) and
-the MQTT settings. Later runs without `--clean-install` upgrade in place and
-keep that configuration.
+The first run on a hub writes Melodious's configuration: the Hub ID, the
+cloud blocker (on) and the MQTT settings (off, unless you pass the `--mqtt-*`
+options). Later runs upgrade in place and keep that configuration;
+`--clean-install` writes it from scratch.
 
 Each run:
 
@@ -95,9 +95,8 @@ Each run:
 `python3 install_webui.py --help` lists every option.
 
 **Updating.** Get the latest copy of this repository and run the installer
-again without `--clean-install`. On Windows you can double-click
-`Install_Harmony_Control.cmd`, which runs `install_webui.ps1` with your
-`harmony_owner_*` key and asks for the rest.
+again. On Windows, `Install_Harmony_Control.cmd` runs `install_webui.ps1`
+with your `harmony_owner_*` key and asks for the rest.
 
 **Rolling back.** In PowerShell, `restore_backup.ps1` restores the boot script,
 `netservicestarter.lua`, the SSH wrappers, the Hub ID and the MQTT settings
@@ -107,10 +106,9 @@ from the newest handoff backup, then tells you to reboot the hub:
 .\restore_backup.ps1 -HubHost <hub-ip> -KeyPath "$env:USERPROFILE\.ssh\<key-file>"
 ```
 
-**Docker and Unraid.** The image runs the same installer, in upgrade mode,
-with settings from environment variables, then stays up as a small proxy to
-the hub's web app. It never runs a clean install, so do the first install
-from a computer. See [UNRAID.md](UNRAID.md) and `compose.yaml`.
+**Docker and Unraid.** The image runs the same installer with settings from
+environment variables, then stays up as a small proxy to the hub's web app.
+See [UNRAID.md](UNRAID.md) and `compose.yaml`.
 
 ### First run
 

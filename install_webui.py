@@ -353,6 +353,7 @@ class Installer:
     def __init__(self, args: argparse.Namespace) -> None:
         self.args = args
         self.key_path = Path(args.key_path).expanduser().resolve()
+        self.first_install = False
         self.stage = ""
         self.preserve_stage = False
         self.candidates: list[Candidate] = []
@@ -595,6 +596,13 @@ class Installer:
                     text="0\n" if self.args.skip_cloud_suppression else "1\n",
                 )
             )
+        elif not self.args.skip_cloud_suppression:
+            # Without the file, codex_webui and netservicestarter.lua treat the
+            # cloud as blocked but the egress guard and the activity writer
+            # don't: create it, and keep whatever value is already there.
+            candidates.append(
+                Candidate("/data/codex/cloud_blocker.conf", "644", "config", text="1\n", condition="if-missing")
+            )
         for dest, text in (
             ("/etc/tdeenable", "1\n"),
             ("/pkg/codexactivity/manifest.json", '{"plugin":"codexactivity"}\n'),
@@ -649,8 +657,14 @@ class Installer:
 
     def resolve_hub_id(self) -> None:
         hub_id = self.args.hub_id or ""
+        existing = self.run_remote("cat /data/codex/hub_id 2>/dev/null || true", timeout=30).strip()
+        if not existing and not self.args.clean_install:
+            # A hub without /data/codex/hub_id has no configuration of ours to
+            # preserve, so the first install writes it, as --clean-install does.
+            self.args.clean_install = True
+            self.first_install = True
+            info("first install: the hub has no /data/codex/hub_id yet, so this run writes the configuration (as --clean-install)")
         if not hub_id:
-            existing = self.run_remote("cat /data/codex/hub_id 2>/dev/null || true", timeout=30).strip()
             if existing:
                 hub_id = existing
                 info(f"hub id from existing /data/codex/hub_id: {hub_id}")
@@ -780,7 +794,12 @@ class Installer:
                 "prints a terminal verdict; performs no persistent writes "
                 "and no service actions."
             )
-        if self.args.clean_install:
+        if self.first_install:
+            info(
+                "Install mode: first install — the hub has no configuration "
+                "of ours yet, so configuration candidates are written."
+            )
+        elif self.args.clean_install:
             info(
                 "Install mode: explicit clean install — configuration "
                 "candidates are regenerated."
@@ -1273,7 +1292,9 @@ class Installer:
             wait_for_port(self.args.hub_host, 8080, 180, "Web UI")
 
         step("Done")
-        if self.args.clean_install:
+        if self.first_install:
+            info("Install finished as a first install (configuration written).")
+        elif self.args.clean_install:
             info("Install finished in explicit clean-install mode (configuration regenerated).")
         else:
             info("Install finished in default upgrade mode (existing configuration preserved where applicable).")

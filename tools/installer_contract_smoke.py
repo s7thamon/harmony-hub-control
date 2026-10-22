@@ -922,6 +922,86 @@ class PythonInstallerMutating(unittest.TestCase):
         self.assertNotIn(("service", "reboot"), hub.events)
 
 
+class PythonInstallerFirstInstall(unittest.TestCase):
+    """[PYTHON BEHAVIORAL] a hub with no configuration of ours, and a hub whose
+    cloud blocker file went missing, both end up with the blocker on."""
+
+    BLOCKER = "/data/codex/cloud_blocker.conf"
+
+    def setUp(self):
+        self.hub = FakeHub()
+        self.harness = InstallerHarness(self.hub)
+        self.addCleanup(self.harness.close)
+
+    def candidate_line(self, stdout: str, dest: str) -> str:
+        lines = [l for l in stdout.splitlines() if l.startswith("candidate ") and f"dest={dest} " in l]
+        self.assertEqual(len(lines), 1, f"expected one candidate line for {dest}")
+        return lines[0]
+
+    def test_fresh_hub_default_run_writes_configuration(self):
+        """[PYTHON BEHAVIORAL] with no /data/codex/hub_id on the hub, a default
+        run is a first install: it writes the hub id, the cloud blocker (on) and
+        a disabled MQTT config, and installs codex_webui last."""
+        code, stdout, stderr = self.harness.run(self.harness.base_argv("--hub-id", FAKE_HUB_ID))
+        self.assertEqual(code, 0, stderr or stdout)
+        self.assertEqual(kv_value(stdout, "verdict"), INST.VERDICT_ALLOWED)
+        self.assertEqual(kv_value(stdout, "preflight_mode"), "clean")
+        self.assertIn("first install", stdout)
+        self.assertEqual(self.hub.fs["/data/codex/hub_id"]["data"], (FAKE_HUB_ID + "\n").encode())
+        self.assertEqual(self.hub.fs[self.BLOCKER]["data"], b"1\n")
+        mqtt = self.hub.fs["/data/codexmqtt/config.json"]
+        self.assertEqual(mqtt["mode"], "600")
+        self.assertIn(b'"enabled": false', mqtt["data"].replace(b'"enabled":false', b'"enabled": false'))
+        self.assertEqual(install_file_dests(self.hub, rollback=False)[-1], INST.WEBUI_DEST)
+        self.assertEqual(self.hub.leftovers(), [])
+
+    def test_fresh_hub_takes_hub_id_from_root_tool_handoff(self):
+        """[PYTHON BEHAVIORAL] on a fresh hub the root tool's handoff file is
+        enough: the preflight is ALLOWED and creates the hub id, instead of
+        BLOCKED_CONFIGURATION_UNCERTAINTY."""
+        old = INST.resolve_saved_hub_id
+        INST.resolve_saved_hub_id = lambda host: (FAKE_HUB_ID, "test handoff")
+        self.addCleanup(setattr, INST, "resolve_saved_hub_id", old)
+        code, stdout, stderr = self.harness.run(self.harness.base_argv("--preflight-only"))
+        self.assertEqual(code, 0, stderr or stdout)
+        self.assertEqual(kv_value(stdout, "verdict"), INST.VERDICT_ALLOWED)
+        self.assertIn("action=create", self.candidate_line(stdout, "/data/codex/hub_id"))
+        self.assertIn("action=create", self.candidate_line(stdout, self.BLOCKER))
+        writes = [e[1] for e in self.hub.events if e[0] == "persistent_write"]
+        self.assertEqual(writes, [], "preflight must not write")
+
+    def test_upgrade_creates_missing_cloud_blocker(self):
+        """[PYTHON BEHAVIORAL] an installed hub without the blocker file gets it
+        created (on); the rest of its configuration is untouched."""
+        originals = prime_upgrade_hub(self.hub)
+        del self.hub.fs[self.BLOCKER]
+        code, stdout, stderr = self.harness.run(self.harness.base_argv())
+        self.assertEqual(code, 0, stderr or stdout)
+        self.assertEqual(kv_value(stdout, "preflight_mode"), "upgrade")
+        self.assertNotIn("first install", stdout)
+        self.assertEqual(self.hub.fs[self.BLOCKER]["data"], b"1\n")
+        for path in ("/data/codex/hub_id", "/data/codexmqtt/config.json", "/etc/tdeenable"):
+            self.assertEqual(md5_bytes(self.hub.fs[path]["data"]), md5_bytes(originals[path]))
+
+    def test_upgrade_keeps_existing_cloud_blocker_value(self):
+        """[PYTHON BEHAVIORAL] an existing blocker value is preserved, even 0."""
+        prime_upgrade_hub(self.hub)
+        self.hub.fs[self.BLOCKER] = {"data": b"0\n", "mode": "644"}
+        code, stdout, stderr = self.harness.run(self.harness.base_argv())
+        self.assertEqual(code, 0, stderr or stdout)
+        self.assertIn("action=preserve", self.candidate_line(stdout, self.BLOCKER))
+        self.assertEqual(self.hub.fs[self.BLOCKER]["data"], b"0\n")
+
+    def test_skip_cloud_suppression_never_creates_blocker_on_upgrade(self):
+        """[PYTHON BEHAVIORAL] --skip-cloud-suppression leaves a missing blocker
+        file missing on an upgrade."""
+        prime_upgrade_hub(self.hub)
+        del self.hub.fs[self.BLOCKER]
+        code, stdout, stderr = self.harness.run(self.harness.base_argv("--skip-cloud-suppression"))
+        self.assertEqual(code, 0, stderr or stdout)
+        self.assertNotIn(self.BLOCKER, self.hub.fs)
+
+
 class PythonInstallerFileStatus(unittest.TestCase):
     """[PYTHON BEHAVIORAL] the BusyBox ls/md5sum probe powers discovery and
     post-install verification; the fake fails any stat/readlink/mktemp/df."""
@@ -1030,6 +1110,21 @@ class PowerShellStaticContract(unittest.TestCase):
         self.assertIn('"--clean-install"', source)
         self.assertIn("[switch]$PreflightOnly", self.text)
         self.assertIn("[switch]$CleanInstall", self.text)
+
+    def test_first_install_and_missing_blocker_parity(self):
+        """[PS1 STATIC] like Python, a hub without /data/codex/hub_id makes the
+        run a first (clean) install, and an upgrade creates a missing cloud
+        blocker file without replacing an existing one."""
+        source = INSTALLER_PY.read_text(encoding="utf-8")
+        self.assertIn("self.args.clean_install = True", source)
+        self.assertIn('Candidate("/data/codex/cloud_blocker.conf", "644", "config", text="1\\n", condition="if-missing")', source)
+        resolve = self.text.split("function Resolve-HubIdentity()", 1)[1].split("\nfunction ", 1)[0]
+        self.assertIn("$script:CleanInstall = $true", resolve)
+        self.assertIn("$script:FirstInstall = $true", resolve)
+        self.assertIn(
+            'Add-Candidate (New-Candidate "/data/codex/cloud_blocker.conf" "644" "config" -Text "1`n" -Condition "if-missing")',
+            self.inventory,
+        )
 
     def test_constants_match_python(self):
         """[PS1 STATIC] stage prefix, suffixes, margins, verdicts match Python."""
