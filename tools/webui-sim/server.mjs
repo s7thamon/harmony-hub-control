@@ -398,6 +398,8 @@ function handleDeviceCommands(res, params) {
   sendJson(res, 200, { ok: true, deviceId, commands, count: commands.length });
 }
 
+const holds = new Map();
+
 function handleIrSend(res, params) {
   const deviceId = String(params.deviceId ?? "").trim();
   const command = String(params.command ?? "").trim();
@@ -405,8 +407,38 @@ function handleIrSend(res, params) {
     sendError(res, 400, "invalid IR command request");
     return;
   }
-  logEvent({ kind: "ir", deviceId, command });
-  sendJson(res, 200, { ok: true, deviceId, command, reply: "sim sent" });
+  // Hold-to-repeat (render_ir_send_json / hold_run): press starts a hold,
+  // hold renews its 700 ms lease, release ends it; one hold at a time.
+  const status = String(params.status ?? "");
+  const holdId = String(params.holdId ?? "");
+  if (status && (!["press", "hold", "release"].includes(status) || !/^[0-9A-Za-z]{8,40}$/.test(holdId))) {
+    sendError(res, 400, "invalid IR command request");
+    return;
+  }
+  if (!status) {
+    logEvent({ kind: "ir", deviceId, command });
+    sendJson(res, 200, { ok: true, deviceId, command, reply: "sim sent" });
+    return;
+  }
+  const now = Date.now();
+  for (const [id, hold] of holds) {
+    if (now - hold.lease > 700 || now - hold.started > 30000) holds.delete(id);
+  }
+  if (status === "press") {
+    holds.clear();
+    holds.set(holdId, { started: now, lease: now });
+  } else if (status === "hold") {
+    const hold = holds.get(holdId);
+    if (!hold) {
+      sendJson(res, 410, { ok: false, error: "The hold has ended.", status, holdId });
+      return;
+    }
+    hold.lease = now;
+  } else {
+    holds.delete(holdId);
+  }
+  logEvent({ kind: "ir", deviceId, command, status, holdId });
+  sendJson(res, 200, { ok: true, status, holdId });
 }
 
 /* -- IR setup: codex_webui.c's /ir/* forms and IR JSON routes -------------

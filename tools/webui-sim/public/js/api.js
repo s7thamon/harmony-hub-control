@@ -87,13 +87,18 @@ export function saveDeviceSettings({ deviceId, settings }) {
   });
 }
 
-export function irSend({ deviceId, command, functionId, activityId }) {
+// `status` and `holdId` are for hold-to-repeat only (views/key-repeat.js):
+// "press" | "hold" | "release" for one hold. A plain send leaves them out
+// and the hub presses and releases once.
+export function irSend({ deviceId, command, functionId, activityId, status, holdId }) {
   const form = {
     deviceId: String(deviceId),
     command: String(command),
   };
   if (functionId != null && functionId !== "") form.functionId = String(functionId);
   if (activityId != null && activityId !== "") form.activityId = String(activityId);
+  if (status) form.status = String(status);
+  if (holdId) form.holdId = String(holdId);
   return request("/api/ir-send", { method: "POST", form });
 }
 

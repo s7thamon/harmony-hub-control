@@ -38,6 +38,7 @@ import {
   flash,
   moreKeysMarkup,
   padMarkup,
+  repeatCommand,
   sendCommand,
   wireKeys,
   wireMoreKeys,
@@ -165,6 +166,11 @@ export function createDevicesView(section) {
 
   function pressKey(entry, which, el) {
     sendAction(which === "hold" ? entry.hold : entry.press, entry.label, el);
+  }
+
+  function repeatKey(entry, el) {
+    flash(el);
+    return repeatCommand(entry.press, { label: entry.label, status: setStatus });
   }
 
   function panelSource() {
@@ -301,7 +307,7 @@ export function createDevicesView(section) {
       label: "More keys",
       render: (content) => {
         content.innerHTML = moreKeysMarkup(keys, { title: device.name });
-        wireMoreKeys(content, { source: panelSource, send: sendAction, onPress: pressKey });
+        wireMoreKeys(content, { source: panelSource, send: sendAction, onPress: pressKey, onRepeat: repeatKey });
       },
     }));
   }
@@ -454,6 +460,7 @@ export function createDevicesView(section) {
   wireKeys(root, {
     keyFor: (k) => (page === "device" ? keys.get(k) ?? null : null),
     onPress: pressKey,
+    onRepeat: repeatKey,
     onPreview: (entry) => {
       if (entry) setStatus(describe(entry.label, entry.press), "preview");
     },
