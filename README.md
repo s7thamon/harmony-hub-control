@@ -18,6 +18,12 @@ hub, and the Harmony remote paired with it, to run entirely on their local
 network. This repository contains no rooting tools, exploits, private keys or
 personal backups.
 
+<p align="center">
+  <img src="docs/screenshots/web/remote.png" alt="The web app's remote on a phone" height="540">
+  <img src="docs/screenshots/android/remote.png" alt="The Android app's remote" height="540">
+  <br><sub>The web app (left) and the Android app (right), on a real hub. Network addresses and the Wi-Fi name are masked in every screenshot.</sub>
+</p>
+
 ## Quick start
 
 1. Root the hub with harmony-hub-root. Keep the SSH key it creates
@@ -128,6 +134,8 @@ Devices and Settings: a bottom bar on phones and a navigation rail on screens
 840 px and wider. Every screen has its own address, such as `#devices/<id>`,
 so you can bookmark it.
 
+<p align="center"><img src="docs/screenshots/web/desktop-remote.png" alt="The web app on a computer, with the navigation rail and More keys beside the remote"><br><sub>On a computer: the navigation rail, the remote and More keys beside it</sub></p>
+
 ### Remote
 
 - **Nothing running**: "Everything's off" and one card per activity.
@@ -148,6 +156,19 @@ so you can bookmark it.
 Keys fire when you lift your finger, and sliding off cancels. A key with a
 hold action fires it after 500 ms. Keys the activity doesn't use are dimmed.
 
+<table>
+<tr><td align="center"><img src="docs/screenshots/web/remote.png" alt="The web app's remote with an activity running" width="200"><br><sub>Remote</sub></td><td align="center"><img src="docs/screenshots/web/remote-more-keys.png" alt="The More keys sheet with on-screen buttons, colour keys and the number pad" width="200"><br><sub>More keys</sub></td><td align="center"><img src="docs/screenshots/web/remote-fix-it.png" alt="The Fix it sheet with power and input resends for each device" width="200"><br><sub>Fix it</sub></td><td align="center"><img src="docs/screenshots/web/remote-switch.png" alt="The Switch activity sheet with Turn everything off" width="200"><br><sub>Switch activity</sub></td></tr>
+</table>
+
+<details>
+<summary>More screenshots</summary>
+
+<table>
+<tr><td align="center"><img src="docs/screenshots/web/remote-keyboard.png" alt="The Keyboard tab for typing on the TV" width="200"><br><sub>Keyboard</sub></td></tr>
+</table>
+
+</details>
+
 ### Activities
 
 - The running activity's card, with Open remote and Turn off.
@@ -159,6 +180,21 @@ hold action fires it after 500 ms. Keys the activity doesn't use are dimmed.
   with a press and a hold action) and Review.
 - The advanced editor covers what the wizard doesn't: roles, the button maps
   for each remote surface, and the activity's JSON.
+
+<table>
+<tr><td align="center"><img src="docs/screenshots/web/activities.png" alt="The Activities tab with the running activity's card" width="200"><br><sub>Activities</sub></td><td align="center"><img src="docs/screenshots/web/activity-menu.png" alt="An activity's menu: Edit, Set up buttons, Try the buttons and more" width="200"><br><sub>Activity menu</sub></td><td align="center"><img src="docs/screenshots/web/wizard-devices.png" alt="The setup wizard's Devices step" width="200"><br><sub>Wizard: Devices</sub></td><td align="center"><img src="docs/screenshots/web/wizard-buttons.png" alt="The setup wizard's Buttons step" width="200"><br><sub>Wizard: Buttons</sub></td></tr>
+</table>
+
+<details>
+<summary>More screenshots</summary>
+
+<table>
+<tr><td align="center"><img src="docs/screenshots/web/wizard-name.png" alt="The setup wizard's Name step" width="200"><br><sub>Wizard: Name</sub></td><td align="center"><img src="docs/screenshots/web/wizard-inputs.png" alt="The setup wizard's Inputs step" width="200"><br><sub>Wizard: Inputs</sub></td><td align="center"><img src="docs/screenshots/web/wizard-review.png" alt="The setup wizard's Review step" width="200"><br><sub>Wizard: Review</sub></td></tr>
+</table>
+
+<p align="center"><img src="docs/screenshots/web/desktop-editor.png" alt="The advanced editor on a computer"><br><sub>Advanced editor</sub></p>
+
+</details>
 
 ### Devices
 
@@ -182,6 +218,22 @@ hold action fires it after 500 ms. Keys the activity doesn't use are dimmed.
   one toggle, or none), turning on (warm-up time, Always on, Keep on between
   activities), inputs and timing.
 
+<table>
+<tr><td align="center"><img src="docs/screenshots/web/devices.png" alt="The Devices tab with search, Add a device and the IR lab" width="200"><br><sub>Devices</sub></td><td align="center"><img src="docs/screenshots/web/device-commands.png" alt="A device's Commands tab with Learn a button and Import codes" width="200"><br><sub>Commands</sub></td><td align="center"><img src="docs/screenshots/web/import-find.png" alt="The Import codes sheet on Find codes" width="200"><br><sub>Import codes</sub></td><td align="center"><img src="docs/screenshots/web/device-settings.png" alt="A device's settings: power, turning on, inputs and timing" width="200"><br><sub>Device settings</sub></td></tr>
+</table>
+
+<details>
+<summary>More screenshots</summary>
+
+<table>
+<tr><td align="center"><img src="docs/screenshots/web/device-remote.png" alt="A device's own remote" width="200"><br><sub>Device remote</sub></td><td align="center"><img src="docs/screenshots/web/learn.png" alt="The Learn a button sheet" width="200"><br><sub>Learn a button</sub></td><td align="center"><img src="docs/screenshots/web/import-paste.png" alt="The Import codes sheet on Paste, with Fetch from RemoteCentral" width="200"><br><sub>Import codes: Paste</sub></td><td align="center"><img src="docs/screenshots/web/send-all.png" alt="The Send all commands page" width="200"><br><sub>Send all commands</sub></td></tr>
+<tr><td align="center"><img src="docs/screenshots/web/ir-lab.png" alt="The IR lab page" width="200"><br><sub>IR lab</sub></td></tr>
+</table>
+
+<p align="center"><img src="docs/screenshots/web/desktop-devices.png" alt="A device page on a computer, with More keys beside the remote"><br><sub>A device page on a computer</sub></p>
+
+</details>
+
 ### Settings
 
 - **Hub**: whether the hub is connected, and its activity and device counts.
@@ -194,6 +246,19 @@ hold action fires it after 500 ms. Keys the activity doesn't use are dimmed.
   file.
 - **System**: status and logs, the cloud blocker, the time zone, sign-in,
   software update, Home Assistant discovery and reboot.
+
+<table>
+<tr><td align="center"><img src="docs/screenshots/web/settings.png" alt="The Settings tab" width="200"><br><sub>Settings</sub></td><td align="center"><img src="docs/screenshots/web/bluetooth.png" alt="The Bluetooth keyboard page" width="200"><br><sub>Bluetooth</sub></td><td align="center"><img src="docs/screenshots/web/backup.png" alt="The Backup page" width="200"><br><sub>Backup</sub></td><td align="center"><img src="docs/screenshots/web/system.png" alt="The System page" width="200"><br><sub>System</sub></td></tr>
+</table>
+
+<details>
+<summary>More screenshots</summary>
+
+<table>
+<tr><td align="center"><img src="docs/screenshots/web/mqtt.png" alt="The MQTT page" width="200"><br><sub>MQTT</sub></td><td align="center"><img src="docs/screenshots/web/wifi.png" alt="The Wi-Fi page" width="200"><br><sub>Wi-Fi</sub></td></tr>
+</table>
+
+</details>
 
 ## The Android app
 
@@ -245,6 +310,24 @@ Only the web app adds and deletes devices and has Edit details, device
 inputs, Find codes, Fetch from RemoteCentral, Type a code, the IR lab, the
 advanced editor, activity reordering, and the Wi-Fi, MQTT, Backup and System
 pages.
+
+<table>
+<tr><td align="center"><img src="docs/screenshots/android/remote.png" alt="The Android app's remote with an activity running" width="200"><br><sub>Remote</sub></td><td align="center"><img src="docs/screenshots/android/touchpad.png" alt="The Touchpad remote mode" width="200"><br><sub>Touchpad</sub></td><td align="center"><img src="docs/screenshots/android/sleep-timer.png" alt="The Sleep timer sheet" width="200"><br><sub>Sleep timer</sub></td><td align="center"><img src="docs/screenshots/android/fix-it.png" alt="The Fix it sheet with Resend everything" width="200"><br><sub>Fix it</sub></td></tr>
+<tr><td align="center"><img src="docs/screenshots/android/editor-start-end.png" alt="The activity editor's Start and end step" width="200"><br><sub>Start &amp; end</sub></td><td align="center"><img src="docs/screenshots/android/on-screen-buttons.png" alt="The on-screen buttons editor" width="200"><br><sub>On-screen buttons</sub></td><td align="center"><img src="docs/screenshots/android/activities.png" alt="The Activities tab" width="200"><br><sub>Activities</sub></td><td align="center"><img src="docs/screenshots/android/settings.png" alt="The Settings tab with the phone options" width="200"><br><sub>Settings</sub></td></tr>
+</table>
+
+<details>
+<summary>More screenshots</summary>
+
+<table>
+<tr><td align="center"><img src="docs/screenshots/android/everything-off.png" alt="The Remote tab with nothing running" width="200"><br><sub>Everything's off</sub></td><td align="center"><img src="docs/screenshots/android/keyboard.png" alt="The Keyboard remote mode" width="200"><br><sub>Keyboard</sub></td><td align="center"><img src="docs/screenshots/android/more-keys.png" alt="The More keys sheet" width="200"><br><sub>More keys</sub></td><td align="center"><img src="docs/screenshots/android/switch-activity.png" alt="The Switch activity sheet with Sleep timer" width="200"><br><sub>Switch activity</sub></td></tr>
+<tr><td align="center"><img src="docs/screenshots/android/activity-menu.png" alt="An activity's menu" width="200"><br><sub>Activity menu</sub></td><td align="center"><img src="docs/screenshots/android/editor-name.png" alt="The activity editor's Name step" width="200"><br><sub>Editor: Name</sub></td><td align="center"><img src="docs/screenshots/android/editor-devices.png" alt="The activity editor's Devices step" width="200"><br><sub>Editor: Devices</sub></td><td align="center"><img src="docs/screenshots/android/editor-inputs.png" alt="The activity editor's Inputs step" width="200"><br><sub>Editor: Inputs</sub></td></tr>
+<tr><td align="center"><img src="docs/screenshots/android/editor-buttons.png" alt="The activity editor's Buttons step" width="200"><br><sub>Editor: Buttons</sub></td><td align="center"><img src="docs/screenshots/android/editor-button-picker.png" alt="Picking the command for a button" width="200"><br><sub>Button picker</sub></td><td align="center"><img src="docs/screenshots/android/devices.png" alt="The Devices tab" width="200"><br><sub>Devices</sub></td><td align="center"><img src="docs/screenshots/android/device-remote.png" alt="A device's own remote" width="200"><br><sub>Device remote</sub></td></tr>
+<tr><td align="center"><img src="docs/screenshots/android/device-commands.png" alt="A device's Commands tab" width="200"><br><sub>Commands</sub></td><td align="center"><img src="docs/screenshots/android/learn.png" alt="The Learn a button sheet" width="200"><br><sub>Learn a button</sub></td><td align="center"><img src="docs/screenshots/android/import.png" alt="The Import codes sheet" width="200"><br><sub>Import codes</sub></td><td align="center"><img src="docs/screenshots/android/device-settings.png" alt="A device's power settings" width="200"><br><sub>Device settings</sub></td></tr>
+<tr><td align="center"><img src="docs/screenshots/android/device-settings-timing.png" alt="A device's turning-on and timing settings" width="200"><br><sub>Device timing</sub></td><td align="center"><img src="docs/screenshots/android/bluetooth.png" alt="The Bluetooth keyboard page" width="200"><br><sub>Bluetooth keyboard</sub></td><td align="center"><img src="docs/screenshots/android/advanced.png" alt="The Advanced page with hub status and the IR sweep lab" width="200"><br><sub>Advanced</sub></td><td align="center"><img src="docs/screenshots/android/ssh-recovery.png" alt="SSH recovery on the Advanced page" width="200"><br><sub>SSH recovery</sub></td></tr>
+</table>
+
+</details>
 
 ## Features
 
