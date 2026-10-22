@@ -5031,7 +5031,9 @@ static int hold_start(const char *hold_id, const char *device_id, const char *co
     hold_unlink(hold_id, "release");
     hold_write_file(hold_id, "lease", "");
     if (lock_fd >= 0) close(lock_fd);
-    if (pipe(pipefd) != 0) {
+    /* Only a negative result is a failure: Zig 0.16's MIPS pipe() returns
+     * the first descriptor, not 0, when it succeeds. */
+    if (pipe(pipefd) < 0) {
         snprintf(out, outlen, "Could not start the hold.");
         hold_unlink(hold_id, "lease");
         return -1;
