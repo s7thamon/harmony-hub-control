@@ -337,6 +337,7 @@ $HandoffDirs = [System.Collections.ArrayList]::new()
 $Changed = [System.Collections.ArrayList]::new()
 $NewCopies = [System.Collections.ArrayList]::new()
 $ResolvedHubId = ""
+$FirstInstall = $false
 $PreserveStage = $false
 $MqttExplicitSupplied = ($PSBoundParameters.ContainsKey("MqttBroker") -or
     $PSBoundParameters.ContainsKey("MqttPort") -or
@@ -411,6 +412,11 @@ function Build-Inventory() {
         $blocker = "1`n"
         if ($SkipCloudSuppression) { $blocker = "0`n" }
         Add-Candidate (New-Candidate "/data/codex/cloud_blocker.conf" "644" "config" -Text $blocker)
+    } elseif (-not $SkipCloudSuppression) {
+        # Without the file, codex_webui and netservicestarter.lua treat the
+        # cloud as blocked but the egress guard and the activity writer
+        # don't: create it, and keep whatever value is already there.
+        Add-Candidate (New-Candidate "/data/codex/cloud_blocker.conf" "644" "config" -Text "1`n" -Condition "if-missing")
     }
     Add-Candidate (New-Candidate "/etc/tdeenable" "644" "config" -Text "1`n" -Condition "if-missing")
     Add-Candidate (New-Candidate "/pkg/codexactivity/manifest.json" "644" "config" -Text ('{"plugin":"codexactivity"}' + "`n") -Condition "if-missing")
@@ -601,8 +607,15 @@ function Stop-WithValidation([string]$Reason) {
 
 function Resolve-HubIdentity() {
     $hubId = $HubId
+    $existing = (Invoke-Remote "cat /data/codex/hub_id 2>/dev/null || true" $null 30000).Trim()
+    if (-not $existing -and -not $CleanInstall) {
+        # A hub without /data/codex/hub_id has no configuration of ours to
+        # preserve, so the first install writes it, as -CleanInstall does.
+        $script:CleanInstall = $true
+        $script:FirstInstall = $true
+        Info "first install: the hub has no /data/codex/hub_id yet, so this run writes the configuration (as -CleanInstall)"
+    }
     if (-not $hubId) {
-        $existing = (Invoke-Remote "cat /data/codex/hub_id 2>/dev/null || true" $null 30000).Trim()
         if ($existing) {
             $hubId = $existing
             Info "hub id from existing /data/codex/hub_id: $hubId"
@@ -726,7 +739,9 @@ function Show-PreflightReport() {
     if ($PreflightOnly) {
         Info "Mode: -PreflightOnly — stages, verifies, compares, and prints a terminal verdict; performs no persistent writes and no service actions."
     }
-    if ($CleanInstall) {
+    if ($FirstInstall) {
+        Info "Install mode: first install — the hub has no configuration of ours yet, so configuration candidates are written."
+    } elseif ($CleanInstall) {
         Info "Install mode: explicit clean install — configuration candidates are regenerated."
     } else {
         Info "Install mode: default upgrade — existing configuration is preserved unless a candidate explicitly replaces it."
@@ -1224,7 +1239,9 @@ if ($cloudChanged -and -not $NoApplyCloudRestart) {
 }
 
 Step "Done"
-if ($CleanInstall) {
+if ($FirstInstall) {
+    Info "Install finished as a first install (configuration written)."
+} elseif ($CleanInstall) {
     Info "Install finished in explicit clean-install mode (configuration regenerated)."
 } else {
     Info "Install finished in default upgrade mode (existing configuration preserved where applicable)."
