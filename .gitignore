@@ -55,6 +55,10 @@ build/zig-cache/
 docs/FULL_FEATURE_ANALYSIS.pdf
 tools/hub-emu/build/
 tools/webui-sim/build/
+node_modules/
+desktop/node_modules/
+desktop/build/
+desktop/dist/
 .omo/
 .playwright-mcp/
 .slim/
