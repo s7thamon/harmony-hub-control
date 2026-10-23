@@ -7,7 +7,7 @@ plugins {
 
 android {
     namespace = "app.melodious"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "app.melodious"
@@ -43,6 +43,8 @@ android {
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
+            // androidx.browser's jspecify and JSch ship the same multi-release manifest.
+            excludes += "/META-INF/versions/9/OSGI-INF/MANIFEST.MF"
         }
     }
 }
@@ -51,6 +53,7 @@ dependencies {
     implementation(project(":core-protocol"))
     implementation(project(":core-ssh"))
 
+    implementation(libs.androidx.browser)
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.viewmodel.compose)

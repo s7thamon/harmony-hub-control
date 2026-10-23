@@ -34,6 +34,11 @@ class HubPrefs(context: Context) {
             .apply()
     }
 
+    /** OAuth client_id override for the Logitech catalog; empty means the built-in public one. */
+    var logitechClientId: String
+        get() = prefs.getString(KEY_CLIENT_ID, "") ?: ""
+        set(value) = prefs.edit().putString(KEY_CLIENT_ID, value).apply()
+
     var volumeKeysEnabled: Boolean
         get() = prefs.getBoolean(KEY_VOLUME_KEYS, true)
         set(value) = prefs.edit().putBoolean(KEY_VOLUME_KEYS, value).apply()
@@ -81,6 +86,7 @@ class HubPrefs(context: Context) {
         const val KEY_PORT = "saved_hub_port"
         const val KEY_HUB_ID = "saved_hub_id"
         const val KEY_AUTH = "saved_hub_auth"
+        const val KEY_CLIENT_ID = "logitech_client_id"
         const val KEY_VOLUME_KEYS = "volume_keys_enabled"
         const val KEY_HAPTICS = "haptics_enabled"
         const val KEY_REMOTE_MODE = "remote_mode"

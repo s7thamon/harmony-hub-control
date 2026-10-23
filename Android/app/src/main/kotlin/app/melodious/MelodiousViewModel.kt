@@ -5,7 +5,14 @@ import android.content.Context
 import android.net.wifi.WifiManager
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import app.melodious.protocol.catalog.CatalogError
+import app.melodious.protocol.catalog.CatalogService
+import app.melodious.protocol.catalog.OkHttpCatalogHttp
+import app.melodious.protocol.catalog.effectiveClientId
+import app.melodious.protocol.catalog.normalizeClientId
+import app.melodious.system.AuthTabSignIn
 import app.melodious.system.HubPrefs
+import app.melodious.system.LogitechTokenStore
 import app.melodious.system.RemoteNotification
 import app.melodious.system.WidgetRenderer
 import app.melodious.protocol.model.DeviceCommand
@@ -125,6 +132,11 @@ data class MelodiousUiState(
     val activeBatchRunId: String? = null,
     val batchSweepStatus: String? = null,
 
+    // Logitech catalog account (tokens stay encrypted on the phone)
+    val catalogSignedIn: Boolean = false,
+    val catalogBusy: Boolean = false,
+    val logitechClientId: String = "",
+
     // Bluetooth & admin
     val btAdapterStatus: BtAdapterStatus = BtAdapterStatus(),
     val btTextHelperStatus: BtTextHelperStatus = BtTextHelperStatus(),
@@ -218,6 +230,12 @@ class MelodiousViewModel(application: Application) : AndroidViewModel(applicatio
     private val discovery = HubDiscovery()
     private val hbusClient = HBusWebSocketClient(viewModelScope)
     private val sshProvisioner = HubSshProvisioner()
+    private val catalogService = CatalogService(
+        http = OkHttpCatalogHttp(),
+        tokenStore = LogitechTokenStore(application),
+        signInLauncher = AuthTabSignIn,
+        clientIdProvider = { effectiveClientId(prefs.logitechClientId) },
+    )
 
     private val _uiState = MutableStateFlow(
         MelodiousUiState(
@@ -227,6 +245,8 @@ class MelodiousViewModel(application: Application) : AndroidViewModel(applicatio
             notificationRemoteEnabled = prefs.notificationRemoteEnabled,
             notificationPermissionGranted = RemoteNotification.hasPermission(application),
             notificationPromptHandled = prefs.notificationPromptHandled,
+            catalogSignedIn = catalogService.status().signedIn,
+            logitechClientId = prefs.logitechClientId,
         )
     )
     val uiState: StateFlow<MelodiousUiState> = _uiState.asStateFlow()
@@ -537,6 +557,61 @@ class MelodiousViewModel(application: Application) : AndroidViewModel(applicatio
     fun setHapticsEnabled(enabled: Boolean) {
         prefs.hapticsEnabled = enabled
         _uiState.update { it.copy(hapticsEnabled = enabled) }
+    }
+
+    // ========================================================================
+    // Logitech catalog account
+    // ========================================================================
+
+    fun catalogSignIn() {
+        if (_uiState.value.catalogBusy) return
+        _uiState.update { it.copy(catalogBusy = true) }
+        viewModelScope.launch {
+            runCatching { catalogService.signIn() }
+                .onSuccess { status ->
+                    _uiState.update { it.copy(catalogBusy = false, catalogSignedIn = status.signedIn) }
+                    if (status.signedIn) showMessage("Signed in to Logitech.")
+                }
+                .onFailure { err ->
+                    _uiState.update {
+                        it.copy(catalogBusy = false, catalogSignedIn = catalogService.status().signedIn)
+                    }
+                    showMessage(err.message ?: "Sign-in failed.", isError = true)
+                }
+        }
+    }
+
+    fun catalogSignOut() {
+        if (_uiState.value.catalogBusy) return
+        _uiState.update { it.copy(catalogBusy = true) }
+        viewModelScope.launch {
+            runCatching { catalogService.signOut() }
+                .onSuccess {
+                    _uiState.update { it.copy(catalogBusy = false, catalogSignedIn = false) }
+                    showMessage("Signed out of Logitech.")
+                }
+                .onFailure { err ->
+                    _uiState.update { it.copy(catalogBusy = false) }
+                    showMessage(err.message ?: "Sign-out failed.", isError = true)
+                }
+        }
+    }
+
+    /** Returns false (and shows why) when the client_id is not usable. */
+    fun saveLogitechClientId(value: String): Boolean {
+        val clean = try {
+            normalizeClientId(value)
+        } catch (e: CatalogError) {
+            showMessage(e.message ?: "Invalid client_id", isError = true)
+            return false
+        }
+        prefs.logitechClientId = clean
+        _uiState.update { it.copy(logitechClientId = clean) }
+        showMessage(
+            if (clean.isEmpty()) "Reset to built-in OAuth client_id."
+            else "Saved custom OAuth client_id."
+        )
+        return true
     }
 
     fun setNotificationRemoteEnabled(enabled: Boolean) {

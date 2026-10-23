@@ -62,6 +62,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.statusBars
+import app.melodious.system.AuthTabSignIn
 import app.melodious.system.PowerOffTileService
 import app.melodious.ui.activities.ActivitiesTab
 import app.melodious.ui.activities.ActivityEditor
@@ -95,7 +96,12 @@ private sealed interface Page {
 class MainActivity : ComponentActivity() {
     private val viewModel: MelodiousViewModel by viewModels()
 
+    private val authTabLauncher = androidx.browser.auth.AuthTabIntent.registerActivityResultLauncher(this) { result ->
+        AuthTabSignIn.onResult(result)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
+        AuthTabSignIn.bind(applicationContext, authTabLauncher)
         enableEdgeToEdge(
             statusBarStyle = SystemBarStyle.dark(MelodiousColors.Canvas.toArgbInt()),
             navigationBarStyle = SystemBarStyle.dark(MelodiousColors.NavBar.toArgbInt()),
@@ -119,6 +125,11 @@ class MainActivity : ComponentActivity() {
     override fun onStop() {
         viewModel.onAppBackground()
         super.onStop()
+    }
+
+    override fun onDestroy() {
+        AuthTabSignIn.unbind(authTabLauncher)
+        super.onDestroy()
     }
 
     override fun onNewIntent(intent: Intent) {

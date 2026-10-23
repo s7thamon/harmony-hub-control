@@ -47,6 +47,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import app.melodious.protocol.catalog.DEFAULT_CLIENT_ID
 import app.melodious.MelodiousUiState
 import app.melodious.MelodiousViewModel
 import app.melodious.SendStatus
@@ -140,6 +141,7 @@ fun AdvancedScreen(state: MelodiousUiState, viewModel: MelodiousViewModel, onBac
     var sweepDeviceId by rememberSaveable { mutableStateOf(state.devices.firstOrNull()?.id) }
     var sweepDelay by remember { mutableFloatStateOf(120f) }
     var sshKey by rememberSaveable { mutableStateOf("") }
+    var clientId by rememberSaveable { mutableStateOf(state.logitechClientId) }
     var confirmReset by remember { mutableStateOf(false) }
     val sys = state.systemStatus
 
@@ -259,6 +261,27 @@ fun AdvancedScreen(state: MelodiousUiState, viewModel: MelodiousViewModel, onBac
                         )
                     }
                 }
+            }
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                SectionLabel("Logitech catalog")
+                OutlinedTextField(
+                    value = clientId,
+                    onValueChange = { clientId = it },
+                    label = { Text("OAuth client_id") },
+                    placeholder = { Text(DEFAULT_CLIENT_ID) },
+                    singleLine = true,
+                    shape = RoundedCornerShape(16.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Text(
+                    "Leave empty to use Logitech's public desktop client_id ($DEFAULT_CLIENT_ID).",
+                    fontSize = 14.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Button(
+                    onClick = { viewModel.saveLogitechClientId(clientId) },
+                    modifier = Modifier.fillMaxWidth().height(52.dp),
+                ) { Text("Save client_id") }
             }
             Spacer(Modifier.height(16.dp))
         }
