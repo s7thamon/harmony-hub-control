@@ -1,9 +1,9 @@
 # Melodious
 
 Melodious turns a rooted Logitech Harmony Hub into a home-theater controller
-that you own outright. It's a framework that runs on the hub, plus a web app
-and an Android app built on it, and all of it runs on your local network with
-no Logitech app, account or cloud.
+that you own outright. It's a framework that runs on the hub, plus a web app,
+an Android app and a macOS app built on it, and all of it runs on your local
+network with no Logitech app, account or cloud.
 
 Melodious is for owners of a Harmony Hub that is already rooted with
 [harmony-hub-root](https://github.com/Ripthulhu/harmony-hub-root) who want the
@@ -26,7 +26,7 @@ Wi-Fi recovery network.
 
 ## What's in it
 
-Melodious has three parts:
+Melodious has four parts:
 
 - **The Melodious framework**, on the hub: software you install on a rooted
   Harmony Hub. It serves the apps and a local HTTP API, saves your changes to
@@ -37,6 +37,9 @@ Melodious has three parts:
   install, and it works fully offline.
 - **The Android app**: a native remote for Android 8.0 and later, for the same
   hub.
+- **The macOS app**: the web app in a Mac window, plus Logitech catalog
+  lookup: sign in to your own Logitech account and import a device's codes
+  from Logitech's catalog. Your sign-in stays on your Mac.
 
 ## Features
 
@@ -59,7 +62,8 @@ Melodious has three parts:
 - **Devices**: add and edit devices, learn codes from your original remotes,
   import codes (IRDB, Flipper `.ir` files, `name|mode|code` lines, Pronto hex
   or RemoteCentral pages) or type them in, and set each device's power, inputs
-  and timing.
+  and timing. The macOS app also imports a device's codes from Logitech's
+  catalog, through your Logitech account.
 - **Finding codes**: send every command a device has, in turn, to find the
   ones it answers to, or try codes on the IR lab's scratch device.
 
@@ -68,6 +72,7 @@ Melodious has three parts:
 - **The web app** on any phone or computer, served by the hub.
 - **The Android app**, with a touchpad, a sleep timer, lock-screen
   controls, a home-screen widget and a Quick Settings tile.
+- **The macOS app**, with Logitech catalog lookup.
 - **A Bluetooth keyboard**: the hub pairs with a TV, streaming box or computer
   as a keyboard, so you can type searches and passwords from your phone, and
   run saved keystroke scripts.
@@ -128,6 +133,7 @@ Melodious has three parts:
 | Network | A trusted home network. The web app is plain HTTP. |
 | Browser | A current browser on a phone, tablet or computer. |
 | Android app (optional) | A phone with Android 8.0 or later, and a computer with JDK 17 or 21 and the Android SDK to build the app. |
+| macOS app (optional) | macOS 13 or later, on Apple silicon or Intel. Catalog lookup needs a Logitech account. Building the app needs Node.js. |
 
 ## Install and first run
 
@@ -198,9 +204,9 @@ already on the hub, including any set up with the Logitech app before rooting.
 
 ## The apps
 
-The web app and the Android app control the same hub and share one design.
-Both come with Melodious: the hub serves the web app, and the Android app is a
-download on the release page.
+The web app, the Android app and the macOS app control the same hub and share
+one design. All three come with Melodious: the hub serves the web app, and the
+Android and macOS apps are downloads on the release page.
 
 <p align="center">
   <img src="docs/screenshots/web/remote.png" alt="The web app's remote on a phone" height="540">
@@ -418,6 +424,53 @@ pages.
 
 </details>
 
+### The macOS app
+
+The macOS app is the web app in a Mac window, from the same bundle the hub
+serves, plus the one thing a page served by the hub can't do: sign in to your
+Logitech account and pull a device's codes from Logitech's catalog. It's in
+[`desktop/`](desktop/) (Electron), for macOS 13 and later.
+
+**Install.** Download `Melodious-<version>-arm64.dmg` (Apple silicon) or
+`-x64.dmg` (Intel) from the
+[release page](https://github.com/schlambos/harmony-hub-control/releases),
+open it and drag Melodious to Applications. The app isn't signed with an Apple
+Developer ID, so macOS asks before the first launch: Control-click Melodious →
+Open, or use System Settings → Privacy & Security → Open Anyway. In Terminal,
+`xattr -dr com.apple.quarantine /Applications/Melodious.app` does the same. To
+build it yourself, see [`desktop/README.md`](desktop/README.md).
+
+**First run.** The app looks for the hub on your network (SSDP), or you type
+its address. If the hub has a sign-in, enter it once. Change either later in
+Melodious → Settings (⌘,).
+
+**Logitech catalog.** Open a device, then Import codes → Logitech catalog:
+
+1. **Sign in** opens Logitech's sign-in in its own window (Google sign-in
+   works). It closes by itself when you're signed in, and the app stays
+   signed in after a restart until you sign out.
+2. Type the brand and model. The app checks the model name after you stop
+   typing; **Search** lists the matches.
+3. Pick one and **Download**. The preview shows what imports, and lists each
+   command the hub can't play, with the reason (its IR protocol isn't on the
+   hub). **Import** adds the rest to the device.
+
+Your Logitech tokens stay in the app's background process, encrypted with your
+Keychain; the web page, the hub and the logs never see them. Logitech gets the
+sign-in, your searches and the one device you download, and nothing about your
+hub. The app contacts Logitech only when you sign in, type a model, search or
+download, and it has no telemetry and no update check.
+
+Without the app, the same tab opens a package downloaded with
+`tools/catalog/harmony_catalog.py` (see [its README](tools/catalog/README.md)).
+
+<table>
+<tr><td align="center"><img src="docs/screenshots/desktop/catalog-search-1280.png" alt="Searching Logitech's catalog in the macOS app" width="420"><br><sub>Search and download</sub></td><td align="center"><img src="docs/screenshots/desktop/catalog-preview-1280.png" alt="The catalog preview with a skipped command and its reason" width="420"><br><sub>Preview, with skipped commands</sub></td></tr>
+<tr><td align="center"><img src="docs/screenshots/desktop/connect-1280.png" alt="The macOS app's connect screen" width="420"><br><sub>Connect to your hub</sub></td><td align="center"><img src="docs/screenshots/desktop/catalog-preview-390.png" alt="The catalog preview in a narrow window" height="262"><br><sub>A narrow window</sub></td></tr>
+</table>
+
+<sub>The catalog screenshots use test data, not a real Logitech account.</sub>
+
 ## How it works
 
 ```text
@@ -428,7 +481,9 @@ Phone or computer on your network
   │                 ├─ codexactivity.lua ──► the hub's resource manager (activity and device saves)
   │                 ├─ codex_hal_ltcp, codex_bthid_keyboard, codex_bt_pair_agent ──► Bluetooth
   │                 └─ JSON files on the hub's flash (/data)
-  └─ Android app ► the same API on 8080, plus the hub's WebSocket on 8088
+  ├─ Android app ► the same API on 8080, plus the hub's WebSocket on 8088
+  └─ macOS app ──► the web app's bundle in a window; hub requests go to the API on 8080,
+                   and only the app itself talks to Logitech, for catalog lookup
 
 Also on the hub: netservicestarter.lua (cloud blocker and local sync),
 offline_egress_guard.sh (WAN route), codexmqtt.lua (MQTT bridge),
@@ -471,7 +526,13 @@ recovery_ap.sh (recovery network)
   preview run in your browser and fetch from the jsDelivr CDN only when you
   click Search IRDB or Preview. The hub fetches a RemoteCentral page only when
   you click Fetch, and that needs a route to the internet, which the cloud
-  blocker removes.
+  blocker removes. The macOS app contacts Logitech only for catalog lookup,
+  when you sign in, type a model, search or download; the hub stays offline.
+- **macOS app**: Electron, with the packaged web app served over its own
+  `melodious://` scheme and a forwarder that sends hub requests on to the hub.
+  The Logitech client is a Node port of `tools/catalog/harmony_catalog.py`
+  in the main process. `docs/DESKTOP_APP.md` has the design and security
+  model.
 - **Backups on the hub**:
 
   | Backups | Folder | Kept |
@@ -503,6 +564,13 @@ recovery_ap.sh (recovery network)
   big import.
 - **Offline is the supported mode.** Using the Logitech app or cloud sync
   alongside Melodious isn't supported and can overwrite local changes.
+- **Logitech catalog lookup uses your account.** The macOS app reads
+  Logitech's catalog with your own Logitech account, one device at a time, and
+  changes nothing in the account. Logitech's terms govern it; if Logitech
+  closes this path, IRDB search, code files and learning still work. Catalog
+  codes import only if the hub already has their IR protocol.
+- **The macOS app is ad-hoc signed.** It has no Developer ID and doesn't
+  update itself: download new versions from the release page.
 - **Limits.** 32 devices, 2,048 commands per device and 1,024 commands per
   import. The hub backs up its device list before each write.
 - **Locked out of sign-in?** The Android app's SSH recovery clears it, or
@@ -544,7 +612,12 @@ node tools/shipped_copy_hygiene.mjs               # no personal names or IDs in 
 python3 tools/installer_contract_smoke.py         # the installers' contract, with a fake hub
 python3 -m unittest discover -s tools/reconciliation -p 'test_*.py'   # provenance; 12 known failures
 (cd Android && ./gradlew :core-protocol:test)    # Android protocol and graph tests
+node --test desktop/test/                         # macOS app units
+(cd desktop && npm run test:e2e)                  # macOS app end-to-end, against the simulator
 ```
+
+The macOS app's tests need `npm ci` in `desktop/` first; building and
+releasing the app is in [`desktop/README.md`](desktop/README.md).
 
 The Android tests need JDK 17 or 21 and the Android SDK; `deploy_to_phone.sh`
 sets both up on macOS.
@@ -570,6 +643,9 @@ When `codex_webui` changes, update its pins in the build script,
 | [docs/API.md](docs/API.md) | The hub's HTTP API and the activity rules the paired remote needs |
 | [docs/BUILD.md](docs/BUILD.md) | Building the MIPS binaries with the pinned toolchain |
 | [docs/PROTOCOLS.md](docs/PROTOCOLS.md) | The hub's own protocols and ports |
+| [docs/DESKTOP_APP.md](docs/DESKTOP_APP.md) | The macOS app's design and security model |
+| [desktop/README.md](desktop/README.md) | Building, testing and releasing the macOS app |
+| [tools/catalog/README.md](tools/catalog/README.md) | The Logitech catalog helper for the command line |
 | [docs/SECURITY.md](docs/SECURITY.md) | Security notes and what never to commit |
 | [UNRAID.md](UNRAID.md) | Docker and Unraid |
 | [tools/webui-sim/README.md](tools/webui-sim/README.md) | The simulator and the web app's packaging |

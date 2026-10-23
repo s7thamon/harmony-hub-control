@@ -31,6 +31,10 @@ const { createCatalogService } = require("./catalog/client");
 const { runSignInWindow } = require("./catalog/signin-window");
 const { registerCatalogIpcHandlers } = require("./ipc");
 
+// Test hooks (stand-in safeStorage, stub catalog) exist only when running from
+// source; a packaged app ignores MELODIOUS_E2E.
+const E2E = process.env.MELODIOUS_E2E === "1" && !app.isPackaged;
+
 if (process.env.MELODIOUS_USER_DATA_DIR) {
   app.setPath("userData", process.env.MELODIOUS_USER_DATA_DIR);
 }
@@ -88,7 +92,7 @@ let pageMode = "connect";
 let lastUnreachableError = null;
 
 function getActiveCatalogService() {
-  return (process.env.MELODIOUS_E2E === "1" && globalThis.__melodiousCatalogService) || catalogService;
+  return (E2E && globalThis.__melodiousCatalogService) || catalogService;
 }
 
 function openSettingsPage() {
@@ -368,7 +372,7 @@ function createMainWindow() {
   attachWindowSecurity({
     win: mainWindow,
     openExternal: (url) =>
-      typeof globalThis.__melodiousOpenExternal === "function"
+      E2E && typeof globalThis.__melodiousOpenExternal === "function"
         ? globalThis.__melodiousOpenExternal(url)
         : shell.openExternal(url),
   });
@@ -383,8 +387,7 @@ function createMainWindow() {
 
 app.whenReady().then(() => {
   app.name = "Melodious";
-  const storageBackend =
-    process.env.MELODIOUS_E2E === "1" ? createE2eSafeStorage() : safeStorage;
+  const storageBackend = E2E ? createE2eSafeStorage() : safeStorage;
 
   settingsStore = createSettingsStore({
     dir: app.getPath("userData"),
@@ -438,7 +441,7 @@ app.whenReady().then(() => {
     ses: session.defaultSession,
     getMainWindow: () => mainWindow,
     showSaveDialog: (win, opts) =>
-      typeof globalThis.__melodiousShowSaveDialog === "function"
+      E2E && typeof globalThis.__melodiousShowSaveDialog === "function"
         ? globalThis.__melodiousShowSaveDialog(win, opts)
         : dialog.showSaveDialogSync(win, opts),
   });
@@ -455,7 +458,7 @@ app.whenReady().then(() => {
 });
 
 app.on("window-all-closed", () => {
-  if (process.platform !== "darwin" || process.env.MELODIOUS_E2E === "1") {
+  if (process.platform !== "darwin" || E2E) {
     app.quit();
   }
 });

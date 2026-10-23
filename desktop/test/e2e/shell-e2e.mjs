@@ -213,9 +213,13 @@ test("Playwright _electron end-to-end shell suite against webui-sim", { timeout:
     await page.evaluate(() => {
       const h = document.getElementById("connectHost");
       if (h) h.value = "hub.local";
+      const p = document.getElementById("connectPort");
+      if (p) p.value = "8080";
+      document.activeElement?.blur();
     });
     await page.screenshot({ path: path.join(shotsDir, "connect-1280.png") });
     await page.fill("#connectHost", "127.0.0.1");
+    await page.fill("#connectPort", String(SIM_PORT));
 
     await page.click("#connectBtn");
 

@@ -1,0 +1,43 @@
+# Melodious for macOS: zip and dmg for arm64 and x64, ad-hoc signed.
+# Build: npm run dist (see README.md). Run scripts/bundle-shell.sh first;
+# `npm run dist` does it.
+appId: app.melodious.desktop
+productName: Melodious
+copyright: Melodious contributors
+artifactName: Melodious-${version}-${arch}.${ext}
+
+directories:
+  output: dist
+  buildResources: resources
+
+# Only the app itself: the main-process code and the staged web shell.
+files:
+  - package.json
+  - src/**/*
+  - build/shell/**/*
+
+asar: true
+npmRebuild: false
+
+mac:
+  target:
+    - target: dmg
+      arch: [arm64, x64]
+    - target: zip
+      arch: [arm64, x64]
+  category: public.app-category.utilities
+  icon: resources/icon.png
+  darkModeSupport: true
+  # Ad-hoc signature: no Developer ID and no notarisation. Hardened runtime
+  # stays off, as ad-hoc signing needs.
+  identity: "-"
+  hardenedRuntime: false
+  gatekeeperAssess: false
+  notarize: false
+
+dmg:
+  title: Melodious ${version}
+  writeUpdateInfo: false
+
+# No update feed and nothing published from here: the owner publishes releases.
+publish: null
