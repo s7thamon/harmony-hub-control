@@ -1,7 +1,8 @@
 /* Activities tab (#activities): the app's ActivitiesScreen. The running
    activity sits in a card with Open remote and Turn off; every other
-   activity is a row with Start and a ⋮ menu (edit, set up buttons, try the
-   buttons, the advanced editor, reorder, delete). Setup goes through the
+   activity is a row with Start and a ⋮ menu (edit, set up buttons, the
+   Touch's on-screen buttons, try the buttons, the advanced editor, reorder,
+   delete). Setup goes through the
    wizard (#wizard). */
 
 import * as hub from "../state.js";
@@ -232,6 +233,7 @@ export function createActivitiesHomeView(section) {
       items: [
         { id: "edit", label: "Edit", icon: "edit_outlined" },
         { id: "buttons", label: "Set up buttons", icon: "tune_outlined" },
+        { id: "touch", label: "On-screen buttons", icon: "tune_outlined" },
         { id: "try", label: "Try the buttons", icon: "settings_remote_outlined" },
         { id: "editor", label: "Advanced editor", icon: "build_outlined" },
         { id: "up", label: "Move up", icon: "keyboard_arrow_up", disabled: !neighbour(id, -1) },
@@ -241,6 +243,7 @@ export function createActivitiesHomeView(section) {
       onSelect: (choice) => {
         if (choice === "edit") location.hash = `#wizard/${path}`;
         else if (choice === "buttons") location.hash = `#wizard/${path}/buttons`;
+        else if (choice === "touch") location.hash = `#touch/${path}`;
         else if (choice === "try") location.hash = `#remote/${path}`;
         else if (choice === "editor") location.hash = "#editor";
         else if (choice === "up") move(id, -1);

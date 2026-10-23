@@ -473,3 +473,66 @@
   border-color: var(--on-primary);
   border-right-color: transparent;
 }
+
+/* -- On-screen buttons (#touch) ------------------------------------------------------ */
+
+.touch-row {
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-2) var(--space-2) var(--space-4);
+}
+
+.touch-slot {
+  flex: none;
+  min-width: 24px;
+  color: var(--outline);
+  font-size: var(--fs-body-sm);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.touch-main {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  min-width: 0;
+  min-height: 48px;
+  border-radius: var(--shape-sm);
+  text-align: left;
+}
+
+.touch-main:hover {
+  background: var(--state-hover);
+}
+
+.touch-main:focus-visible {
+  box-shadow: 0 0 0 2px var(--primary);
+}
+
+.touch-move {
+  display: flex;
+  flex: none;
+}
+
+.touch-row.is-locked {
+  padding-right: var(--space-4);
+}
+
+.touch-row.is-locked .m-row-title {
+  color: var(--on-surface-variant);
+}
+
+.touch-sync {
+  margin-bottom: var(--space-4);
+}
+
+.touch .wiz-add {
+  margin-top: var(--space-4);
+}
+
+.touch .wiz-foot [data-act="undo"] {
+  flex: 1;
+}
+
+.touch .wiz-foot [data-act="save"] {
+  flex: 2;
+}

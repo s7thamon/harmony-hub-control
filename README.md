@@ -59,6 +59,9 @@ Melodious has four parts:
   advanced editor for roles, button maps and the activity's JSON. Each save is
   checked and written on the hub as one transaction, and the paired remote
   picks it up the next time it syncs.
+- **Harmony Touch screen**: rename, re-point, move, add and remove an
+  activity's on-screen buttons. Buttons keep their places unless you move
+  them, and the Touch shows the change after its next sync.
 - **Devices**: add and edit devices, learn codes from your original remotes,
   import codes (IRDB, Flipper `.ir` files, `name|mode|code` lines, Pronto hex
   or RemoteCentral pages) or type them in, and set each device's power, inputs
