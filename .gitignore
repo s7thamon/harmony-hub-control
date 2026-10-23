@@ -5,6 +5,7 @@ Thumbs.db
 .idea/
 
 # Local archives and generated packages
+harmony-catalog-*.json
 *.zip
 *.7z
 *.rar
