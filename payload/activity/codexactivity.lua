@@ -387,34 +387,138 @@ local function validateGraph(activityList, mapList, functionList, deviceList)
     if not mapDeviceOk then
       return nil, mapDeviceError
     end
-    if type(buttonMap.Buttons) == "table" then
-      for _, button in ipairs(buttonMap.Buttons) do
-        if type(button) == "table" then
-          for _, field in ipairs({
-            "ButtonAction",
-            "ButtonLongPressAction",
-            "ButtonDoublePressAction"
-          }) do
-            local action = button[field]
-            if type(action) == "table" then
-              local actionDeviceOk, actionDeviceError = validateDeviceReference(
-                deviceIds,
-                action["DeviceId-"],
-                "MapList " .. field
-              )
-              if not actionDeviceOk then
-                return nil, actionDeviceError
-              end
-              local actionActivityOk, actionActivityError =
-                validateActivityReference(
-                  activityIds,
-                  action["ActivityId-"],
-                  "MapList " .. field
-                )
-              if not actionActivityOk then
-                return nil, actionActivityError
-              end
+    -- The stock reader that builds the hub's and the Touch's button maps
+    -- throws on maps and buttons shaped unlike the ones below, and a map
+    -- it cannot load leaves the Touch without a screen until the next
+    -- good sync. Reject those shapes here, before anything is saved.
+    local mapLabel = tostring(
+      buttonMap.ButtonMapIdentifier or buttonMap["ButtonMapId-"] or "unknown"
+    )
+    local mapType = type(buttonMap.__type) == "string" and buttonMap.__type or ""
+    local isActivityMap = string.find(mapType, "ActivityButtonMap", 1, true) ~= nil
+    if not isActivityMap and
+        not string.find(mapType, "DeviceButtonMap", 1, true) and
+        not string.find(mapType, "RootButtonMap", 1, true) then
+      return nil, "MapList map " .. mapLabel .. " has an unknown or missing __type"
+    end
+    if type(buttonMap.Buttons) ~= "table" then
+      return nil, "MapList map " .. mapLabel .. " is missing its Buttons array"
+    end
+    local sequenceIds = {}
+    if buttonMap.Sequences ~= nil and buttonMap.Sequences ~= json.null then
+      if type(buttonMap.Sequences) ~= "table" then
+        return nil, "MapList map " .. mapLabel .. " has an invalid Sequences value"
+      end
+      for _, sequence in ipairs(buttonMap.Sequences) do
+        if type(sequence) ~= "table" or sequence.SequenceId == nil or
+            sequence.SequenceId == json.null then
+          return nil, "MapList map " .. mapLabel .. " has a sequence without a SequenceId"
+        end
+        local sequenceLabel = tostring(sequence.SequenceId)
+        if type(sequence.Actions) ~= "table" then
+          return nil, "MapList map " .. mapLabel .. " sequence " ..
+            sequenceLabel .. " is missing its Actions array"
+        end
+        sequenceIds[sequenceLabel] = true
+        for _, step in ipairs(sequence.Actions) do
+          local stepType = type(step) == "table" and step.__type or nil
+          if type(stepType) ~= "string" then
+            return nil, "MapList map " .. mapLabel .. " sequence " ..
+              sequenceLabel .. " has a step with an unknown or missing __type"
+          end
+          if string.find(stepType, "ButtonCommandAction", 1, true) then
+            local stepDeviceOk, stepDeviceError = validateDeviceReference(
+              deviceIds,
+              step["DeviceId-"],
+              "MapList sequence " .. sequenceLabel .. " step"
+            )
+            if not stepDeviceOk then
+              return nil, stepDeviceError
             end
+          elseif string.find(stepType, "ButtonDelayAction", 1, true) then
+            if type(step.Duration) ~= "number" then
+              return nil, "MapList map " .. mapLabel .. " sequence " ..
+                sequenceLabel .. " has a delay step without a numeric Duration"
+            end
+          else
+            return nil, "MapList map " .. mapLabel .. " sequence " ..
+              sequenceLabel .. " has a step with an unknown or missing __type"
+          end
+        end
+      end
+    end
+    local seenSlots = {}
+    for _, button in ipairs(buttonMap.Buttons) do
+      if type(button) ~= "table" then
+        return nil, "MapList map " .. mapLabel .. " contains a non-object button"
+      end
+      local buttonType = type(button.__type) == "string" and button.__type or ""
+      local isSoft = string.find(buttonType, "SoftRemoteButton", 1, true) ~= nil
+      local isHard = string.find(buttonType, "HardRemoteButton", 1, true) ~= nil
+      local isGesture = string.find(buttonType, "GestureRemoteButton", 1, true) ~= nil
+      if not isSoft and not isHard and not isGesture then
+        return nil, "MapList map " .. mapLabel ..
+          " has a button with an unknown or missing __type"
+      end
+      if isHard or isGesture then
+        if type(button.ButtonKey) ~= "string" or button.ButtonKey == "" then
+          return nil, "MapList map " .. mapLabel .. " button is missing ButtonKey"
+        end
+      end
+      if isSoft then
+        local menuItem = button.MenuItem
+        local index = type(menuItem) == "table" and menuItem ~= json.null and
+          menuItem.IndexInMenu or nil
+        if type(index) ~= "number" or index ~= math.floor(index) or index < 0 then
+          return nil, "MapList map " .. mapLabel ..
+            " soft button has an invalid MenuItem.IndexInMenu"
+        end
+        -- The stock reader keys on-screen buttons by IndexInMenu alone, so
+        -- two buttons in one activity map that share a slot shadow each
+        -- other. Device maps keep their existing slots until the device
+        -- screen editor sets their rule, so only activity maps are
+        -- rejected here. The number pad is keyed separately and has its
+        -- own slot space.
+        if isActivityMap then
+          local slotKey = (button.FunctionGroupType == 2 and "pad:" or "soft:") ..
+            tostring(index)
+          if seenSlots[slotKey] then
+            return nil, "MapList map " .. mapLabel ..
+              " has duplicate IndexInMenu " .. tostring(index) ..
+              " for on-screen buttons"
+          end
+          seenSlots[slotKey] = true
+        end
+      end
+      for _, field in ipairs({
+        "ButtonAction",
+        "ButtonLongPressAction",
+        "ButtonDoublePressAction"
+      }) do
+        local action = button[field]
+        if type(action) == "table" then
+          local actionDeviceOk, actionDeviceError = validateDeviceReference(
+            deviceIds,
+            action["DeviceId-"],
+            "MapList " .. field
+          )
+          if not actionDeviceOk then
+            return nil, actionDeviceError
+          end
+          local actionActivityOk, actionActivityError =
+            validateActivityReference(
+              activityIds,
+              action["ActivityId-"],
+              "MapList " .. field
+            )
+          if not actionActivityOk then
+            return nil, actionActivityError
+          end
+          local actionType = type(action.__type) == "string" and action.__type or ""
+          if string.find(actionType, "ButtonSequenceAction", 1, true) and
+              not sequenceIds[tostring(action.SequenceId)] then
+            return nil, "MapList map " .. mapLabel ..
+              " button references missing sequence " .. tostring(action.SequenceId)
           end
         end
       end
