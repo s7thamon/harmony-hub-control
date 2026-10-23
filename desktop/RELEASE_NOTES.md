@@ -4,9 +4,9 @@ Melodious for macOS is the Melodious web app in a Mac window, plus one thing the
 
 | File | What it is |
 | --- | --- |
-| `Melodious-1.0.0-arm64.dmg` | Apple silicon (M1 and later) |
-| `Melodious-1.0.0-x64.dmg` | Intel |
-| `Melodious-1.0.0-arm64.zip`, `Melodious-1.0.0-x64.zip` | The same apps, zipped |
+| `Melodious-1.1.0-arm64.dmg` | Apple silicon (M1 and later) |
+| `Melodious-1.1.0-x64.dmg` | Intel |
+| `Melodious-1.1.0-arm64.zip`, `Melodious-1.1.0-x64.zip` | The same apps, zipped |
 | `SHA256SUMS.txt` | SHA-256 checksums of the four files |
 
 Needs macOS 13 or later and a hub running Melodious. Use hub software from this release's commit or newer: the app carries that commit's web app, and catalog import needs the hub's catalog route (an older hub says "update the hub"). The app ships Electron 45.0.0 (Chromium 156).
@@ -20,7 +20,7 @@ Needs macOS 13 or later and a hub running Melodious. Use hub software from this 
 3. macOS asks whether Melodious may find and connect to devices on your local network. Choose **Allow**: without it the app can't reach the hub. (Change it later in System Settings → Privacy & Security → Local Network.)
 4. Melodious looks for your hub on the network, or you type its address. If your hub has a sign-in, enter it once; it's kept encrypted in your Keychain.
 
-## What's in 1.0
+## What's in 1.1
 
 - **The web app, unchanged:** Remote, Activities, Devices and Settings, from the same bundle the hub serves.
 - **Logitech catalog lookup:** Devices → a device → Import codes → Logitech catalog.
