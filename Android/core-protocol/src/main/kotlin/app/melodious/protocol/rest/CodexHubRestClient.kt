@@ -9,6 +9,8 @@ import app.melodious.protocol.model.HubEndpoint
 import app.melodious.protocol.model.IrCaptureAnalysis
 import app.melodious.protocol.model.SavedBtDevice
 import app.melodious.protocol.model.SavedBtScript
+import app.melodious.protocol.catalog.CatalogCommandRow
+import app.melodious.protocol.catalog.hubProtocolNames
 import app.melodious.protocol.model.SystemStatusSnapshot
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -17,6 +19,9 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonArray
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonObject
@@ -453,6 +458,46 @@ class CodexHubRestClient(
         withContext(Dispatchers.IO) {
             getRawText(endpoint, "/export/bundle")
         }
+
+    /** `GET /export/protocols` → protocol names the hub has. Throws on an unreadable reply. */
+    suspend fun getHubProtocolNames(endpoint: HubEndpoint): List<String> = withContext(Dispatchers.IO) {
+        val raw = getRawText(endpoint, "/export/protocols")
+        val parsed = runCatching { jsonParser.parseToJsonElement(raw) }
+            .getOrElse { throw HubApiException("couldn't be read") }
+        hubProtocolNames(parsed)
+    }
+
+    /** `POST /api/catalog-import` with hub rows from a catalog package. */
+    suspend fun importCatalogCommands(
+        endpoint: HubEndpoint,
+        deviceId: String,
+        rows: List<CatalogCommandRow>,
+    ): JsonObject = withContext(Dispatchers.IO) {
+        val body = buildJsonObject {
+            put("deviceId", deviceId)
+            put("commands", buildJsonArray {
+                for (row in rows) {
+                    add(buildJsonObject {
+                        put("name", row.name)
+                        put("keycode", row.keycode)
+                        put("raw", row.raw)
+                        put("protocol", row.protocol)
+                    })
+                }
+            })
+        }
+        try {
+            postJson(endpoint, "/api/catalog-import", body)
+        } catch (e: HubApiException) {
+            if (e.statusCode == 404) {
+                throw HubApiException(
+                    "Your hub's Melodious software is older than this app; update the hub",
+                    404,
+                )
+            }
+            throw e
+        }
+    }
 
     private fun getRawText(endpoint: HubEndpoint, path: String): String {
         val request = Request.Builder()
