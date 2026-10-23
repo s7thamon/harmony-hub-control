@@ -10,7 +10,7 @@ import java.security.MessageDigest
 import java.security.SecureRandom
 import java.util.Base64
 
-class CatalogError(message: String) : Exception(message)
+class CatalogError(message: String, val accessDenied: Boolean = false) : Exception(message)
 
 const val DEFAULT_CLIENT_ID = "9d88df5e-7edf-4288-8634-26721cbe7add"
 const val OAUTH_AUTHORIZE_URL = "https://accounts.logi.com/identity/oauth2/authorize"

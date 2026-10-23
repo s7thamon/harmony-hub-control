@@ -3,11 +3,16 @@ package app.melodious.protocol.catalog
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import kotlinx.serialization.json.jsonPrimitive
+import java.time.Instant
 
 data class CatalogSession(val accountId: String, val tokens: CatalogTokens)
 
@@ -48,6 +53,16 @@ class CatalogService(
     private val mutex = Mutex()
     private var inMemoryTokens: CatalogTokens? = null
     private var currentSession: CatalogSession? = null
+    private var cachedOperations: Map<String, CatalogOperation>? = null
+
+    private data class LastSearch(
+        val manufacturer: String,
+        val model: String,
+        val raw: JsonElement,
+        val matches: List<JsonObject>,
+    )
+
+    private var lastSearch: LastSearch? = null
 
     fun status(): CatalogStatus =
         CatalogStatus(currentSession != null || loadStoredTokens() != null)
@@ -136,7 +151,130 @@ class CatalogService(
     private fun clearStoredLocked() {
         inMemoryTokens = null
         currentSession = null
+        cachedOperations = null
+        lastSearch = null
         runCatching { tokenStore.clear() }
         runCatching { http.clearCookies() }
+    }
+
+    private fun validateCatalogString(value: String, fieldName: String): String {
+        if (value.any { it.code <= 0x1F || it.code == 0x7F }) {
+            throw CatalogError("Invalid $fieldName: control characters are not allowed")
+        }
+        val trimmed = value.trim()
+        if (trimmed.length !in 1..64) {
+            throw CatalogError("Invalid $fieldName: must be 1 to 64 characters")
+        }
+        return trimmed
+    }
+
+    private fun validateCatalogId(id: Long): Long {
+        if (id <= 0) throw CatalogError("Invalid catalog device id: must be a positive integer")
+        return id
+    }
+
+    suspend fun checkModel(manufacturer: String, model: String): CatalogModelCheck {
+        val m = validateCatalogString(manufacturer, "manufacturer")
+        val n = validateCatalogString(model, "model")
+        return mutex.withLock { checkDeviceModel(http, m, n) }
+    }
+
+    suspend fun search(manufacturer: String, model: String): List<CatalogSearchMatch> {
+        val m = validateCatalogString(manufacturer, "manufacturer")
+        val n = validateCatalogString(model, "model")
+        return mutex.withLock {
+            lastSearch = null
+            val raw = withCatalogRetryLocked { catalog -> catalog.search(m, n) }
+            val matches = searchMatches(raw)
+            if (matches.isEmpty()) {
+                throw CatalogError("No catalog device matches $m $n")
+            }
+            lastSearch = LastSearch(m, n, raw, matches)
+            formatSearchMatches(matches, m, n)
+        }
+    }
+
+    suspend fun download(id: Long, manufacturer: String, model: String): JsonObject {
+        val validId = validateCatalogId(id)
+        val m = validateCatalogString(manufacturer, "manufacturer")
+        val n = validateCatalogString(model, "model")
+        return mutex.withLock {
+            withCatalogRetryLocked { catalog ->
+                val result = catalog.globalDevices(listOf(validId))
+                val arr = result as? JsonArray
+                val device = arr?.singleOrNull() as? JsonObject
+                    ?: throw CatalogError("GetGlobalDevices did not return the device")
+                val returnedId = ((device["Id"] ?: device["Id-"]) as? JsonPrimitive)
+                    ?.let { parseIntegerElement(it) }
+                if (returnedId != validId) {
+                    throw CatalogError("The catalog returned a different device; search again")
+                }
+                val versionPrim = device["DefaultGlobalLanguageVersionId"] as? JsonPrimitive
+                if (versionPrim == null || versionPrim is kotlinx.serialization.json.JsonNull ||
+                    versionPrim.booleanOrNull != null
+                ) {
+                    throw CatalogError("the device carries no language version id")
+                }
+                val commands = catalog.globalLanguageCommands(versionPrim)
+                if (commands !is JsonArray) {
+                    throw CatalogError("The catalog returned no command list")
+                }
+                val matched = lastSearch?.matches?.firstOrNull { candidate ->
+                    ((candidate["Id-"] ?: candidate["Id"]) as? JsonPrimitive)
+                        ?.let { parseIntegerElement(it) } == validId
+                } ?: buildJsonObject {
+                    put("Id-", JsonPrimitive(validId))
+                    put("Manufacturer", m)
+                    put("DeviceModel", n)
+                }
+                val searchResult: JsonElement = lastSearch?.raw ?: buildJsonObject {
+                    put("Matches", buildJsonArray { add(matched) })
+                    put("Status", JsonPrimitive(0))
+                }
+                buildPackage(
+                    manufacturer = m,
+                    model = n,
+                    searchResult = searchResult,
+                    selectedMatch = matched,
+                    globalDevice = device,
+                    languageCommands = commands,
+                    generatedAt = Instant.now().toString(),
+                )
+            }
+        }
+    }
+
+    private suspend fun <T> withCatalogRetryLocked(action: suspend (GlobalCatalogClient) -> T): T {
+        val session = ensureActiveSessionLocked()
+        var catalog = GlobalCatalogClient(http, session, cachedOperations)
+        try {
+            val result = action(catalog)
+            cachedOperations = catalog.operations()
+            return result
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: CatalogError) {
+            if (!e.accessDenied) throw e
+            val refreshToken = session.tokens.refreshToken
+            if (refreshToken.isNullOrEmpty()) {
+                clearStoredLocked()
+                throw e
+            }
+            try {
+                val refreshed = oauthRefresh(http, session.tokens, clientIdProvider())
+                saveStoredTokens(refreshed)
+                val newSession = harmonySignin(http, refreshed)
+                currentSession = newSession
+                catalog = GlobalCatalogClient(http, newSession, cachedOperations)
+                val result = action(catalog)
+                cachedOperations = catalog.operations()
+                return result
+            } catch (e2: CancellationException) {
+                throw e2
+            } catch (_: Exception) {
+                clearStoredLocked()
+                throw CatalogError("Logitech refused the catalog session; sign in again")
+            }
+        }
     }
 }
