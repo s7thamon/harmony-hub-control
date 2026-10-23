@@ -17,7 +17,8 @@ Needs macOS 13 or later and a hub running Melodious. Use hub software from this 
 2. The app isn't signed with an Apple Developer ID, so macOS asks before the first launch:
    - Finder: Control-click Melodious → Open. Where macOS no longer offers Open, use System Settings → Privacy & Security → Open Anyway.
    - Or in Terminal: `xattr -dr com.apple.quarantine /Applications/Melodious.app`
-3. Melodious looks for your hub on the network, or you type its address. If your hub has a sign-in, enter it once; it's kept encrypted in your Keychain.
+3. macOS asks whether Melodious may find and connect to devices on your local network. Choose **Allow**: without it the app can't reach the hub. (Change it later in System Settings → Privacy & Security → Local Network.)
+4. Melodious looks for your hub on the network, or you type its address. If your hub has a sign-in, enter it once; it's kept encrypted in your Keychain.
 
 ## What's in 1.0
 
