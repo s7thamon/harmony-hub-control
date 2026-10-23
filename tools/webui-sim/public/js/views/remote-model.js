@@ -67,6 +67,110 @@ function actionOf(raw) {
 
 const mapsOf = (config) => config?.mapList?.ButtonMaps ?? [];
 
+const MAP_TYPES = ["DeviceButtonMap", "ActivityButtonMap", "RootButtonMap"];
+const BUTTON_TYPES = ["HardRemoteButton", "SoftRemoteButton", "GestureRemoteButton"];
+const ACTION_FIELDS = ["ButtonAction", "ButtonLongPressAction", "ButtonDoublePressAction"];
+
+/**
+ * Check a MapList against the shapes the hub's and the Touch's stock
+ * button-map reader can load, mirroring the hub's validateGraph in
+ * payload/activity/codexactivity.lua. Returns error strings; an empty
+ * list means the MapList is safe to save. Device and activity references
+ * are the hub's job and are not checked here. Duplicate on-screen slots
+ * are rejected in activity maps only: device maps keep their existing
+ * slots until the device screen editor sets their rule, and the number
+ * pad (FunctionGroupType 2) is keyed separately from other soft buttons.
+ */
+export function validateMapList(mapList) {
+  if (!mapList || !Array.isArray(mapList.ButtonMaps)) {
+    return ["MapList.ButtonMaps must be an array"];
+  }
+  const errors = [];
+  for (const map of mapList.ButtonMaps) {
+    if (!map || typeof map !== "object" || Array.isArray(map)) {
+      errors.push("MapList contains a non-object button map");
+      continue;
+    }
+    const mapLabel = String(map.ButtonMapIdentifier ?? map["ButtonMapId-"] ?? "unknown");
+    const mapType = typeof map.__type === "string" ? map.__type : "";
+    const isActivityMap = mapType.includes("ActivityButtonMap");
+    if (!MAP_TYPES.some((t) => mapType.includes(t))) {
+      errors.push(`MapList map ${mapLabel} has an unknown or missing __type`);
+    }
+    if (!Array.isArray(map.Buttons)) {
+      errors.push(`MapList map ${mapLabel} is missing its Buttons array`);
+      continue;
+    }
+    const sequenceIds = new Set();
+    if (map.Sequences !== undefined && map.Sequences !== null) {
+      if (!Array.isArray(map.Sequences)) {
+        errors.push(`MapList map ${mapLabel} has an invalid Sequences value`);
+      } else {
+        for (const sequence of map.Sequences) {
+          if (!sequence || typeof sequence !== "object" || sequence.SequenceId == null) {
+            errors.push(`MapList map ${mapLabel} has a sequence without a SequenceId`);
+            continue;
+          }
+          const sequenceLabel = String(sequence.SequenceId);
+          sequenceIds.add(sequenceLabel);
+          if (!Array.isArray(sequence.Actions)) {
+            errors.push(`MapList map ${mapLabel} sequence ${sequenceLabel} is missing its Actions array`);
+            continue;
+          }
+          for (const step of sequence.Actions) {
+            const stepType = step && typeof step === "object" && typeof step.__type === "string" ? step.__type : "";
+            if (stepType.includes("ButtonCommandAction")) continue;
+            if (stepType.includes("ButtonDelayAction")) {
+              if (typeof step.Duration !== "number") {
+                errors.push(`MapList map ${mapLabel} sequence ${sequenceLabel} has a delay step without a numeric Duration`);
+              }
+              continue;
+            }
+            errors.push(`MapList map ${mapLabel} sequence ${sequenceLabel} has a step with an unknown or missing __type`);
+          }
+        }
+      }
+    }
+    const seenSlots = new Set();
+    for (const button of map.Buttons) {
+      if (!button || typeof button !== "object" || Array.isArray(button)) {
+        errors.push(`MapList map ${mapLabel} contains a non-object button`);
+        continue;
+      }
+      const buttonType = typeof button.__type === "string" ? button.__type : "";
+      const isSoft = buttonType.includes("SoftRemoteButton");
+      if (!BUTTON_TYPES.some((t) => buttonType.includes(t))) {
+        errors.push(`MapList map ${mapLabel} has a button with an unknown or missing __type`);
+        continue;
+      }
+      if (!isSoft && (typeof button.ButtonKey !== "string" || button.ButtonKey === "")) {
+        errors.push(`MapList map ${mapLabel} button is missing ButtonKey`);
+      }
+      if (isSoft) {
+        const index = button.MenuItem && typeof button.MenuItem === "object" ? button.MenuItem.IndexInMenu : undefined;
+        if (!Number.isSafeInteger(index) || index < 0) {
+          errors.push(`MapList map ${mapLabel} soft button has an invalid MenuItem.IndexInMenu`);
+        } else if (isActivityMap) {
+          const slotKey = `${button.FunctionGroupType === 2 ? "pad" : "soft"}:${index}`;
+          if (seenSlots.has(slotKey)) {
+            errors.push(`MapList map ${mapLabel} has duplicate IndexInMenu ${index} for on-screen buttons`);
+          }
+          seenSlots.add(slotKey);
+        }
+      }
+      for (const field of ACTION_FIELDS) {
+        const action = button[field];
+        if (!action || typeof action !== "object") continue;
+        const actionType = typeof action.__type === "string" ? action.__type : "";
+        if (actionType.includes("ButtonSequenceAction") && !sequenceIds.has(String(action.SequenceId))) {
+          errors.push(`MapList map ${mapLabel} button references missing sequence ${String(action.SequenceId)}`);
+        }
+      }
+    }
+  }
+  return errors;
+}
+
 /** The activity's button maps, its own 16414 map first (as the app does). */
 export function activityButtonMaps(config, activityId) {
   const id = String(activityId);

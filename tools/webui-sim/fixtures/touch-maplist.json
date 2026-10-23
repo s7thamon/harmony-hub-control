@@ -1,0 +1,6790 @@
+{
+ "description": "Synthetic MapList validation cases for the Harmony Touch editor. No real activity, device, or hub data. Small integer ids are invented. stock records what the stock button-map reader does with the case: throws, or loads it (ok) even when Melodious validation rejects it.",
+ "cases": [
+  {
+   "name": "valid-activity-full",
+   "expect": "valid",
+   "stock": "ok",
+   "graph": {
+    "activityList": {
+     "Activities": [
+      {
+       "Id-": 100,
+       "Name": "Activity 100",
+       "Roles": []
+      },
+      {
+       "Id-": 101,
+       "Name": "Activity 101",
+       "Roles": []
+      },
+      {
+       "Id-": 102,
+       "Name": "Activity 102",
+       "Roles": []
+      },
+      {
+       "Id-": 103,
+       "Name": "Activity 103",
+       "Roles": []
+      },
+      {
+       "Id-": 200,
+       "Name": "Activity 200",
+       "Roles": []
+      }
+     ]
+    },
+    "mapList": {
+     "ButtonMaps": [
+      {
+       "ButtonMapId-": 5100,
+       "ActivityId-": 100,
+       "ButtonMapSurfaceId-": 7001,
+       "__type": "ActivityButtonMap",
+       "RemoteId-": 8001,
+       "ButtonMapIdentifier": "16417Activity100",
+       "DateModified": null,
+       "Sequences": [
+        {
+         "SequenceId": 9001,
+         "Name": "Start Movie",
+         "Actions": [
+          {
+           "__type": "ButtonCommandAction",
+           "DeviceId-": 10,
+           "CommandName": "Home",
+           "FunctionId-": 0,
+           "Order": 0,
+           "EventType": 0,
+           "Id": 0
+          },
+          {
+           "__type": "ButtonDelayAction",
+           "Duration": 1.5,
+           "Order": 1
+          },
+          {
+           "__type": "ButtonCommandAction",
+           "DeviceId-": 11,
+           "CommandName": "VolumeUp",
+           "FunctionId-": 0,
+           "Order": 2,
+           "EventType": 0,
+           "Id": 0
+          }
+         ]
+        }
+       ],
+       "SurfaceId-": 7001,
+       "Buttons": [
+        {
+         "__type": "HardRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1001,
+         "ButtonState": 1,
+         "ButtonKey": "DirectionUp",
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "DirectionUp",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1100,
+         "TextOnRemote": "Home",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 0,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "Home",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1101,
+         "TextOnRemote": "Volume",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 1,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 11,
+          "CommandName": "VolumeUp",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 11,
+          "CommandName": "VolumeDown",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonDoublePressAction": {
+          "__type": "ButtonSequenceAction",
+          "SequenceId": 9001,
+          "Order": 0
+         }
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1102,
+         "TextOnRemote": "Back",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 2,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "Back",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1103,
+         "TextOnRemote": "Other Activity",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 3,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonActivityAction",
+          "ActivityId-": 200,
+          "Order": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1104,
+         "TextOnRemote": "Movie",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 4,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonSequenceAction",
+          "SequenceId": 9001,
+          "Order": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1105,
+         "TextOnRemote": "Sleep",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 5,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "Sleep",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 2,
+         "ButtonId": 1106,
+         "TextOnRemote": "1",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 0,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "1",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 2,
+         "ButtonId": 1107,
+         "TextOnRemote": "2",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 1,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "2",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "GestureRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1200,
+         "ButtonState": 1,
+         "ButtonKey": "SwipeUp",
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "ChannelUp",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "GestureRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1201,
+         "ButtonState": 1,
+         "ButtonKey": "SwipeDown",
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "ChannelUp",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "GestureRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1202,
+         "ButtonState": 1,
+         "ButtonKey": "SwipeLeft",
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "ChannelUp",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "GestureRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1203,
+         "ButtonState": 1,
+         "ButtonKey": "SwipeRight",
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "ChannelUp",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "GestureRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1204,
+         "ButtonState": 1,
+         "ButtonKey": "Tap",
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "ChannelUp",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        }
+       ]
+      }
+     ]
+    },
+    "functionList": {
+     "FunctionMaps": [
+      {
+       "__type": "ActivityFunctionMap",
+       "ActivityId-": 100,
+       "FunctionGroups": []
+      },
+      {
+       "__type": "ActivityFunctionMap",
+       "ActivityId-": 101,
+       "FunctionGroups": []
+      },
+      {
+       "__type": "ActivityFunctionMap",
+       "ActivityId-": 102,
+       "FunctionGroups": []
+      },
+      {
+       "__type": "ActivityFunctionMap",
+       "ActivityId-": 103,
+       "FunctionGroups": []
+      },
+      {
+       "__type": "ActivityFunctionMap",
+       "ActivityId-": 200,
+       "FunctionGroups": []
+      }
+     ]
+    },
+    "deviceList": {
+     "DevicesWithFeatures": [
+      {
+       "Device": {
+        "Id-": 10,
+        "Name": "Device 10"
+       },
+       "Commands": [],
+       "DeviceFeatures": []
+      },
+      {
+       "Device": {
+        "Id-": 11,
+        "Name": "Device 11"
+       },
+       "Commands": [],
+       "DeviceFeatures": []
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "valid-gap-slots",
+   "expect": "valid",
+   "stock": "ok",
+   "graph": {
+    "activityList": {
+     "Activities": [
+      {
+       "Id-": 100,
+       "Name": "Activity 100",
+       "Roles": []
+      },
+      {
+       "Id-": 101,
+       "Name": "Activity 101",
+       "Roles": []
+      },
+      {
+       "Id-": 102,
+       "Name": "Activity 102",
+       "Roles": []
+      },
+      {
+       "Id-": 103,
+       "Name": "Activity 103",
+       "Roles": []
+      },
+      {
+       "Id-": 200,
+       "Name": "Activity 200",
+       "Roles": []
+      }
+     ]
+    },
+    "mapList": {
+     "ButtonMaps": [
+      {
+       "ButtonMapId-": 5101,
+       "ActivityId-": 101,
+       "ButtonMapSurfaceId-": 7001,
+       "__type": "ActivityButtonMap",
+       "RemoteId-": 8001,
+       "ButtonMapIdentifier": "16417Activity101",
+       "DateModified": null,
+       "Sequences": [],
+       "SurfaceId-": 7001,
+       "Buttons": [
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 2100,
+         "TextOnRemote": "Home",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 0,
+          "MenuName": "Activity.101"
+         },
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "Home",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 2101,
+         "TextOnRemote": "Sleep",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 4,
+          "MenuName": "Activity.101"
+         },
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "Sleep",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        }
+       ]
+      }
+     ]
+    },
+    "functionList": {
+     "FunctionMaps": [
+      {
+       "__type": "ActivityFunctionMap",
+       "ActivityId-": 100,
+       "FunctionGroups": []
+      },
+      {
+       "__type": "ActivityFunctionMap",
+       "ActivityId-": 101,
+       "FunctionGroups": []
+      },
+      {
+       "__type": "ActivityFunctionMap",
+       "ActivityId-": 102,
+       "FunctionGroups": []
+      },
+      {
+       "__type": "ActivityFunctionMap",
+       "ActivityId-": 103,
+       "FunctionGroups": []
+      },
+      {
+       "__type": "ActivityFunctionMap",
+       "ActivityId-": 200,
+       "FunctionGroups": []
+      }
+     ]
+    },
+    "deviceList": {
+     "DevicesWithFeatures": [
+      {
+       "Device": {
+        "Id-": 10,
+        "Name": "Device 10"
+       },
+       "Commands": [],
+       "DeviceFeatures": []
+      },
+      {
+       "Device": {
+        "Id-": 11,
+        "Name": "Device 11"
+       },
+       "Commands": [],
+       "DeviceFeatures": []
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "valid-empty-touch-map",
+   "expect": "valid",
+   "stock": "ok",
+   "graph": {
+    "activityList": {
+     "Activities": [
+      {
+       "Id-": 100,
+       "Name": "Activity 100",
+       "Roles": []
+      },
+      {
+       "Id-": 101,
+       "Name": "Activity 101",
+       "Roles": []
+      },
+      {
+       "Id-": 102,
+       "Name": "Activity 102",
+       "Roles": []
+      },
+      {
+       "Id-": 103,
+       "Name": "Activity 103",
+       "Roles": []
+      },
+      {
+       "Id-": 200,
+       "Name": "Activity 200",
+       "Roles": []
+      }
+     ]
+    },
+    "mapList": {
+     "ButtonMaps": [
+      {
+       "ButtonMapId-": 5102,
+       "ActivityId-": 102,
+       "ButtonMapSurfaceId-": 7001,
+       "__type": "ActivityButtonMap",
+       "RemoteId-": 8001,
+       "ButtonMapIdentifier": "16417Activity102",
+       "DateModified": null,
+       "Sequences": [],
+       "SurfaceId-": 7001,
+       "Buttons": []
+      }
+     ]
+    },
+    "functionList": {
+     "FunctionMaps": [
+      {
+       "__type": "ActivityFunctionMap",
+       "ActivityId-": 100,
+       "FunctionGroups": []
+      },
+      {
+       "__type": "ActivityFunctionMap",
+       "ActivityId-": 101,
+       "FunctionGroups": []
+      },
+      {
+       "__type": "ActivityFunctionMap",
+       "ActivityId-": 102,
+       "FunctionGroups": []
+      },
+      {
+       "__type": "ActivityFunctionMap",
+       "ActivityId-": 103,
+       "FunctionGroups": []
+      },
+      {
+       "__type": "ActivityFunctionMap",
+       "ActivityId-": 200,
+       "FunctionGroups": []
+      }
+     ]
+    },
+    "deviceList": {
+     "DevicesWithFeatures": [
+      {
+       "Device": {
+        "Id-": 10,
+        "Name": "Device 10"
+       },
+       "Commands": [],
+       "DeviceFeatures": []
+      },
+      {
+       "Device": {
+        "Id-": 11,
+        "Name": "Device 11"
+       },
+       "Commands": [],
+       "DeviceFeatures": []
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "valid-no-touch-map",
+   "expect": "valid",
+   "stock": "ok",
+   "graph": {
+    "activityList": {
+     "Activities": [
+      {
+       "Id-": 100,
+       "Name": "Activity 100",
+       "Roles": []
+      },
+      {
+       "Id-": 101,
+       "Name": "Activity 101",
+       "Roles": []
+      },
+      {
+       "Id-": 102,
+       "Name": "Activity 102",
+       "Roles": []
+      },
+      {
+       "Id-": 103,
+       "Name": "Activity 103",
+       "Roles": []
+      },
+      {
+       "Id-": 200,
+       "Name": "Activity 200",
+       "Roles": []
+      }
+     ]
+    },
+    "mapList": {
+     "ButtonMaps": [
+      {
+       "ButtonMapId-": 5103,
+       "ActivityId-": 103,
+       "ButtonMapSurfaceId-": 7001,
+       "__type": "ActivityButtonMap",
+       "RemoteId-": 8001,
+       "ButtonMapIdentifier": "16414Activity103",
+       "DateModified": null,
+       "Sequences": [],
+       "SurfaceId-": 7001,
+       "Buttons": [
+        {
+         "__type": "HardRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 3100,
+         "ButtonState": 1,
+         "ButtonKey": "Play",
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "Play",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        }
+       ]
+      }
+     ]
+    },
+    "functionList": {
+     "FunctionMaps": [
+      {
+       "__type": "ActivityFunctionMap",
+       "ActivityId-": 100,
+       "FunctionGroups": []
+      },
+      {
+       "__type": "ActivityFunctionMap",
+       "ActivityId-": 101,
+       "FunctionGroups": []
+      },
+      {
+       "__type": "ActivityFunctionMap",
+       "ActivityId-": 102,
+       "FunctionGroups": []
+      },
+      {
+       "__type": "ActivityFunctionMap",
+       "ActivityId-": 103,
+       "FunctionGroups": []
+      },
+      {
+       "__type": "ActivityFunctionMap",
+       "ActivityId-": 200,
+       "FunctionGroups": []
+      }
+     ]
+    },
+    "deviceList": {
+     "DevicesWithFeatures": [
+      {
+       "Device": {
+        "Id-": 10,
+        "Name": "Device 10"
+       },
+       "Commands": [],
+       "DeviceFeatures": []
+      },
+      {
+       "Device": {
+        "Id-": 11,
+        "Name": "Device 11"
+       },
+       "Commands": [],
+       "DeviceFeatures": []
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "valid-device-slot-clash-deferred",
+   "expect": "valid",
+   "stock": "ok",
+   "graph": {
+    "activityList": {
+     "Activities": [
+      {
+       "Id-": 100,
+       "Name": "Activity 100",
+       "Roles": []
+      },
+      {
+       "Id-": 101,
+       "Name": "Activity 101",
+       "Roles": []
+      },
+      {
+       "Id-": 102,
+       "Name": "Activity 102",
+       "Roles": []
+      },
+      {
+       "Id-": 103,
+       "Name": "Activity 103",
+       "Roles": []
+      },
+      {
+       "Id-": 200,
+       "Name": "Activity 200",
+       "Roles": []
+      }
+     ]
+    },
+    "mapList": {
+     "ButtonMaps": [
+      {
+       "ButtonMapId-": 5100,
+       "ActivityId-": 100,
+       "ButtonMapSurfaceId-": 7001,
+       "__type": "ActivityButtonMap",
+       "RemoteId-": 8001,
+       "ButtonMapIdentifier": "16417Activity100",
+       "DateModified": null,
+       "Sequences": [
+        {
+         "SequenceId": 9001,
+         "Name": "Start Movie",
+         "Actions": [
+          {
+           "__type": "ButtonCommandAction",
+           "DeviceId-": 10,
+           "CommandName": "Home",
+           "FunctionId-": 0,
+           "Order": 0,
+           "EventType": 0,
+           "Id": 0
+          },
+          {
+           "__type": "ButtonDelayAction",
+           "Duration": 1.5,
+           "Order": 1
+          },
+          {
+           "__type": "ButtonCommandAction",
+           "DeviceId-": 11,
+           "CommandName": "VolumeUp",
+           "FunctionId-": 0,
+           "Order": 2,
+           "EventType": 0,
+           "Id": 0
+          }
+         ]
+        }
+       ],
+       "SurfaceId-": 7001,
+       "Buttons": [
+        {
+         "__type": "HardRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1001,
+         "ButtonState": 1,
+         "ButtonKey": "DirectionUp",
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "DirectionUp",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1100,
+         "TextOnRemote": "Home",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 0,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "Home",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1101,
+         "TextOnRemote": "Volume",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 1,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 11,
+          "CommandName": "VolumeUp",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 11,
+          "CommandName": "VolumeDown",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonDoublePressAction": {
+          "__type": "ButtonSequenceAction",
+          "SequenceId": 9001,
+          "Order": 0
+         }
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1102,
+         "TextOnRemote": "Back",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 2,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "Back",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1103,
+         "TextOnRemote": "Other Activity",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 3,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonActivityAction",
+          "ActivityId-": 200,
+          "Order": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1104,
+         "TextOnRemote": "Movie",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 4,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonSequenceAction",
+          "SequenceId": 9001,
+          "Order": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1105,
+         "TextOnRemote": "Sleep",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 5,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "Sleep",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 2,
+         "ButtonId": 1106,
+         "TextOnRemote": "1",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 0,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "1",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 2,
+         "ButtonId": 1107,
+         "TextOnRemote": "2",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 1,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "2",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "GestureRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1200,
+         "ButtonState": 1,
+         "ButtonKey": "SwipeUp",
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "ChannelUp",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "GestureRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1201,
+         "ButtonState": 1,
+         "ButtonKey": "SwipeDown",
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "ChannelUp",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "GestureRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1202,
+         "ButtonState": 1,
+         "ButtonKey": "SwipeLeft",
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "ChannelUp",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "GestureRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1203,
+         "ButtonState": 1,
+         "ButtonKey": "SwipeRight",
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "ChannelUp",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "GestureRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1204,
+         "ButtonState": 1,
+         "ButtonKey": "Tap",
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "ChannelUp",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        }
+       ]
+      },
+      {
+       "ButtonMapId-": 6001,
+       "DeviceId-": 10,
+       "ButtonMapSurfaceId-": 7001,
+       "__type": "DeviceButtonMap",
+       "RemoteId-": 8001,
+       "ButtonMapIdentifier": "16417Device10",
+       "DateModified": null,
+       "SurfaceId-": 7001,
+       "Buttons": [
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 4100,
+         "TextOnRemote": "Home",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 3,
+          "MenuName": "Device.10"
+         },
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "Home",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 1006,
+         "ButtonId": 4101,
+         "TextOnRemote": "Alt",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 3,
+          "MenuName": "Device.10"
+         },
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "Back",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        }
+       ]
+      }
+     ]
+    },
+    "functionList": {
+     "FunctionMaps": [
+      {
+       "__type": "ActivityFunctionMap",
+       "ActivityId-": 100,
+       "FunctionGroups": []
+      },
+      {
+       "__type": "ActivityFunctionMap",
+       "ActivityId-": 101,
+       "FunctionGroups": []
+      },
+      {
+       "__type": "ActivityFunctionMap",
+       "ActivityId-": 102,
+       "FunctionGroups": []
+      },
+      {
+       "__type": "ActivityFunctionMap",
+       "ActivityId-": 103,
+       "FunctionGroups": []
+      },
+      {
+       "__type": "ActivityFunctionMap",
+       "ActivityId-": 200,
+       "FunctionGroups": []
+      }
+     ]
+    },
+    "deviceList": {
+     "DevicesWithFeatures": [
+      {
+       "Device": {
+        "Id-": 10,
+        "Name": "Device 10"
+       },
+       "Commands": [],
+       "DeviceFeatures": []
+      },
+      {
+       "Device": {
+        "Id-": 11,
+        "Name": "Device 11"
+       },
+       "Commands": [],
+       "DeviceFeatures": []
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "invalid-soft-missing-menuitem",
+   "expect": "invalid",
+   "stock": "throws",
+   "graph": {
+    "activityList": {
+     "Activities": [
+      {
+       "Id-": 100,
+       "Name": "Activity 100",
+       "Roles": []
+      },
+      {
+       "Id-": 101,
+       "Name": "Activity 101",
+       "Roles": []
+      },
+      {
+       "Id-": 102,
+       "Name": "Activity 102",
+       "Roles": []
+      },
+      {
+       "Id-": 103,
+       "Name": "Activity 103",
+       "Roles": []
+      },
+      {
+       "Id-": 200,
+       "Name": "Activity 200",
+       "Roles": []
+      }
+     ]
+    },
+    "mapList": {
+     "ButtonMaps": [
+      {
+       "ButtonMapId-": 5100,
+       "ActivityId-": 100,
+       "ButtonMapSurfaceId-": 7001,
+       "__type": "ActivityButtonMap",
+       "RemoteId-": 8001,
+       "ButtonMapIdentifier": "16417Activity100",
+       "DateModified": null,
+       "Sequences": [
+        {
+         "SequenceId": 9001,
+         "Name": "Start Movie",
+         "Actions": [
+          {
+           "__type": "ButtonCommandAction",
+           "DeviceId-": 10,
+           "CommandName": "Home",
+           "FunctionId-": 0,
+           "Order": 0,
+           "EventType": 0,
+           "Id": 0
+          },
+          {
+           "__type": "ButtonDelayAction",
+           "Duration": 1.5,
+           "Order": 1
+          },
+          {
+           "__type": "ButtonCommandAction",
+           "DeviceId-": 11,
+           "CommandName": "VolumeUp",
+           "FunctionId-": 0,
+           "Order": 2,
+           "EventType": 0,
+           "Id": 0
+          }
+         ]
+        }
+       ],
+       "SurfaceId-": 7001,
+       "Buttons": [
+        {
+         "__type": "HardRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1001,
+         "ButtonState": 1,
+         "ButtonKey": "DirectionUp",
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "DirectionUp",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1100,
+         "TextOnRemote": "Home",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "Home",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1101,
+         "TextOnRemote": "Volume",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 1,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 11,
+          "CommandName": "VolumeUp",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 11,
+          "CommandName": "VolumeDown",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonDoublePressAction": {
+          "__type": "ButtonSequenceAction",
+          "SequenceId": 9001,
+          "Order": 0
+         }
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1102,
+         "TextOnRemote": "Back",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 2,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "Back",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1103,
+         "TextOnRemote": "Other Activity",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 3,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonActivityAction",
+          "ActivityId-": 200,
+          "Order": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1104,
+         "TextOnRemote": "Movie",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 4,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonSequenceAction",
+          "SequenceId": 9001,
+          "Order": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1105,
+         "TextOnRemote": "Sleep",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 5,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "Sleep",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 2,
+         "ButtonId": 1106,
+         "TextOnRemote": "1",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 0,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "1",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 2,
+         "ButtonId": 1107,
+         "TextOnRemote": "2",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 1,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "2",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "GestureRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1200,
+         "ButtonState": 1,
+         "ButtonKey": "SwipeUp",
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "ChannelUp",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "GestureRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1201,
+         "ButtonState": 1,
+         "ButtonKey": "SwipeDown",
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "ChannelUp",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "GestureRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1202,
+         "ButtonState": 1,
+         "ButtonKey": "SwipeLeft",
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "ChannelUp",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "GestureRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1203,
+         "ButtonState": 1,
+         "ButtonKey": "SwipeRight",
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "ChannelUp",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "GestureRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1204,
+         "ButtonState": 1,
+         "ButtonKey": "Tap",
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "ChannelUp",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        }
+       ]
+      }
+     ]
+    },
+    "functionList": {
+     "FunctionMaps": [
+      {
+       "__type": "ActivityFunctionMap",
+       "ActivityId-": 100,
+       "FunctionGroups": []
+      },
+      {
+       "__type": "ActivityFunctionMap",
+       "ActivityId-": 101,
+       "FunctionGroups": []
+      },
+      {
+       "__type": "ActivityFunctionMap",
+       "ActivityId-": 102,
+       "FunctionGroups": []
+      },
+      {
+       "__type": "ActivityFunctionMap",
+       "ActivityId-": 103,
+       "FunctionGroups": []
+      },
+      {
+       "__type": "ActivityFunctionMap",
+       "ActivityId-": 200,
+       "FunctionGroups": []
+      }
+     ]
+    },
+    "deviceList": {
+     "DevicesWithFeatures": [
+      {
+       "Device": {
+        "Id-": 10,
+        "Name": "Device 10"
+       },
+       "Commands": [],
+       "DeviceFeatures": []
+      },
+      {
+       "Device": {
+        "Id-": 11,
+        "Name": "Device 11"
+       },
+       "Commands": [],
+       "DeviceFeatures": []
+      }
+     ]
+    }
+   },
+   "errorIncludes": "invalid MenuItem.IndexInMenu"
+  },
+  {
+   "name": "invalid-soft-index-fraction",
+   "expect": "invalid",
+   "stock": "ok",
+   "graph": {
+    "activityList": {
+     "Activities": [
+      {
+       "Id-": 100,
+       "Name": "Activity 100",
+       "Roles": []
+      },
+      {
+       "Id-": 101,
+       "Name": "Activity 101",
+       "Roles": []
+      },
+      {
+       "Id-": 102,
+       "Name": "Activity 102",
+       "Roles": []
+      },
+      {
+       "Id-": 103,
+       "Name": "Activity 103",
+       "Roles": []
+      },
+      {
+       "Id-": 200,
+       "Name": "Activity 200",
+       "Roles": []
+      }
+     ]
+    },
+    "mapList": {
+     "ButtonMaps": [
+      {
+       "ButtonMapId-": 5100,
+       "ActivityId-": 100,
+       "ButtonMapSurfaceId-": 7001,
+       "__type": "ActivityButtonMap",
+       "RemoteId-": 8001,
+       "ButtonMapIdentifier": "16417Activity100",
+       "DateModified": null,
+       "Sequences": [
+        {
+         "SequenceId": 9001,
+         "Name": "Start Movie",
+         "Actions": [
+          {
+           "__type": "ButtonCommandAction",
+           "DeviceId-": 10,
+           "CommandName": "Home",
+           "FunctionId-": 0,
+           "Order": 0,
+           "EventType": 0,
+           "Id": 0
+          },
+          {
+           "__type": "ButtonDelayAction",
+           "Duration": 1.5,
+           "Order": 1
+          },
+          {
+           "__type": "ButtonCommandAction",
+           "DeviceId-": 11,
+           "CommandName": "VolumeUp",
+           "FunctionId-": 0,
+           "Order": 2,
+           "EventType": 0,
+           "Id": 0
+          }
+         ]
+        }
+       ],
+       "SurfaceId-": 7001,
+       "Buttons": [
+        {
+         "__type": "HardRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1001,
+         "ButtonState": 1,
+         "ButtonKey": "DirectionUp",
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "DirectionUp",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1100,
+         "TextOnRemote": "Home",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 1.5,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "Home",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1101,
+         "TextOnRemote": "Volume",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 1,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 11,
+          "CommandName": "VolumeUp",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 11,
+          "CommandName": "VolumeDown",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonDoublePressAction": {
+          "__type": "ButtonSequenceAction",
+          "SequenceId": 9001,
+          "Order": 0
+         }
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1102,
+         "TextOnRemote": "Back",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 2,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "Back",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1103,
+         "TextOnRemote": "Other Activity",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 3,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonActivityAction",
+          "ActivityId-": 200,
+          "Order": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1104,
+         "TextOnRemote": "Movie",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 4,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonSequenceAction",
+          "SequenceId": 9001,
+          "Order": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1105,
+         "TextOnRemote": "Sleep",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 5,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "Sleep",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 2,
+         "ButtonId": 1106,
+         "TextOnRemote": "1",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 0,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "1",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 2,
+         "ButtonId": 1107,
+         "TextOnRemote": "2",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 1,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "2",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "GestureRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1200,
+         "ButtonState": 1,
+         "ButtonKey": "SwipeUp",
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "ChannelUp",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "GestureRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1201,
+         "ButtonState": 1,
+         "ButtonKey": "SwipeDown",
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "ChannelUp",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "GestureRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1202,
+         "ButtonState": 1,
+         "ButtonKey": "SwipeLeft",
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "ChannelUp",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "GestureRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1203,
+         "ButtonState": 1,
+         "ButtonKey": "SwipeRight",
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "ChannelUp",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "GestureRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1204,
+         "ButtonState": 1,
+         "ButtonKey": "Tap",
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "ChannelUp",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        }
+       ]
+      }
+     ]
+    },
+    "functionList": {
+     "FunctionMaps": [
+      {
+       "__type": "ActivityFunctionMap",
+       "ActivityId-": 100,
+       "FunctionGroups": []
+      },
+      {
+       "__type": "ActivityFunctionMap",
+       "ActivityId-": 101,
+       "FunctionGroups": []
+      },
+      {
+       "__type": "ActivityFunctionMap",
+       "ActivityId-": 102,
+       "FunctionGroups": []
+      },
+      {
+       "__type": "ActivityFunctionMap",
+       "ActivityId-": 103,
+       "FunctionGroups": []
+      },
+      {
+       "__type": "ActivityFunctionMap",
+       "ActivityId-": 200,
+       "FunctionGroups": []
+      }
+     ]
+    },
+    "deviceList": {
+     "DevicesWithFeatures": [
+      {
+       "Device": {
+        "Id-": 10,
+        "Name": "Device 10"
+       },
+       "Commands": [],
+       "DeviceFeatures": []
+      },
+      {
+       "Device": {
+        "Id-": 11,
+        "Name": "Device 11"
+       },
+       "Commands": [],
+       "DeviceFeatures": []
+      }
+     ]
+    }
+   },
+   "errorIncludes": "invalid MenuItem.IndexInMenu"
+  },
+  {
+   "name": "invalid-map-missing-buttons",
+   "expect": "invalid",
+   "stock": "throws",
+   "graph": {
+    "activityList": {
+     "Activities": [
+      {
+       "Id-": 100,
+       "Name": "Activity 100",
+       "Roles": []
+      },
+      {
+       "Id-": 101,
+       "Name": "Activity 101",
+       "Roles": []
+      },
+      {
+       "Id-": 102,
+       "Name": "Activity 102",
+       "Roles": []
+      },
+      {
+       "Id-": 103,
+       "Name": "Activity 103",
+       "Roles": []
+      },
+      {
+       "Id-": 200,
+       "Name": "Activity 200",
+       "Roles": []
+      }
+     ]
+    },
+    "mapList": {
+     "ButtonMaps": [
+      {
+       "ButtonMapId-": 5100,
+       "ActivityId-": 100,
+       "ButtonMapSurfaceId-": 7001,
+       "__type": "ActivityButtonMap",
+       "RemoteId-": 8001,
+       "ButtonMapIdentifier": "16417Activity100",
+       "DateModified": null,
+       "Sequences": [
+        {
+         "SequenceId": 9001,
+         "Name": "Start Movie",
+         "Actions": [
+          {
+           "__type": "ButtonCommandAction",
+           "DeviceId-": 10,
+           "CommandName": "Home",
+           "FunctionId-": 0,
+           "Order": 0,
+           "EventType": 0,
+           "Id": 0
+          },
+          {
+           "__type": "ButtonDelayAction",
+           "Duration": 1.5,
+           "Order": 1
+          },
+          {
+           "__type": "ButtonCommandAction",
+           "DeviceId-": 11,
+           "CommandName": "VolumeUp",
+           "FunctionId-": 0,
+           "Order": 2,
+           "EventType": 0,
+           "Id": 0
+          }
+         ]
+        }
+       ],
+       "SurfaceId-": 7001
+      }
+     ]
+    },
+    "functionList": {
+     "FunctionMaps": [
+      {
+       "__type": "ActivityFunctionMap",
+       "ActivityId-": 100,
+       "FunctionGroups": []
+      },
+      {
+       "__type": "ActivityFunctionMap",
+       "ActivityId-": 101,
+       "FunctionGroups": []
+      },
+      {
+       "__type": "ActivityFunctionMap",
+       "ActivityId-": 102,
+       "FunctionGroups": []
+      },
+      {
+       "__type": "ActivityFunctionMap",
+       "ActivityId-": 103,
+       "FunctionGroups": []
+      },
+      {
+       "__type": "ActivityFunctionMap",
+       "ActivityId-": 200,
+       "FunctionGroups": []
+      }
+     ]
+    },
+    "deviceList": {
+     "DevicesWithFeatures": [
+      {
+       "Device": {
+        "Id-": 10,
+        "Name": "Device 10"
+       },
+       "Commands": [],
+       "DeviceFeatures": []
+      },
+      {
+       "Device": {
+        "Id-": 11,
+        "Name": "Device 11"
+       },
+       "Commands": [],
+       "DeviceFeatures": []
+      }
+     ]
+    }
+   },
+   "errorIncludes": "missing its Buttons array"
+  },
+  {
+   "name": "invalid-map-missing-type",
+   "expect": "invalid",
+   "stock": "throws",
+   "graph": {
+    "activityList": {
+     "Activities": [
+      {
+       "Id-": 100,
+       "Name": "Activity 100",
+       "Roles": []
+      },
+      {
+       "Id-": 101,
+       "Name": "Activity 101",
+       "Roles": []
+      },
+      {
+       "Id-": 102,
+       "Name": "Activity 102",
+       "Roles": []
+      },
+      {
+       "Id-": 103,
+       "Name": "Activity 103",
+       "Roles": []
+      },
+      {
+       "Id-": 200,
+       "Name": "Activity 200",
+       "Roles": []
+      }
+     ]
+    },
+    "mapList": {
+     "ButtonMaps": [
+      {
+       "ButtonMapId-": 5100,
+       "ActivityId-": 100,
+       "ButtonMapSurfaceId-": 7001,
+       "RemoteId-": 8001,
+       "ButtonMapIdentifier": "16417Activity100",
+       "DateModified": null,
+       "Sequences": [
+        {
+         "SequenceId": 9001,
+         "Name": "Start Movie",
+         "Actions": [
+          {
+           "__type": "ButtonCommandAction",
+           "DeviceId-": 10,
+           "CommandName": "Home",
+           "FunctionId-": 0,
+           "Order": 0,
+           "EventType": 0,
+           "Id": 0
+          },
+          {
+           "__type": "ButtonDelayAction",
+           "Duration": 1.5,
+           "Order": 1
+          },
+          {
+           "__type": "ButtonCommandAction",
+           "DeviceId-": 11,
+           "CommandName": "VolumeUp",
+           "FunctionId-": 0,
+           "Order": 2,
+           "EventType": 0,
+           "Id": 0
+          }
+         ]
+        }
+       ],
+       "SurfaceId-": 7001,
+       "Buttons": [
+        {
+         "__type": "HardRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1001,
+         "ButtonState": 1,
+         "ButtonKey": "DirectionUp",
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "DirectionUp",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1100,
+         "TextOnRemote": "Home",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 0,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "Home",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1101,
+         "TextOnRemote": "Volume",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 1,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 11,
+          "CommandName": "VolumeUp",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 11,
+          "CommandName": "VolumeDown",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonDoublePressAction": {
+          "__type": "ButtonSequenceAction",
+          "SequenceId": 9001,
+          "Order": 0
+         }
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1102,
+         "TextOnRemote": "Back",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 2,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "Back",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1103,
+         "TextOnRemote": "Other Activity",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 3,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonActivityAction",
+          "ActivityId-": 200,
+          "Order": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1104,
+         "TextOnRemote": "Movie",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 4,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonSequenceAction",
+          "SequenceId": 9001,
+          "Order": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1105,
+         "TextOnRemote": "Sleep",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 5,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "Sleep",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 2,
+         "ButtonId": 1106,
+         "TextOnRemote": "1",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 0,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "1",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 2,
+         "ButtonId": 1107,
+         "TextOnRemote": "2",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 1,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "2",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "GestureRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1200,
+         "ButtonState": 1,
+         "ButtonKey": "SwipeUp",
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "ChannelUp",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "GestureRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1201,
+         "ButtonState": 1,
+         "ButtonKey": "SwipeDown",
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "ChannelUp",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "GestureRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1202,
+         "ButtonState": 1,
+         "ButtonKey": "SwipeLeft",
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "ChannelUp",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "GestureRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1203,
+         "ButtonState": 1,
+         "ButtonKey": "SwipeRight",
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "ChannelUp",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "GestureRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1204,
+         "ButtonState": 1,
+         "ButtonKey": "Tap",
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "ChannelUp",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        }
+       ]
+      }
+     ]
+    },
+    "functionList": {
+     "FunctionMaps": [
+      {
+       "__type": "ActivityFunctionMap",
+       "ActivityId-": 100,
+       "FunctionGroups": []
+      },
+      {
+       "__type": "ActivityFunctionMap",
+       "ActivityId-": 101,
+       "FunctionGroups": []
+      },
+      {
+       "__type": "ActivityFunctionMap",
+       "ActivityId-": 102,
+       "FunctionGroups": []
+      },
+      {
+       "__type": "ActivityFunctionMap",
+       "ActivityId-": 103,
+       "FunctionGroups": []
+      },
+      {
+       "__type": "ActivityFunctionMap",
+       "ActivityId-": 200,
+       "FunctionGroups": []
+      }
+     ]
+    },
+    "deviceList": {
+     "DevicesWithFeatures": [
+      {
+       "Device": {
+        "Id-": 10,
+        "Name": "Device 10"
+       },
+       "Commands": [],
+       "DeviceFeatures": []
+      },
+      {
+       "Device": {
+        "Id-": 11,
+        "Name": "Device 11"
+       },
+       "Commands": [],
+       "DeviceFeatures": []
+      }
+     ]
+    }
+   },
+   "errorIncludes": "unknown or missing __type"
+  },
+  {
+   "name": "invalid-map-unknown-type",
+   "expect": "invalid",
+   "stock": "ok",
+   "graph": {
+    "activityList": {
+     "Activities": [
+      {
+       "Id-": 100,
+       "Name": "Activity 100",
+       "Roles": []
+      },
+      {
+       "Id-": 101,
+       "Name": "Activity 101",
+       "Roles": []
+      },
+      {
+       "Id-": 102,
+       "Name": "Activity 102",
+       "Roles": []
+      },
+      {
+       "Id-": 103,
+       "Name": "Activity 103",
+       "Roles": []
+      },
+      {
+       "Id-": 200,
+       "Name": "Activity 200",
+       "Roles": []
+      }
+     ]
+    },
+    "mapList": {
+     "ButtonMaps": [
+      {
+       "ButtonMapId-": 5100,
+       "ActivityId-": 100,
+       "ButtonMapSurfaceId-": 7001,
+       "__type": "BananaButtonMap",
+       "RemoteId-": 8001,
+       "ButtonMapIdentifier": "16417Activity100",
+       "DateModified": null,
+       "Sequences": [
+        {
+         "SequenceId": 9001,
+         "Name": "Start Movie",
+         "Actions": [
+          {
+           "__type": "ButtonCommandAction",
+           "DeviceId-": 10,
+           "CommandName": "Home",
+           "FunctionId-": 0,
+           "Order": 0,
+           "EventType": 0,
+           "Id": 0
+          },
+          {
+           "__type": "ButtonDelayAction",
+           "Duration": 1.5,
+           "Order": 1
+          },
+          {
+           "__type": "ButtonCommandAction",
+           "DeviceId-": 11,
+           "CommandName": "VolumeUp",
+           "FunctionId-": 0,
+           "Order": 2,
+           "EventType": 0,
+           "Id": 0
+          }
+         ]
+        }
+       ],
+       "SurfaceId-": 7001,
+       "Buttons": [
+        {
+         "__type": "HardRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1001,
+         "ButtonState": 1,
+         "ButtonKey": "DirectionUp",
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "DirectionUp",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1100,
+         "TextOnRemote": "Home",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 0,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "Home",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1101,
+         "TextOnRemote": "Volume",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 1,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 11,
+          "CommandName": "VolumeUp",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 11,
+          "CommandName": "VolumeDown",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonDoublePressAction": {
+          "__type": "ButtonSequenceAction",
+          "SequenceId": 9001,
+          "Order": 0
+         }
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1102,
+         "TextOnRemote": "Back",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 2,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "Back",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1103,
+         "TextOnRemote": "Other Activity",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 3,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonActivityAction",
+          "ActivityId-": 200,
+          "Order": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1104,
+         "TextOnRemote": "Movie",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 4,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonSequenceAction",
+          "SequenceId": 9001,
+          "Order": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1105,
+         "TextOnRemote": "Sleep",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 5,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "Sleep",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 2,
+         "ButtonId": 1106,
+         "TextOnRemote": "1",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 0,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "1",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 2,
+         "ButtonId": 1107,
+         "TextOnRemote": "2",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 1,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "2",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "GestureRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1200,
+         "ButtonState": 1,
+         "ButtonKey": "SwipeUp",
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "ChannelUp",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "GestureRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1201,
+         "ButtonState": 1,
+         "ButtonKey": "SwipeDown",
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "ChannelUp",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "GestureRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1202,
+         "ButtonState": 1,
+         "ButtonKey": "SwipeLeft",
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "ChannelUp",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "GestureRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1203,
+         "ButtonState": 1,
+         "ButtonKey": "SwipeRight",
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "ChannelUp",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "GestureRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1204,
+         "ButtonState": 1,
+         "ButtonKey": "Tap",
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "ChannelUp",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        }
+       ]
+      }
+     ]
+    },
+    "functionList": {
+     "FunctionMaps": [
+      {
+       "__type": "ActivityFunctionMap",
+       "ActivityId-": 100,
+       "FunctionGroups": []
+      },
+      {
+       "__type": "ActivityFunctionMap",
+       "ActivityId-": 101,
+       "FunctionGroups": []
+      },
+      {
+       "__type": "ActivityFunctionMap",
+       "ActivityId-": 102,
+       "FunctionGroups": []
+      },
+      {
+       "__type": "ActivityFunctionMap",
+       "ActivityId-": 103,
+       "FunctionGroups": []
+      },
+      {
+       "__type": "ActivityFunctionMap",
+       "ActivityId-": 200,
+       "FunctionGroups": []
+      }
+     ]
+    },
+    "deviceList": {
+     "DevicesWithFeatures": [
+      {
+       "Device": {
+        "Id-": 10,
+        "Name": "Device 10"
+       },
+       "Commands": [],
+       "DeviceFeatures": []
+      },
+      {
+       "Device": {
+        "Id-": 11,
+        "Name": "Device 11"
+       },
+       "Commands": [],
+       "DeviceFeatures": []
+      }
+     ]
+    }
+   },
+   "errorIncludes": "unknown or missing __type"
+  },
+  {
+   "name": "invalid-button-missing-type",
+   "expect": "invalid",
+   "stock": "throws",
+   "graph": {
+    "activityList": {
+     "Activities": [
+      {
+       "Id-": 100,
+       "Name": "Activity 100",
+       "Roles": []
+      },
+      {
+       "Id-": 101,
+       "Name": "Activity 101",
+       "Roles": []
+      },
+      {
+       "Id-": 102,
+       "Name": "Activity 102",
+       "Roles": []
+      },
+      {
+       "Id-": 103,
+       "Name": "Activity 103",
+       "Roles": []
+      },
+      {
+       "Id-": 200,
+       "Name": "Activity 200",
+       "Roles": []
+      }
+     ]
+    },
+    "mapList": {
+     "ButtonMaps": [
+      {
+       "ButtonMapId-": 5100,
+       "ActivityId-": 100,
+       "ButtonMapSurfaceId-": 7001,
+       "__type": "ActivityButtonMap",
+       "RemoteId-": 8001,
+       "ButtonMapIdentifier": "16417Activity100",
+       "DateModified": null,
+       "Sequences": [
+        {
+         "SequenceId": 9001,
+         "Name": "Start Movie",
+         "Actions": [
+          {
+           "__type": "ButtonCommandAction",
+           "DeviceId-": 10,
+           "CommandName": "Home",
+           "FunctionId-": 0,
+           "Order": 0,
+           "EventType": 0,
+           "Id": 0
+          },
+          {
+           "__type": "ButtonDelayAction",
+           "Duration": 1.5,
+           "Order": 1
+          },
+          {
+           "__type": "ButtonCommandAction",
+           "DeviceId-": 11,
+           "CommandName": "VolumeUp",
+           "FunctionId-": 0,
+           "Order": 2,
+           "EventType": 0,
+           "Id": 0
+          }
+         ]
+        }
+       ],
+       "SurfaceId-": 7001,
+       "Buttons": [
+        {
+         "FunctionGroupType": 0,
+         "ButtonId": 1001,
+         "ButtonState": 1,
+         "ButtonKey": "DirectionUp",
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "DirectionUp",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1100,
+         "TextOnRemote": "Home",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 0,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "Home",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1101,
+         "TextOnRemote": "Volume",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 1,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 11,
+          "CommandName": "VolumeUp",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 11,
+          "CommandName": "VolumeDown",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonDoublePressAction": {
+          "__type": "ButtonSequenceAction",
+          "SequenceId": 9001,
+          "Order": 0
+         }
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1102,
+         "TextOnRemote": "Back",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 2,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "Back",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1103,
+         "TextOnRemote": "Other Activity",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 3,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonActivityAction",
+          "ActivityId-": 200,
+          "Order": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1104,
+         "TextOnRemote": "Movie",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 4,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonSequenceAction",
+          "SequenceId": 9001,
+          "Order": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1105,
+         "TextOnRemote": "Sleep",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 5,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "Sleep",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 2,
+         "ButtonId": 1106,
+         "TextOnRemote": "1",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 0,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "1",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 2,
+         "ButtonId": 1107,
+         "TextOnRemote": "2",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 1,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "2",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "GestureRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1200,
+         "ButtonState": 1,
+         "ButtonKey": "SwipeUp",
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "ChannelUp",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "GestureRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1201,
+         "ButtonState": 1,
+         "ButtonKey": "SwipeDown",
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "ChannelUp",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "GestureRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1202,
+         "ButtonState": 1,
+         "ButtonKey": "SwipeLeft",
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "ChannelUp",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "GestureRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1203,
+         "ButtonState": 1,
+         "ButtonKey": "SwipeRight",
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "ChannelUp",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "GestureRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1204,
+         "ButtonState": 1,
+         "ButtonKey": "Tap",
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "ChannelUp",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        }
+       ]
+      }
+     ]
+    },
+    "functionList": {
+     "FunctionMaps": [
+      {
+       "__type": "ActivityFunctionMap",
+       "ActivityId-": 100,
+       "FunctionGroups": []
+      },
+      {
+       "__type": "ActivityFunctionMap",
+       "ActivityId-": 101,
+       "FunctionGroups": []
+      },
+      {
+       "__type": "ActivityFunctionMap",
+       "ActivityId-": 102,
+       "FunctionGroups": []
+      },
+      {
+       "__type": "ActivityFunctionMap",
+       "ActivityId-": 103,
+       "FunctionGroups": []
+      },
+      {
+       "__type": "ActivityFunctionMap",
+       "ActivityId-": 200,
+       "FunctionGroups": []
+      }
+     ]
+    },
+    "deviceList": {
+     "DevicesWithFeatures": [
+      {
+       "Device": {
+        "Id-": 10,
+        "Name": "Device 10"
+       },
+       "Commands": [],
+       "DeviceFeatures": []
+      },
+      {
+       "Device": {
+        "Id-": 11,
+        "Name": "Device 11"
+       },
+       "Commands": [],
+       "DeviceFeatures": []
+      }
+     ]
+    }
+   },
+   "errorIncludes": "button with an unknown or missing __type"
+  },
+  {
+   "name": "invalid-gesture-missing-key",
+   "expect": "invalid",
+   "stock": "throws",
+   "graph": {
+    "activityList": {
+     "Activities": [
+      {
+       "Id-": 100,
+       "Name": "Activity 100",
+       "Roles": []
+      },
+      {
+       "Id-": 101,
+       "Name": "Activity 101",
+       "Roles": []
+      },
+      {
+       "Id-": 102,
+       "Name": "Activity 102",
+       "Roles": []
+      },
+      {
+       "Id-": 103,
+       "Name": "Activity 103",
+       "Roles": []
+      },
+      {
+       "Id-": 200,
+       "Name": "Activity 200",
+       "Roles": []
+      }
+     ]
+    },
+    "mapList": {
+     "ButtonMaps": [
+      {
+       "ButtonMapId-": 5100,
+       "ActivityId-": 100,
+       "ButtonMapSurfaceId-": 7001,
+       "__type": "ActivityButtonMap",
+       "RemoteId-": 8001,
+       "ButtonMapIdentifier": "16417Activity100",
+       "DateModified": null,
+       "Sequences": [
+        {
+         "SequenceId": 9001,
+         "Name": "Start Movie",
+         "Actions": [
+          {
+           "__type": "ButtonCommandAction",
+           "DeviceId-": 10,
+           "CommandName": "Home",
+           "FunctionId-": 0,
+           "Order": 0,
+           "EventType": 0,
+           "Id": 0
+          },
+          {
+           "__type": "ButtonDelayAction",
+           "Duration": 1.5,
+           "Order": 1
+          },
+          {
+           "__type": "ButtonCommandAction",
+           "DeviceId-": 11,
+           "CommandName": "VolumeUp",
+           "FunctionId-": 0,
+           "Order": 2,
+           "EventType": 0,
+           "Id": 0
+          }
+         ]
+        }
+       ],
+       "SurfaceId-": 7001,
+       "Buttons": [
+        {
+         "__type": "HardRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1001,
+         "ButtonState": 1,
+         "ButtonKey": "DirectionUp",
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "DirectionUp",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1100,
+         "TextOnRemote": "Home",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 0,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "Home",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1101,
+         "TextOnRemote": "Volume",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 1,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 11,
+          "CommandName": "VolumeUp",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 11,
+          "CommandName": "VolumeDown",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonDoublePressAction": {
+          "__type": "ButtonSequenceAction",
+          "SequenceId": 9001,
+          "Order": 0
+         }
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1102,
+         "TextOnRemote": "Back",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 2,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "Back",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1103,
+         "TextOnRemote": "Other Activity",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 3,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonActivityAction",
+          "ActivityId-": 200,
+          "Order": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1104,
+         "TextOnRemote": "Movie",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 4,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonSequenceAction",
+          "SequenceId": 9001,
+          "Order": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1105,
+         "TextOnRemote": "Sleep",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 5,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "Sleep",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 2,
+         "ButtonId": 1106,
+         "TextOnRemote": "1",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 0,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "1",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 2,
+         "ButtonId": 1107,
+         "TextOnRemote": "2",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 1,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "2",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "GestureRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1200,
+         "ButtonState": 1,
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "ChannelUp",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "GestureRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1201,
+         "ButtonState": 1,
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "ChannelUp",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "GestureRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1202,
+         "ButtonState": 1,
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "ChannelUp",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "GestureRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1203,
+         "ButtonState": 1,
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "ChannelUp",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "GestureRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1204,
+         "ButtonState": 1,
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "ChannelUp",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        }
+       ]
+      }
+     ]
+    },
+    "functionList": {
+     "FunctionMaps": [
+      {
+       "__type": "ActivityFunctionMap",
+       "ActivityId-": 100,
+       "FunctionGroups": []
+      },
+      {
+       "__type": "ActivityFunctionMap",
+       "ActivityId-": 101,
+       "FunctionGroups": []
+      },
+      {
+       "__type": "ActivityFunctionMap",
+       "ActivityId-": 102,
+       "FunctionGroups": []
+      },
+      {
+       "__type": "ActivityFunctionMap",
+       "ActivityId-": 103,
+       "FunctionGroups": []
+      },
+      {
+       "__type": "ActivityFunctionMap",
+       "ActivityId-": 200,
+       "FunctionGroups": []
+      }
+     ]
+    },
+    "deviceList": {
+     "DevicesWithFeatures": [
+      {
+       "Device": {
+        "Id-": 10,
+        "Name": "Device 10"
+       },
+       "Commands": [],
+       "DeviceFeatures": []
+      },
+      {
+       "Device": {
+        "Id-": 11,
+        "Name": "Device 11"
+       },
+       "Commands": [],
+       "DeviceFeatures": []
+      }
+     ]
+    }
+   },
+   "errorIncludes": "missing ButtonKey"
+  },
+  {
+   "name": "invalid-hard-missing-key",
+   "expect": "invalid",
+   "stock": "throws",
+   "graph": {
+    "activityList": {
+     "Activities": [
+      {
+       "Id-": 100,
+       "Name": "Activity 100",
+       "Roles": []
+      },
+      {
+       "Id-": 101,
+       "Name": "Activity 101",
+       "Roles": []
+      },
+      {
+       "Id-": 102,
+       "Name": "Activity 102",
+       "Roles": []
+      },
+      {
+       "Id-": 103,
+       "Name": "Activity 103",
+       "Roles": []
+      },
+      {
+       "Id-": 200,
+       "Name": "Activity 200",
+       "Roles": []
+      }
+     ]
+    },
+    "mapList": {
+     "ButtonMaps": [
+      {
+       "ButtonMapId-": 5100,
+       "ActivityId-": 100,
+       "ButtonMapSurfaceId-": 7001,
+       "__type": "ActivityButtonMap",
+       "RemoteId-": 8001,
+       "ButtonMapIdentifier": "16417Activity100",
+       "DateModified": null,
+       "Sequences": [
+        {
+         "SequenceId": 9001,
+         "Name": "Start Movie",
+         "Actions": [
+          {
+           "__type": "ButtonCommandAction",
+           "DeviceId-": 10,
+           "CommandName": "Home",
+           "FunctionId-": 0,
+           "Order": 0,
+           "EventType": 0,
+           "Id": 0
+          },
+          {
+           "__type": "ButtonDelayAction",
+           "Duration": 1.5,
+           "Order": 1
+          },
+          {
+           "__type": "ButtonCommandAction",
+           "DeviceId-": 11,
+           "CommandName": "VolumeUp",
+           "FunctionId-": 0,
+           "Order": 2,
+           "EventType": 0,
+           "Id": 0
+          }
+         ]
+        }
+       ],
+       "SurfaceId-": 7001,
+       "Buttons": [
+        {
+         "__type": "HardRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1001,
+         "ButtonState": 1,
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "DirectionUp",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1100,
+         "TextOnRemote": "Home",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 0,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "Home",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1101,
+         "TextOnRemote": "Volume",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 1,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 11,
+          "CommandName": "VolumeUp",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 11,
+          "CommandName": "VolumeDown",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonDoublePressAction": {
+          "__type": "ButtonSequenceAction",
+          "SequenceId": 9001,
+          "Order": 0
+         }
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1102,
+         "TextOnRemote": "Back",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 2,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "Back",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1103,
+         "TextOnRemote": "Other Activity",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 3,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonActivityAction",
+          "ActivityId-": 200,
+          "Order": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1104,
+         "TextOnRemote": "Movie",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 4,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonSequenceAction",
+          "SequenceId": 9001,
+          "Order": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1105,
+         "TextOnRemote": "Sleep",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 5,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "Sleep",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 2,
+         "ButtonId": 1106,
+         "TextOnRemote": "1",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 0,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "1",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 2,
+         "ButtonId": 1107,
+         "TextOnRemote": "2",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 1,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "2",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "GestureRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1200,
+         "ButtonState": 1,
+         "ButtonKey": "SwipeUp",
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "ChannelUp",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "GestureRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1201,
+         "ButtonState": 1,
+         "ButtonKey": "SwipeDown",
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "ChannelUp",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "GestureRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1202,
+         "ButtonState": 1,
+         "ButtonKey": "SwipeLeft",
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "ChannelUp",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "GestureRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1203,
+         "ButtonState": 1,
+         "ButtonKey": "SwipeRight",
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "ChannelUp",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "GestureRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1204,
+         "ButtonState": 1,
+         "ButtonKey": "Tap",
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "ChannelUp",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        }
+       ]
+      }
+     ]
+    },
+    "functionList": {
+     "FunctionMaps": [
+      {
+       "__type": "ActivityFunctionMap",
+       "ActivityId-": 100,
+       "FunctionGroups": []
+      },
+      {
+       "__type": "ActivityFunctionMap",
+       "ActivityId-": 101,
+       "FunctionGroups": []
+      },
+      {
+       "__type": "ActivityFunctionMap",
+       "ActivityId-": 102,
+       "FunctionGroups": []
+      },
+      {
+       "__type": "ActivityFunctionMap",
+       "ActivityId-": 103,
+       "FunctionGroups": []
+      },
+      {
+       "__type": "ActivityFunctionMap",
+       "ActivityId-": 200,
+       "FunctionGroups": []
+      }
+     ]
+    },
+    "deviceList": {
+     "DevicesWithFeatures": [
+      {
+       "Device": {
+        "Id-": 10,
+        "Name": "Device 10"
+       },
+       "Commands": [],
+       "DeviceFeatures": []
+      },
+      {
+       "Device": {
+        "Id-": 11,
+        "Name": "Device 11"
+       },
+       "Commands": [],
+       "DeviceFeatures": []
+      }
+     ]
+    }
+   },
+   "errorIncludes": "missing ButtonKey"
+  },
+  {
+   "name": "invalid-duplicate-index-activity",
+   "expect": "invalid",
+   "stock": "ok",
+   "graph": {
+    "activityList": {
+     "Activities": [
+      {
+       "Id-": 100,
+       "Name": "Activity 100",
+       "Roles": []
+      },
+      {
+       "Id-": 101,
+       "Name": "Activity 101",
+       "Roles": []
+      },
+      {
+       "Id-": 102,
+       "Name": "Activity 102",
+       "Roles": []
+      },
+      {
+       "Id-": 103,
+       "Name": "Activity 103",
+       "Roles": []
+      },
+      {
+       "Id-": 200,
+       "Name": "Activity 200",
+       "Roles": []
+      }
+     ]
+    },
+    "mapList": {
+     "ButtonMaps": [
+      {
+       "ButtonMapId-": 5100,
+       "ActivityId-": 100,
+       "ButtonMapSurfaceId-": 7001,
+       "__type": "ActivityButtonMap",
+       "RemoteId-": 8001,
+       "ButtonMapIdentifier": "16417Activity100",
+       "DateModified": null,
+       "Sequences": [
+        {
+         "SequenceId": 9001,
+         "Name": "Start Movie",
+         "Actions": [
+          {
+           "__type": "ButtonCommandAction",
+           "DeviceId-": 10,
+           "CommandName": "Home",
+           "FunctionId-": 0,
+           "Order": 0,
+           "EventType": 0,
+           "Id": 0
+          },
+          {
+           "__type": "ButtonDelayAction",
+           "Duration": 1.5,
+           "Order": 1
+          },
+          {
+           "__type": "ButtonCommandAction",
+           "DeviceId-": 11,
+           "CommandName": "VolumeUp",
+           "FunctionId-": 0,
+           "Order": 2,
+           "EventType": 0,
+           "Id": 0
+          }
+         ]
+        }
+       ],
+       "SurfaceId-": 7001,
+       "Buttons": [
+        {
+         "__type": "HardRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1001,
+         "ButtonState": 1,
+         "ButtonKey": "DirectionUp",
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "DirectionUp",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1100,
+         "TextOnRemote": "Home",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 0,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "Home",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1101,
+         "TextOnRemote": "Volume",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 1,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 11,
+          "CommandName": "VolumeUp",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 11,
+          "CommandName": "VolumeDown",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonDoublePressAction": {
+          "__type": "ButtonSequenceAction",
+          "SequenceId": 9001,
+          "Order": 0
+         }
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1102,
+         "TextOnRemote": "Back",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 2,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "Back",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1103,
+         "TextOnRemote": "Other Activity",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 3,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonActivityAction",
+          "ActivityId-": 200,
+          "Order": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1104,
+         "TextOnRemote": "Movie",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 4,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonSequenceAction",
+          "SequenceId": 9001,
+          "Order": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1105,
+         "TextOnRemote": "Sleep",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 5,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "Sleep",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 2,
+         "ButtonId": 1106,
+         "TextOnRemote": "1",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 0,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "1",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 2,
+         "ButtonId": 1107,
+         "TextOnRemote": "2",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 1,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "2",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "GestureRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1200,
+         "ButtonState": 1,
+         "ButtonKey": "SwipeUp",
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "ChannelUp",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "GestureRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1201,
+         "ButtonState": 1,
+         "ButtonKey": "SwipeDown",
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "ChannelUp",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "GestureRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1202,
+         "ButtonState": 1,
+         "ButtonKey": "SwipeLeft",
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "ChannelUp",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "GestureRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1203,
+         "ButtonState": 1,
+         "ButtonKey": "SwipeRight",
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "ChannelUp",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "GestureRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1204,
+         "ButtonState": 1,
+         "ButtonKey": "Tap",
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "ChannelUp",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 1006,
+         "ButtonId": 1199,
+         "TextOnRemote": "Copy",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 4,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "Home",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        }
+       ]
+      }
+     ]
+    },
+    "functionList": {
+     "FunctionMaps": [
+      {
+       "__type": "ActivityFunctionMap",
+       "ActivityId-": 100,
+       "FunctionGroups": []
+      },
+      {
+       "__type": "ActivityFunctionMap",
+       "ActivityId-": 101,
+       "FunctionGroups": []
+      },
+      {
+       "__type": "ActivityFunctionMap",
+       "ActivityId-": 102,
+       "FunctionGroups": []
+      },
+      {
+       "__type": "ActivityFunctionMap",
+       "ActivityId-": 103,
+       "FunctionGroups": []
+      },
+      {
+       "__type": "ActivityFunctionMap",
+       "ActivityId-": 200,
+       "FunctionGroups": []
+      }
+     ]
+    },
+    "deviceList": {
+     "DevicesWithFeatures": [
+      {
+       "Device": {
+        "Id-": 10,
+        "Name": "Device 10"
+       },
+       "Commands": [],
+       "DeviceFeatures": []
+      },
+      {
+       "Device": {
+        "Id-": 11,
+        "Name": "Device 11"
+       },
+       "Commands": [],
+       "DeviceFeatures": []
+      }
+     ]
+    }
+   },
+   "errorIncludes": "duplicate IndexInMenu 4"
+  },
+  {
+   "name": "invalid-dangling-sequence",
+   "expect": "invalid",
+   "stock": "ok",
+   "graph": {
+    "activityList": {
+     "Activities": [
+      {
+       "Id-": 100,
+       "Name": "Activity 100",
+       "Roles": []
+      },
+      {
+       "Id-": 101,
+       "Name": "Activity 101",
+       "Roles": []
+      },
+      {
+       "Id-": 102,
+       "Name": "Activity 102",
+       "Roles": []
+      },
+      {
+       "Id-": 103,
+       "Name": "Activity 103",
+       "Roles": []
+      },
+      {
+       "Id-": 200,
+       "Name": "Activity 200",
+       "Roles": []
+      }
+     ]
+    },
+    "mapList": {
+     "ButtonMaps": [
+      {
+       "ButtonMapId-": 5100,
+       "ActivityId-": 100,
+       "ButtonMapSurfaceId-": 7001,
+       "__type": "ActivityButtonMap",
+       "RemoteId-": 8001,
+       "ButtonMapIdentifier": "16417Activity100",
+       "DateModified": null,
+       "Sequences": [
+        {
+         "SequenceId": 9001,
+         "Name": "Start Movie",
+         "Actions": [
+          {
+           "__type": "ButtonCommandAction",
+           "DeviceId-": 10,
+           "CommandName": "Home",
+           "FunctionId-": 0,
+           "Order": 0,
+           "EventType": 0,
+           "Id": 0
+          },
+          {
+           "__type": "ButtonDelayAction",
+           "Duration": 1.5,
+           "Order": 1
+          },
+          {
+           "__type": "ButtonCommandAction",
+           "DeviceId-": 11,
+           "CommandName": "VolumeUp",
+           "FunctionId-": 0,
+           "Order": 2,
+           "EventType": 0,
+           "Id": 0
+          }
+         ]
+        }
+       ],
+       "SurfaceId-": 7001,
+       "Buttons": [
+        {
+         "__type": "HardRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1001,
+         "ButtonState": 1,
+         "ButtonKey": "DirectionUp",
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "DirectionUp",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1100,
+         "TextOnRemote": "Home",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 0,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "Home",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1101,
+         "TextOnRemote": "Volume",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 1,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 11,
+          "CommandName": "VolumeUp",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 11,
+          "CommandName": "VolumeDown",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonDoublePressAction": {
+          "__type": "ButtonSequenceAction",
+          "SequenceId": 9001,
+          "Order": 0
+         }
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1102,
+         "TextOnRemote": "Back",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 2,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "Back",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1103,
+         "TextOnRemote": "Other Activity",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 3,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonActivityAction",
+          "ActivityId-": 200,
+          "Order": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1104,
+         "TextOnRemote": "Movie",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 4,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonSequenceAction",
+          "SequenceId": 9999,
+          "Order": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1105,
+         "TextOnRemote": "Sleep",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 5,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "Sleep",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 2,
+         "ButtonId": 1106,
+         "TextOnRemote": "1",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 0,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "1",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 2,
+         "ButtonId": 1107,
+         "TextOnRemote": "2",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 1,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "2",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "GestureRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1200,
+         "ButtonState": 1,
+         "ButtonKey": "SwipeUp",
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "ChannelUp",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "GestureRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1201,
+         "ButtonState": 1,
+         "ButtonKey": "SwipeDown",
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "ChannelUp",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "GestureRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1202,
+         "ButtonState": 1,
+         "ButtonKey": "SwipeLeft",
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "ChannelUp",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "GestureRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1203,
+         "ButtonState": 1,
+         "ButtonKey": "SwipeRight",
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "ChannelUp",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "GestureRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1204,
+         "ButtonState": 1,
+         "ButtonKey": "Tap",
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "ChannelUp",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        }
+       ]
+      }
+     ]
+    },
+    "functionList": {
+     "FunctionMaps": [
+      {
+       "__type": "ActivityFunctionMap",
+       "ActivityId-": 100,
+       "FunctionGroups": []
+      },
+      {
+       "__type": "ActivityFunctionMap",
+       "ActivityId-": 101,
+       "FunctionGroups": []
+      },
+      {
+       "__type": "ActivityFunctionMap",
+       "ActivityId-": 102,
+       "FunctionGroups": []
+      },
+      {
+       "__type": "ActivityFunctionMap",
+       "ActivityId-": 103,
+       "FunctionGroups": []
+      },
+      {
+       "__type": "ActivityFunctionMap",
+       "ActivityId-": 200,
+       "FunctionGroups": []
+      }
+     ]
+    },
+    "deviceList": {
+     "DevicesWithFeatures": [
+      {
+       "Device": {
+        "Id-": 10,
+        "Name": "Device 10"
+       },
+       "Commands": [],
+       "DeviceFeatures": []
+      },
+      {
+       "Device": {
+        "Id-": 11,
+        "Name": "Device 11"
+       },
+       "Commands": [],
+       "DeviceFeatures": []
+      }
+     ]
+    }
+   },
+   "errorIncludes": "missing sequence 9999"
+  },
+  {
+   "name": "invalid-sequence-missing-actions",
+   "expect": "invalid",
+   "stock": "throws",
+   "graph": {
+    "activityList": {
+     "Activities": [
+      {
+       "Id-": 100,
+       "Name": "Activity 100",
+       "Roles": []
+      },
+      {
+       "Id-": 101,
+       "Name": "Activity 101",
+       "Roles": []
+      },
+      {
+       "Id-": 102,
+       "Name": "Activity 102",
+       "Roles": []
+      },
+      {
+       "Id-": 103,
+       "Name": "Activity 103",
+       "Roles": []
+      },
+      {
+       "Id-": 200,
+       "Name": "Activity 200",
+       "Roles": []
+      }
+     ]
+    },
+    "mapList": {
+     "ButtonMaps": [
+      {
+       "ButtonMapId-": 5100,
+       "ActivityId-": 100,
+       "ButtonMapSurfaceId-": 7001,
+       "__type": "ActivityButtonMap",
+       "RemoteId-": 8001,
+       "ButtonMapIdentifier": "16417Activity100",
+       "DateModified": null,
+       "Sequences": [
+        {
+         "SequenceId": 9001,
+         "Name": "Broken"
+        }
+       ],
+       "SurfaceId-": 7001,
+       "Buttons": [
+        {
+         "__type": "HardRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1001,
+         "ButtonState": 1,
+         "ButtonKey": "DirectionUp",
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "DirectionUp",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1100,
+         "TextOnRemote": "Home",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 0,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "Home",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1101,
+         "TextOnRemote": "Volume",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 1,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 11,
+          "CommandName": "VolumeUp",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 11,
+          "CommandName": "VolumeDown",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonDoublePressAction": {
+          "__type": "ButtonSequenceAction",
+          "SequenceId": 9001,
+          "Order": 0
+         }
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1102,
+         "TextOnRemote": "Back",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 2,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "Back",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1103,
+         "TextOnRemote": "Other Activity",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 3,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonActivityAction",
+          "ActivityId-": 200,
+          "Order": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1104,
+         "TextOnRemote": "Movie",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 4,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonSequenceAction",
+          "SequenceId": 9001,
+          "Order": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1105,
+         "TextOnRemote": "Sleep",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 5,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "Sleep",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 2,
+         "ButtonId": 1106,
+         "TextOnRemote": "1",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 0,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "1",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 2,
+         "ButtonId": 1107,
+         "TextOnRemote": "2",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 1,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "2",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "GestureRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1200,
+         "ButtonState": 1,
+         "ButtonKey": "SwipeUp",
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "ChannelUp",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "GestureRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1201,
+         "ButtonState": 1,
+         "ButtonKey": "SwipeDown",
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "ChannelUp",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "GestureRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1202,
+         "ButtonState": 1,
+         "ButtonKey": "SwipeLeft",
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "ChannelUp",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "GestureRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1203,
+         "ButtonState": 1,
+         "ButtonKey": "SwipeRight",
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "ChannelUp",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "GestureRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1204,
+         "ButtonState": 1,
+         "ButtonKey": "Tap",
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "ChannelUp",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        }
+       ]
+      }
+     ]
+    },
+    "functionList": {
+     "FunctionMaps": [
+      {
+       "__type": "ActivityFunctionMap",
+       "ActivityId-": 100,
+       "FunctionGroups": []
+      },
+      {
+       "__type": "ActivityFunctionMap",
+       "ActivityId-": 101,
+       "FunctionGroups": []
+      },
+      {
+       "__type": "ActivityFunctionMap",
+       "ActivityId-": 102,
+       "FunctionGroups": []
+      },
+      {
+       "__type": "ActivityFunctionMap",
+       "ActivityId-": 103,
+       "FunctionGroups": []
+      },
+      {
+       "__type": "ActivityFunctionMap",
+       "ActivityId-": 200,
+       "FunctionGroups": []
+      }
+     ]
+    },
+    "deviceList": {
+     "DevicesWithFeatures": [
+      {
+       "Device": {
+        "Id-": 10,
+        "Name": "Device 10"
+       },
+       "Commands": [],
+       "DeviceFeatures": []
+      },
+      {
+       "Device": {
+        "Id-": 11,
+        "Name": "Device 11"
+       },
+       "Commands": [],
+       "DeviceFeatures": []
+      }
+     ]
+    }
+   },
+   "errorIncludes": "missing its Actions array"
+  },
+  {
+   "name": "invalid-sequence-step-type",
+   "expect": "invalid",
+   "stock": "ok",
+   "graph": {
+    "activityList": {
+     "Activities": [
+      {
+       "Id-": 100,
+       "Name": "Activity 100",
+       "Roles": []
+      },
+      {
+       "Id-": 101,
+       "Name": "Activity 101",
+       "Roles": []
+      },
+      {
+       "Id-": 102,
+       "Name": "Activity 102",
+       "Roles": []
+      },
+      {
+       "Id-": 103,
+       "Name": "Activity 103",
+       "Roles": []
+      },
+      {
+       "Id-": 200,
+       "Name": "Activity 200",
+       "Roles": []
+      }
+     ]
+    },
+    "mapList": {
+     "ButtonMaps": [
+      {
+       "ButtonMapId-": 5100,
+       "ActivityId-": 100,
+       "ButtonMapSurfaceId-": 7001,
+       "__type": "ActivityButtonMap",
+       "RemoteId-": 8001,
+       "ButtonMapIdentifier": "16417Activity100",
+       "DateModified": null,
+       "Sequences": [
+        {
+         "SequenceId": 9001,
+         "Name": "Start Movie",
+         "Actions": [
+          {
+           "__type": "ButtonCommandAction",
+           "DeviceId-": 10,
+           "CommandName": "Home",
+           "FunctionId-": 0,
+           "Order": 0,
+           "EventType": 0,
+           "Id": 0
+          },
+          {
+           "__type": "ButtonDelayAction",
+           "Duration": 1.5,
+           "Order": 1
+          },
+          {
+           "__type": "ButtonCommandAction",
+           "DeviceId-": 11,
+           "CommandName": "VolumeUp",
+           "FunctionId-": 0,
+           "Order": 2,
+           "EventType": 0,
+           "Id": 0
+          },
+          {
+           "__type": "ButtonClientAction",
+           "Order": 3
+          }
+         ]
+        }
+       ],
+       "SurfaceId-": 7001,
+       "Buttons": [
+        {
+         "__type": "HardRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1001,
+         "ButtonState": 1,
+         "ButtonKey": "DirectionUp",
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "DirectionUp",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1100,
+         "TextOnRemote": "Home",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 0,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "Home",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1101,
+         "TextOnRemote": "Volume",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 1,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 11,
+          "CommandName": "VolumeUp",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 11,
+          "CommandName": "VolumeDown",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonDoublePressAction": {
+          "__type": "ButtonSequenceAction",
+          "SequenceId": 9001,
+          "Order": 0
+         }
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1102,
+         "TextOnRemote": "Back",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 2,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "Back",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1103,
+         "TextOnRemote": "Other Activity",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 3,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonActivityAction",
+          "ActivityId-": 200,
+          "Order": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1104,
+         "TextOnRemote": "Movie",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 4,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonSequenceAction",
+          "SequenceId": 9001,
+          "Order": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1105,
+         "TextOnRemote": "Sleep",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 5,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "Sleep",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 2,
+         "ButtonId": 1106,
+         "TextOnRemote": "1",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 0,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "1",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 2,
+         "ButtonId": 1107,
+         "TextOnRemote": "2",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 1,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "2",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "GestureRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1200,
+         "ButtonState": 1,
+         "ButtonKey": "SwipeUp",
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "ChannelUp",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "GestureRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1201,
+         "ButtonState": 1,
+         "ButtonKey": "SwipeDown",
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "ChannelUp",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "GestureRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1202,
+         "ButtonState": 1,
+         "ButtonKey": "SwipeLeft",
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "ChannelUp",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "GestureRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1203,
+         "ButtonState": 1,
+         "ButtonKey": "SwipeRight",
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "ChannelUp",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "GestureRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1204,
+         "ButtonState": 1,
+         "ButtonKey": "Tap",
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "ChannelUp",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        }
+       ]
+      }
+     ]
+    },
+    "functionList": {
+     "FunctionMaps": [
+      {
+       "__type": "ActivityFunctionMap",
+       "ActivityId-": 100,
+       "FunctionGroups": []
+      },
+      {
+       "__type": "ActivityFunctionMap",
+       "ActivityId-": 101,
+       "FunctionGroups": []
+      },
+      {
+       "__type": "ActivityFunctionMap",
+       "ActivityId-": 102,
+       "FunctionGroups": []
+      },
+      {
+       "__type": "ActivityFunctionMap",
+       "ActivityId-": 103,
+       "FunctionGroups": []
+      },
+      {
+       "__type": "ActivityFunctionMap",
+       "ActivityId-": 200,
+       "FunctionGroups": []
+      }
+     ]
+    },
+    "deviceList": {
+     "DevicesWithFeatures": [
+      {
+       "Device": {
+        "Id-": 10,
+        "Name": "Device 10"
+       },
+       "Commands": [],
+       "DeviceFeatures": []
+      },
+      {
+       "Device": {
+        "Id-": 11,
+        "Name": "Device 11"
+       },
+       "Commands": [],
+       "DeviceFeatures": []
+      }
+     ]
+    }
+   },
+   "errorIncludes": "step with an unknown or missing __type"
+  },
+  {
+   "name": "invalid-sequence-delay-no-duration",
+   "expect": "invalid",
+   "stock": "throws",
+   "graph": {
+    "activityList": {
+     "Activities": [
+      {
+       "Id-": 100,
+       "Name": "Activity 100",
+       "Roles": []
+      },
+      {
+       "Id-": 101,
+       "Name": "Activity 101",
+       "Roles": []
+      },
+      {
+       "Id-": 102,
+       "Name": "Activity 102",
+       "Roles": []
+      },
+      {
+       "Id-": 103,
+       "Name": "Activity 103",
+       "Roles": []
+      },
+      {
+       "Id-": 200,
+       "Name": "Activity 200",
+       "Roles": []
+      }
+     ]
+    },
+    "mapList": {
+     "ButtonMaps": [
+      {
+       "ButtonMapId-": 5100,
+       "ActivityId-": 100,
+       "ButtonMapSurfaceId-": 7001,
+       "__type": "ActivityButtonMap",
+       "RemoteId-": 8001,
+       "ButtonMapIdentifier": "16417Activity100",
+       "DateModified": null,
+       "Sequences": [
+        {
+         "SequenceId": 9001,
+         "Name": "Start Movie",
+         "Actions": [
+          {
+           "__type": "ButtonCommandAction",
+           "DeviceId-": 10,
+           "CommandName": "Home",
+           "FunctionId-": 0,
+           "Order": 0,
+           "EventType": 0,
+           "Id": 0
+          },
+          {
+           "__type": "ButtonDelayAction",
+           "Order": 1
+          },
+          {
+           "__type": "ButtonCommandAction",
+           "DeviceId-": 11,
+           "CommandName": "VolumeUp",
+           "FunctionId-": 0,
+           "Order": 2,
+           "EventType": 0,
+           "Id": 0
+          }
+         ]
+        }
+       ],
+       "SurfaceId-": 7001,
+       "Buttons": [
+        {
+         "__type": "HardRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1001,
+         "ButtonState": 1,
+         "ButtonKey": "DirectionUp",
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "DirectionUp",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1100,
+         "TextOnRemote": "Home",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 0,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "Home",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1101,
+         "TextOnRemote": "Volume",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 1,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 11,
+          "CommandName": "VolumeUp",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 11,
+          "CommandName": "VolumeDown",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonDoublePressAction": {
+          "__type": "ButtonSequenceAction",
+          "SequenceId": 9001,
+          "Order": 0
+         }
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1102,
+         "TextOnRemote": "Back",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 2,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "Back",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1103,
+         "TextOnRemote": "Other Activity",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 3,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonActivityAction",
+          "ActivityId-": 200,
+          "Order": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1104,
+         "TextOnRemote": "Movie",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 4,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonSequenceAction",
+          "SequenceId": 9001,
+          "Order": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1105,
+         "TextOnRemote": "Sleep",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 5,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "Sleep",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 2,
+         "ButtonId": 1106,
+         "TextOnRemote": "1",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 0,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "1",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "SoftRemoteButton",
+         "FunctionGroupType": 2,
+         "ButtonId": 1107,
+         "TextOnRemote": "2",
+         "ButtonState": 1,
+         "ImageId-": 0,
+         "ButtonImageKey": null,
+         "ButtonImagePath": null,
+         "MenuItem": {
+          "IndexInMenu": 1,
+          "MenuName": "Activity.100"
+         },
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "2",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "GestureRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1200,
+         "ButtonState": 1,
+         "ButtonKey": "SwipeUp",
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "ChannelUp",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "GestureRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1201,
+         "ButtonState": 1,
+         "ButtonKey": "SwipeDown",
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "ChannelUp",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "GestureRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1202,
+         "ButtonState": 1,
+         "ButtonKey": "SwipeLeft",
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "ChannelUp",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "GestureRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1203,
+         "ButtonState": 1,
+         "ButtonKey": "SwipeRight",
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "ChannelUp",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        },
+        {
+         "__type": "GestureRemoteButton",
+         "FunctionGroupType": 0,
+         "ButtonId": 1204,
+         "ButtonState": 1,
+         "ButtonKey": "Tap",
+         "ButtonAction": {
+          "__type": "ButtonCommandAction",
+          "DeviceId-": 10,
+          "CommandName": "ChannelUp",
+          "FunctionId-": 0,
+          "Order": 0,
+          "EventType": 0,
+          "Id": 0
+         },
+         "ButtonLongPressAction": null,
+         "ButtonDoublePressAction": null
+        }
+       ]
+      }
+     ]
+    },
+    "functionList": {
+     "FunctionMaps": [
+      {
+       "__type": "ActivityFunctionMap",
+       "ActivityId-": 100,
+       "FunctionGroups": []
+      },
+      {
+       "__type": "ActivityFunctionMap",
+       "ActivityId-": 101,
+       "FunctionGroups": []
+      },
+      {
+       "__type": "ActivityFunctionMap",
+       "ActivityId-": 102,
+       "FunctionGroups": []
+      },
+      {
+       "__type": "ActivityFunctionMap",
+       "ActivityId-": 103,
+       "FunctionGroups": []
+      },
+      {
+       "__type": "ActivityFunctionMap",
+       "ActivityId-": 200,
+       "FunctionGroups": []
+      }
+     ]
+    },
+    "deviceList": {
+     "DevicesWithFeatures": [
+      {
+       "Device": {
+        "Id-": 10,
+        "Name": "Device 10"
+       },
+       "Commands": [],
+       "DeviceFeatures": []
+      },
+      {
+       "Device": {
+        "Id-": 11,
+        "Name": "Device 11"
+       },
+       "Commands": [],
+       "DeviceFeatures": []
+      }
+     ]
+    }
+   },
+   "errorIncludes": "delay step without a numeric Duration"
+  }
+ ]
+}
