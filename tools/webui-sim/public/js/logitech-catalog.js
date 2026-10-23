@@ -8,6 +8,17 @@
    pass through untouched. Everything unimportable is reported by name,
    never silently dropped. */
 
+/** True when `pkg` is a schema 0.2.0 Logitech catalog package. */
+export function isCatalogPackage(pkg) {
+  return Boolean(
+    pkg &&
+      typeof pkg === "object" &&
+      !Array.isArray(pkg) &&
+      pkg.schema_version === "0.2.0" &&
+      Array.isArray(pkg.resources?.global_language_commands),
+  );
+}
+
 /**
  * Convert a 0.2.0 catalog package into import rows plus a report of what
  * was left out and why. `hubProtocolNames` is the set of protocol names

@@ -1082,6 +1082,197 @@ checkActivationRejects(
   'refs.findSearchBtn.dispatchEvent(new MouseEvent("click"));'
 );
 
+/* -- desktop catalog bridge: confined to device-import.js click/input seams - */
+
+const desktopBridgeUsers = listJsFiles(PUBLIC_JS_DIR)
+  .filter((file) => fs.readFileSync(file, "utf8").includes("melodiousDesktop"))
+  .map((file) => file.slice(PUBLIC_JS_DIR.length + 1));
+check(
+  "public js: views/device-import.js is the only module referencing melodiousDesktop",
+  desktopBridgeUsers.length === 1 && desktopBridgeUsers[0] === "views/device-import.js",
+  `referencing modules: ${desktopBridgeUsers.join(", ") || "none"}`
+);
+
+const doCatalogSignInSrc = extractFunctionSource(findView, "doCatalogSignIn");
+const doCatalogSignOutSrc = extractFunctionSource(findView, "doCatalogSignOut");
+const doCatalogSearchSrc = extractFunctionSource(findView, "doCatalogSearch");
+const doCatalogDownloadSrc = extractFunctionSource(findView, "doCatalogDownload");
+const checkCatalogModelSrc = extractFunctionSource(findView, "checkCatalogModel");
+const renderCatalogResultsSrc = extractFunctionSource(findView, "renderCatalogResults");
+const showTabSrc = extractFunctionSource(findView, "showTab");
+const catalogOpeningPathSrc = openingPathSrc
+  ? openingPathSrc
+      .replace(doCatalogSignInSrc ?? "\0", "")
+      .replace(doCatalogSignOutSrc ?? "\0", "")
+      .replace(doCatalogSearchSrc ?? "\0", "")
+      .replace(doCatalogDownloadSrc ?? "\0", "")
+      .replace(checkCatalogModelSrc ?? "\0", "")
+  : null;
+
+const catalogWithoutHandlers = [doCatalogSignInSrc, doCatalogSignOutSrc, doCatalogSearchSrc, doCatalogDownloadSrc, checkCatalogModelSrc, showTabSrc]
+  .reduce((src, handler) => src.replace(handler ?? "\0", ""), findView);
+function hasBridgePropertyUse(src) {
+  // Includes aliasing/bind/apply/computed access, not just direct calls.
+  return /\bdesktop\s*(?:\?\.|\.|\[)/.test(src);
+}
+check(
+  "device-import.js: no bridge method aliases or calls outside the pinned handlers",
+  !hasBridgePropertyUse(catalogWithoutHandlers)
+);
+for (const snippet of ["setTimeout(desktop.search, 0);", "const download = desktop['download'];", "desktop.signIn.bind(null);"]) {
+  check(`catalog bridge detector rejects: ${snippet}`, hasBridgePropertyUse(catalogWithoutHandlers + snippet));
+}
+
+check(
+  "device-import.js: catalog handlers (doCatalogSignIn, doCatalogSignOut, doCatalogSearch, doCatalogDownload, checkCatalogModel) are defined",
+  Boolean(doCatalogSignInSrc) &&
+    Boolean(doCatalogSignOutSrc) &&
+    Boolean(doCatalogSearchSrc) &&
+    Boolean(doCatalogDownloadSrc) &&
+    Boolean(checkCatalogModelSrc) &&
+    Boolean(renderCatalogResultsSrc)
+);
+check(
+  "device-import.js: desktop.signIn, signOut, search and download are called only from their named click handlers, never from mount or the opening path",
+  Boolean(doCatalogSignInSrc) &&
+    Boolean(doCatalogSignOutSrc) &&
+    Boolean(doCatalogSearchSrc) &&
+    Boolean(doCatalogDownloadSrc) &&
+    /\bdesktop\.signIn\s*\(/.test(doCatalogSignInSrc) &&
+    (findView.match(/\bdesktop\s*(?:\?\.|\.)\s*signIn\s*\(/g) ?? []).length === 1 &&
+    /\bdesktop\.signOut\s*\(/.test(doCatalogSignOutSrc) &&
+    (findView.match(/\bdesktop\s*(?:\?\.|\.)\s*signOut\s*\(/g) ?? []).length === 1 &&
+    /\bdesktop\.search\s*\(/.test(doCatalogSearchSrc) &&
+    (findView.match(/\bdesktop\s*(?:\?\.|\.)\s*search\s*\(/g) ?? []).length === 1 &&
+    /\bdesktop\.download\s*\(/.test(doCatalogDownloadSrc) &&
+    (findView.match(/\bdesktop\s*(?:\?\.|\.)\s*download\s*\(/g) ?? []).length === 1 &&
+    Boolean(catalogOpeningPathSrc) &&
+    !/\bdesktop\s*(?:\?\.|\.)\s*(?:signIn|signOut|search|download|checkModel)\s*\(/.test(
+      catalogOpeningPathSrc
+    ) &&
+    Boolean(mountSrc) &&
+    !/\bdesktop\s*(?:\?\.|\.)\s*\w+\s*\(/.test(mountSrc)
+);
+check(
+  "device-import.js: desktop.checkModel is called only from checkCatalogModel behind its 600 ms debounce",
+  Boolean(checkCatalogModelSrc) &&
+    /\bclearTimeout\s*\(\s*catalogState\.modelTimer\s*\)/.test(checkCatalogModelSrc) &&
+    /\bsetTimeout\s*\(\s*async\s*\(\s*\)\s*=>\s*\{[\s\S]*?\bdesktop\.checkModel\s*\([\s\S]*?\}\s*,\s*600\s*\)/.test(
+      checkCatalogModelSrc
+    ) &&
+    (findView.match(/\bdesktop\s*(?:\?\.|\.)\s*checkModel\s*\(/g) ?? []).length === 1 &&
+    Boolean(mountSrc) &&
+    /\brefs\.catalogModel\.addEventListener\(\s*["']input["']\s*,\s*checkCatalogModel\s*\)/.test(
+      mountSrc
+    )
+);
+check(
+  "device-import.js: no melodiousDesktop call runs while the sheet opens",
+  (findView.match(/\bmelodiousDesktop\b/g) ?? []).length === 1 &&
+    Boolean(mountSrc) &&
+    /\bdesktop\s*=\s*window\.melodiousDesktop\?\.catalog\s*;/.test(mountSrc) &&
+    !/\bmelodiousDesktop\s*(?:\?\.|\.)\s*catalog\s*(?:\?\.|\.)\s*\w+\s*\(/.test(findView) &&
+    !/\bdesktop\s*(?:\?\.|\.)\s*\w+\s*\(/.test(mountSrc) &&
+    Boolean(showTabSrc) &&
+    /\bif\s*\(\s*tab\s*===\s*["']catalog["']\s*&&\s*desktop\s*\)/.test(showTabSrc) &&
+    /\bshowTab\(\s*["']find["']\s*\)/.test(mountSrc) &&
+    !/\bshowTab\(\s*["']catalog["']\s*\)/.test(mountSrc) &&
+    Boolean(catalogOpeningPathSrc) &&
+    !/\bdesktop\s*(?:\?\.|\.)\s*\w+\s*\(/.test(
+      catalogOpeningPathSrc.replace(showTabSrc ?? "\0", "")
+    )
+);
+
+function catalogReferenceBudgets(src) {
+  const mountSpan = spanOf(src, extractFunctionSource(src, "mount"));
+  const catalogResultsSpan = spanOf(src, extractFunctionSource(src, "renderCatalogResults"));
+  return [
+    {
+      name: "doCatalogSignIn",
+      roles: [
+        { role: "declaration", pattern: /\basync\s+function\s+doCatalogSignIn\s*\(/ },
+        {
+          role: "Sign in button callback in mount",
+          pattern: /\bbutton\(\s*["']Sign in["']\s*,\s*["'][^"']*["']\s*,\s*doCatalogSignIn\s*\)/,
+          within: mountSpan,
+        },
+      ],
+    },
+    {
+      name: "doCatalogSignOut",
+      roles: [
+        { role: "declaration", pattern: /\basync\s+function\s+doCatalogSignOut\s*\(/ },
+        {
+          role: "Sign out button callback in mount",
+          pattern: /\bbutton\(\s*["']Sign out["']\s*,\s*["'][^"']*["']\s*,\s*doCatalogSignOut\s*\)/,
+          within: mountSpan,
+        },
+      ],
+    },
+    {
+      name: "doCatalogSearch",
+      roles: [
+        { role: "declaration", pattern: /\basync\s+function\s+doCatalogSearch\s*\(/ },
+        {
+          role: "Search Logitech catalog button callback in mount",
+          pattern:
+            /\bbutton\(\s*["']Search Logitech catalog["']\s*,\s*["'][^"']*["']\s*,\s*doCatalogSearch\s*\)/,
+          within: mountSpan,
+        },
+      ],
+    },
+    {
+      name: "doCatalogDownload",
+      roles: [
+        { role: "declaration", pattern: /\basync\s+function\s+doCatalogDownload\s*\(/ },
+        {
+          role: "Download button callback in renderCatalogResults",
+          pattern:
+            /\bbutton\(\s*["']Download["']\s*,\s*["'][^"']*["']\s*,\s*\(\s*\)\s*=>\s*doCatalogDownload\s*\(\s*\w+\s*\)\s*\)/,
+          within: catalogResultsSpan,
+        },
+      ],
+    },
+    {
+      name: "checkCatalogModel",
+      roles: [
+        { role: "declaration", pattern: /\bfunction\s+checkCatalogModel\s*\(/ },
+        {
+          role: "Model field input listener in mount",
+          pattern:
+            /\brefs\.catalogModel\.addEventListener\(\s*["']input["']\s*,\s*checkCatalogModel\s*\)/,
+          within: mountSpan,
+        },
+      ],
+    },
+  ];
+}
+
+for (const budget of catalogReferenceBudgets(findView)) {
+  const report = referenceBudget(findView, budget.name, budget.roles);
+  check(
+    `device-import.js: ${budget.name} reference budget — only ${budget.roles.map((r) => r.role).join(" + ")}`,
+    report.ok,
+    report.detail
+  );
+}
+
+for (const [label, name, snippet] of [
+  ["setTimeout(doCatalogSignIn, 0)", "doCatalogSignIn", "setTimeout(doCatalogSignIn, 0);"],
+  ["queueMicrotask(doCatalogSearch)", "doCatalogSearch", "queueMicrotask(doCatalogSearch);"],
+  ["Promise.resolve().then(doCatalogDownload)", "doCatalogDownload", "Promise.resolve().then(doCatalogDownload);"],
+  ["checkCatalogModel() on mount", "checkCatalogModel", "checkCatalogModel();"],
+]) {
+  const mutated = mutateFindView(snippet);
+  const budget = catalogReferenceBudgets(mutated).find((entry) => entry.name === name);
+  const report = budget ? referenceBudget(mutated, name, budget.roles) : { ok: false, extras: [] };
+  check(
+    `device-import.js catalog budget rejects: ${label}`,
+    mutated !== findView && !report.ok && report.extras.length > 0,
+    mutated === findView ? "mutation anchor not found" : report.ok ? "mutation passed the budget" : ""
+  );
+}
+
 check("index.html: no /sim/ URLs", !/\/sim\//.test(html));
 check("shell.js: no routable /sim/ URLs", !/\/sim\//.test(shellJs));
 check("index.html: no simulated-hub wording left", !/simulated/i.test(html));

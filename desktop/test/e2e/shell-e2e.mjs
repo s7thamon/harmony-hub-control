@@ -164,7 +164,7 @@ function startAuthProxyServer(simPort) {
   });
 }
 
-test("Playwright _electron end-to-end shell suite against webui-sim", async () => {
+test("Playwright _electron end-to-end shell suite against webui-sim", { timeout: 150_000 }, async () => {
   const userDataDir = fs.mkdtempSync(
     path.join(os.tmpdir(), "melodious-e2e-userdata-")
   );
@@ -444,6 +444,79 @@ test("Playwright _electron end-to-end shell suite against webui-sim", async () =
       assert.equal(reply.status, 200, JSON.stringify(reply.body));
       assert.equal(reply.body.ok, true, JSON.stringify(reply.body));
     }
+
+    // Catalog client stub stays in main; preload, IPC, bundled tab, preview,
+    // Content-Length forwarder and simulator persistence are all real.
+    const fixture = JSON.parse(fs.readFileSync(path.join(DESKTOP_DIR, "test/fixtures/catalog-fixtures.json"), "utf8"));
+    await electronApp.evaluate((_electron, wire) => {
+      let signedIn = false;
+      globalThis.__catalogCalls = [];
+      globalThis.__melodiousCatalogService = {
+        status: async () => ({ signedIn }),
+        signIn: async () => { globalThis.__catalogCalls.push("signIn"); signedIn = true; return { signedIn }; },
+        signOut: async () => { signedIn = false; return { signedIn }; },
+        checkModel: async () => ({ found: true, manufacturer: "Sony", model: "STR-DG720" }),
+        search: async () => {
+          globalThis.__catalogCalls.push("search");
+          return [{ id: 167856, manufacturer: "Sony", model: "STR-DG720", displayText: "Sony STR-DG720", deviceType: "Receiver", description: "Catalog fixture" }];
+        },
+        download: async () => {
+          globalThis.__catalogCalls.push("download");
+          return { schema_version: "0.2.0", source: "logitech-catalog-via-melodious-desktop", resources: { global_language_commands: wire.getGlobalLanguageCommands.GetGlobalLanguageCommandsResult } };
+        },
+      };
+    }, fixture);
+    const labId = await page.evaluate(async () => {
+      const r = await fetch("/api/ir-lab-target", { method: "POST", body: "" });
+      return (await r.json()).deviceId;
+    });
+    assert.ok(labId);
+    await page.evaluate((id) => { window.location.hash = `#devices/${id}`; }, labId);
+    await page.reload(); // The lab was created outside the view's config cache.
+    await page.getByRole("tab", { name: /^Commands/ }).click();
+    await page.getByRole("button", { name: "Import codes", exact: true }).click();
+    assert.deepEqual(await electronApp.evaluate(() => globalThis.__catalogCalls), []);
+    await page.getByRole("tab", { name: "Logitech catalog" }).click();
+    const catalogPanel = page.locator('[role="tabpanel"][id$="panel-catalog"]');
+    await catalogPanel.getByRole("button", { name: "Sign in", exact: true }).click();
+    await catalogPanel.getByText("Signed in to Logitech", { exact: true }).waitFor();
+    await catalogPanel.getByLabel("Brand", { exact: true }).fill("Sony");
+    await catalogPanel.getByLabel("Model", { exact: true }).fill("STR-DG7");
+    await catalogPanel.getByRole("button", { name: "Search Logitech catalog" }).click();
+    await catalogPanel.getByRole("button", { name: "Download", exact: true }).click();
+    await catalogPanel.getByRole("button", { name: "Import 4 commands to Temporary IR Test", exact: true }).waitFor();
+    assert.match(await catalogPanel.innerText(), /SmartKey — protocol “RC6 Mode 0” is not on this hub/);
+    assert.match(await catalogPanel.innerText(), /missing on hub: RC6 Mode 0/);
+    assert.deepEqual(await electronApp.evaluate(() => globalThis.__catalogCalls), ["signIn", "search", "download"]);
+    // Only synthetic fixtures are on this screen. Mask the target label too.
+    await page.evaluate(() => {
+      document.querySelectorAll(".sheet-title, .import-sheet button").forEach((el) => {
+        if (el.textContent.includes("Temporary IR Test")) el.textContent = el.textContent.replace("Temporary IR Test", "Scratch device");
+      });
+    });
+    await page.screenshot({ path: path.join(shotsDir, "catalog-search-1280.png") });
+    await catalogPanel.getByRole("button", { name: "Import 4 commands to Scratch device", exact: true }).scrollIntoViewIfNeeded();
+    await page.screenshot({ path: path.join(shotsDir, "catalog-preview-1280.png") });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.waitForTimeout(450); // Let the sheet's breakpoint animation finish.
+    await catalogPanel.getByRole("button", { name: "Import 4 commands to Scratch device", exact: true }).scrollIntoViewIfNeeded();
+    await page.screenshot({ path: path.join(shotsDir, "catalog-preview-390.png") });
+    await page.setViewportSize({ width: 1280, height: 800 });
+    const importReply = page.waitForResponse((r) => r.url().endsWith("/api/catalog-import") && r.request().method() === "POST");
+    await catalogPanel.getByRole("button", { name: "Import 4 commands to Scratch device", exact: true }).click();
+    assert.equal((await importReply).status(), 200);
+    await page.waitForSelector("dialog.import-sheet", { state: "detached" });
+    const savedCommands = await page.evaluate(async (id) => {
+      const config = await (await fetch("/api/activity-config")).json();
+      return config.deviceList.DevicesWithFeatures.find((e) => String(e.Device["Id-"]) === id).Commands;
+    }, String(labId));
+    assert.equal(savedCommands.length, 4);
+    for (const row of savedCommands) {
+      const original = fixture.getGlobalLanguageCommands.GetGlobalLanguageCommandsResult.find((c) => c.Name === row.Name);
+      assert.equal(row.KeyCode, original.KeyCode);
+      assert.equal(row.ProtocolId, original.ProtocolId);
+    }
+    console.log("catalog e2e: search → download → preview (4 importable, 1 skipped with reason) → import/read-back: OK");
 
     // 6. Navigation to another origin is cancelled; https: window.open goes to shell.openExternal
     await electronApp.evaluate(() => {

@@ -2,6 +2,23 @@
 
 const { contextBridge, ipcRenderer } = require("electron");
 
+async function invokeCatalog(channel, args) {
+  try {
+    return await (args === undefined
+      ? ipcRenderer.invoke(channel)
+      : ipcRenderer.invoke(channel, args));
+  } catch (err) {
+    const raw = String(err?.message || err || "Catalog request failed");
+    const clean = raw
+      .replace(
+        /^Error invoking remote method '[^']+':\s*(?:[A-Za-z0-9_]*Error:\s*)?/,
+        ""
+      )
+      .trim();
+    throw new Error(clean || "Catalog request failed");
+  }
+}
+
 contextBridge.exposeInMainWorld("melodiousDesktop", {
   version: 1,
   hub: {
@@ -15,6 +32,14 @@ contextBridge.exposeInMainWorld("melodiousDesktop", {
     openShell: () => ipcRenderer.invoke("desktop:open-shell"),
     openConnect: () => ipcRenderer.invoke("desktop:open-connect"),
     openSettings: () => ipcRenderer.invoke("desktop:open-settings"),
+  },
+  catalog: {
+    status: () => invokeCatalog("catalog:status"),
+    signIn: () => invokeCatalog("catalog:sign-in"),
+    signOut: () => invokeCatalog("catalog:sign-out"),
+    checkModel: (args) => invokeCatalog("catalog:check-model", args),
+    search: (args) => invokeCatalog("catalog:search", args),
+    download: (args) => invokeCatalog("catalog:download", args),
   },
 });
 

@@ -171,33 +171,45 @@ def authorize_url(cid: str, challenge: str, state: str) -> str:
 
 
 def parse_callback(text: str, *, expected_state: str) -> str:
-    """The authorization code out of a pasted callback address.
+    """The authorization code out of a callback address.
 
-    Accepts the full com.logitech.harmony://lidsoauth?... address, a bare
-    query string, or a bare code. The state must match what this run sent:
-    a callback from any other sign-in attempt is refused, not exchanged.
+    Takes the full com.logitech.harmony://lidsoauth?code=...&state=...
+    address (or just its query string). The state must match what this run
+    sent: a callback from any other sign-in attempt is refused, not
+    exchanged. A bare string is refused too: it can't be checked, and the
+    nonce on Logitech's id.logi.com/launch.html page looks just like a code.
     """
     candidate = (text or "").strip()
     if not candidate:
         raise CatalogError("nothing was pasted; paste the callback address from your browser")
-    query = candidate
-    if "://" in candidate or candidate.startswith("?"):
-        query = urllib.parse.urlsplit(candidate).query
-    params = urllib.parse.parse_qs(query)
+    try:
+        parts = urllib.parse.urlsplit(candidate)
+    except ValueError:
+        raise CatalogError("that is not a valid callback address") from None
+    host = (parts.hostname or parts.netloc or "").lower()
+    if host.endswith("logi.com") or candidate.lower().startswith(("id.logi.com/", "accounts.logi.com/")):
+        raise CatalogError(
+            "that is Logitech's own page, not the callback. It hands your browser a "
+            "com.logitech.harmony://lidsoauth?code=... address, which Chrome does not show "
+            "in the address bar; copy the com.logitech.harmony:// callback, not the launch page")
+    if "://" in candidate and (parts.scheme.lower() != "com.logitech.harmony" or
+                              parts.netloc != "lidsoauth" or parts.path or parts.fragment):
+        raise CatalogError("that is not the callback address: it should start with "
+                           "com.logitech.harmony://lidsoauth and carry code= and state=")
+    query = parts.query if ("://" in candidate or candidate.startswith("?")) else candidate
+    params = urllib.parse.parse_qs(query, keep_blank_values=True)
     error = (params.get("error") or [""])[0]
-    if error:
+    if "error" in params:
         description = (params.get("error_description") or [""])[0]
         raise CatalogError(f"Logitech refused the sign-in: {error}" + (f" ({description})" if description else ""))
-    state = (params.get("state") or [""])[0]
-    if state and state != expected_state:
-        raise CatalogError("that callback belongs to a different sign-in attempt; use the address from the tab this run opened")
-    if not state and "://" in candidate:
-        raise CatalogError("that address carries no sign-in state; use the address from the tab this run opened")
     code = (params.get("code") or [""])[0]
+    state = (params.get("state") or [""])[0]
     if not code:
-        if "=" not in candidate and "://" not in candidate and candidate:
-            return candidate  # a bare code, pasted on its own
-        raise CatalogError("that address carries no authorization code; finish signing in, then copy the address your browser lands on")
+        raise CatalogError("that is not the callback address: it should start with "
+                           "com.logitech.harmony://lidsoauth and carry code= and state=")
+    if (not state or not expected_state or state != expected_state or
+            len(params.get("code", [])) != 1 or len(params.get("state", [])) != 1):
+        raise CatalogError("that callback belongs to a different sign-in attempt; sign in again from the tab this run opened")
     return code
 
 
@@ -213,7 +225,8 @@ def oauth_exchange(client: JsonClient, cid: str, *, code: str, verifier: str) ->
         detail = ""
         if isinstance(payload, dict):
             detail = str(payload.get("error_description") or payload.get("error") or "")
-        raise CatalogError(_rejected("Logitech rejected the code exchange", status) + (f": {detail}" if detail else ""))
+        raise CatalogError(f"Logitech rejected the code exchange: HTTP {status}" + (f" ({detail})" if detail else "")
+                           + "; codes work once and expire within minutes, so run the helper again to sign in afresh")
     return LipTokens.from_mapping(payload)
 
 

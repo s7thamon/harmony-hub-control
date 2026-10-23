@@ -107,3 +107,70 @@ test("hub password is encrypted with safeStorage and never stored if safeStorage
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("Logitech tokens are encrypted with safeStorage (0600) and never stored when safeStorage is unavailable", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "melodious-tokens-test-"));
+  try {
+    const store = createSettingsStore({
+      dir,
+      safeStorage: makeFakeSafeStorage(true),
+    });
+
+    assert.equal(store.hasLogitechTokens(), false);
+    const saved = store.setLogitechTokens({
+      access_token: "acc-123",
+      id_token: "id-456",
+      refresh_token: "ref-789",
+    });
+    assert.equal(saved.stored, true);
+    assert.equal(store.hasLogitechTokens(), true);
+
+    const tokenFile = path.join(dir, "logitech-tokens.bin");
+    assert.equal(fs.existsSync(tokenFile), true);
+    const rawOnDisk = fs.readFileSync(tokenFile, "utf8");
+    assert.equal(rawOnDisk.includes("acc-123"), false);
+    assert.equal(rawOnDisk.includes("ref-789"), false);
+    assert.equal(fs.statSync(tokenFile).mode & 0o777, 0o600);
+
+    const reloaded = createSettingsStore({
+      dir,
+      safeStorage: makeFakeSafeStorage(true),
+    });
+    assert.deepEqual(reloaded.getLogitechTokens(), {
+      access_token: "acc-123",
+      id_token: "id-456",
+      refresh_token: "ref-789",
+    });
+
+    reloaded.clearLogitechTokens();
+    assert.equal(reloaded.getLogitechTokens(), null);
+    assert.equal(fs.existsSync(tokenFile), false);
+
+    const denied = createSettingsStore({ dir, safeStorage: {
+      ...makeFakeSafeStorage(true),
+      encryptString() { throw new Error("Keychain access refused"); },
+    } });
+    assert.deepEqual(denied.setLogitechTokens({ access_token: "fixture-access", id_token: "fixture-identity" }), { stored: false });
+    assert.equal(fs.existsSync(tokenFile), false);
+
+    const dirNoEnc = fs.mkdtempSync(path.join(os.tmpdir(), "melodious-tokens-noenc-"));
+    try {
+      const noEncStore = createSettingsStore({
+        dir: dirNoEnc,
+        safeStorage: makeFakeSafeStorage(false),
+      });
+      const res = noEncStore.setLogitechTokens({
+        access_token: "acc-123",
+        id_token: "id-456",
+        refresh_token: "ref-789",
+      });
+      assert.equal(res.stored, false);
+      assert.equal(noEncStore.getLogitechTokens(), null);
+      assert.equal(fs.existsSync(path.join(dirNoEnc, "logitech-tokens.bin")), false);
+    } finally {
+      fs.rmSync(dirNoEnc, { recursive: true, force: true });
+    }
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
