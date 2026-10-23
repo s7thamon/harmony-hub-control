@@ -43,11 +43,9 @@ node desktop/test/hub-emu.mjs                 # catalog import POSTs against too
 ```
 
 `test:dist` checks each built `Melodious.app`: the ad-hoc signature, one
-architecture per build, the app's own LC_UUID, an Info.plist with the Local
-Network text and no URL scheme, update feed or login item, and a shell
-byte-identical to `build/shell/`. It then launches the app
-against the simulator (on loopback, which Local Network privacy doesn't
-cover, so the LAN prompt is a manual check) and opens the catalog tab. It never signs in to
+architecture per build, an Info.plist with no URL scheme, update feed or login
+item, and a shell byte-identical to `build/shell/`. It then launches the app
+against the simulator and opens the catalog tab. It never signs in to
 Logitech, and it runs with `--use-mock-keychain` so it doesn't touch your
 login Keychain. The x64 build runs under Rosetta on Apple silicon; without
 Rosetta it is skipped.
@@ -78,15 +76,6 @@ npm run test:dist
   no notarisation, so macOS asks before the first launch (see below).
 - No update feed, no URL scheme, no login item and no helper beyond
   Electron's own.
-- `scripts/after-pack.js` gives the main executable its own LC_UUID before
-  signing, derived from the bundle id and arch (`scripts/macho-uuid.js`).
-  macOS Local Network privacy identifies apps by that UUID, and Electron's
-  prebuilt executable has the same one in every app on the same version, so
-  without it macOS files Melodious under another Electron app (often the
-  development `Electron.app`), never asks, and every LAN connection to the hub
-  fails ([electron/electron#55101](https://github.com/electron/electron/issues/55101)).
-  The UUID stays the same across versions, so the permission survives updates.
-  `Info.plist` carries `NSLocalNetworkUsageDescription` for the prompt.
 - electron-builder downloads the Electron zips and its dmg tools on the
   first build and caches them in `~/Library/Caches/electron-builder`.
 - The `.zip.blockmap` files are for auto-update, which the app doesn't

@@ -19,10 +19,6 @@ files:
 asar: true
 npmRebuild: false
 
-# Before signing: give the main executable its own LC_UUID, or macOS Local
-# Network privacy confuses Melodious with other Electron apps and blocks the hub.
-afterPack: scripts/after-pack.js
-
 mac:
   target:
     - target: dmg
@@ -32,8 +28,6 @@ mac:
   category: public.app-category.utilities
   icon: resources/icon.png
   darkModeSupport: true
-  extendInfo:
-    NSLocalNetworkUsageDescription: Melodious connects to your Harmony Hub on your local network.
   # Ad-hoc signature: no Developer ID and no notarisation. Hardened runtime
   # stays off, as ad-hoc signing needs.
   identity: "-"
