@@ -131,6 +131,43 @@ slot clash, and each rejected shape. The web tests run the mirror and,
 when LuaJIT is available, the hub validator over the same fixtures, so
 the two copies cannot drift.
 
+## The web editor
+
+Activities, ⋮, On-screen buttons (`#touch/<activityId>`) opens one
+activity's Touch screen. Its model is
+`tools/webui-sim/public/js/views/touch-model.js`; it reads the
+activity's `16417Activity<id>` map and writes the whole MapList back
+through `POST /api/activity-save`, with ActivityList and FunctionList
+sent exactly as the hub returned them.
+
+- The list shows the on-screen buttons in slot order, numbered by slot,
+  so gaps stay visible.
+- A button that sends a device command can be renamed, pointed at
+  another command, moved or removed. A button that runs a sequence or
+  starts an activity can be renamed, moved, removed, or changed to send
+  a command; the editor does not create sequence or activity buttons.
+- Buttons with Touch-only actions (such as the number-pad toggle) are
+  shown, keep their slot and can't be changed.
+- Move swaps slots with the nearest button that can move. Add takes the
+  lowest free slot. Remove leaves a gap. Nothing else is renumbered.
+- An activity without a screen gets one on its first added button, its
+  surface and remote ids copied from another activity's screen. On a
+  hub with no Touch screen at all, the editor says so and offers
+  nothing to add.
+- Labels are plain text, trimmed, at most 24 characters, and required.
+- Before sending, the editor checks that the activity's map hasn't
+  changed on the hub since the screen opened, and runs the validation
+  rules above. It refuses to save a config without its FunctionList
+  rather than send an empty one.
+- After a save it asks the owner to sync the Touch from its menu and
+  says why: until then, a moved or changed button can run its new
+  action under its old label.
+
+Tests: `tools/webui-sim/test/touch-model.test.mjs` covers each edit,
+byte-identical carry-through of every other map and button, key order,
+id allocation and the new-screen path, and runs the hub's Lua validator
+over a graph for every kind of edit.
+
 ## Slices
 
 Each slice is one branch from `main` and one pull request, and ends
@@ -164,3 +201,22 @@ the Touch or the hub's save routes.
 
 A failure at step 1 stops the programme: the Touch is not on the local
 pull this design assumes.
+
+## Hardware gate for slice (b)
+
+After deploying, on an activity whose screen has at least two buttons,
+with hub logging running:
+
+1. In On-screen buttons, rename one button, save, and sync the Touch
+   from its menu. The new label shows; pressing it sends the same
+   command as before.
+2. Move that button one place and save. Before syncing, note what the
+   Touch shows. Sync, then check the two buttons sit in their new
+   places and each sends its own command.
+3. Add a button that sends a harmless command, save, sync, and check it
+   appears in the lowest free slot and sends that command.
+4. Remove the added button, undo the move and the rename, save, and
+   sync. The screen matches how it started.
+
+Stop and report if the Touch shows no screen or an error after any
+sync.
