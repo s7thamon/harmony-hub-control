@@ -6,11 +6,13 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material.icons.filled.WifiOff
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
@@ -62,6 +64,28 @@ fun SettingsTab(
                     trailing = { OutlinedButton(onClick = onOpenHub) { Text("Change") } },
                     onClick = onOpenHub,
                 )
+            }
+
+            Column {
+                SectionLabel("Logitech account")
+                ListGroup {
+                    ListRow(
+                        title = if (state.catalogSignedIn) "Signed in to Logitech" else "Not signed in",
+                        subtitle = if (state.catalogSignedIn)
+                            "Your sign-in stays on this phone; the hub never sees it."
+                        else
+                            "Used only to search and download device codes from Logitech's catalog.",
+                        trailing = {
+                            if (state.catalogBusy) {
+                                CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                            } else if (state.catalogSignedIn) {
+                                OutlinedButton(onClick = viewModel::catalogSignOut) { Text("Sign out") }
+                            } else {
+                                OutlinedButton(onClick = viewModel::catalogSignIn) { Text("Sign in") }
+                            }
+                        },
+                    )
+                }
             }
 
             Column {

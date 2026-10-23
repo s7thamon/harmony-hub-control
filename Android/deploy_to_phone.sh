@@ -61,14 +61,14 @@ if ! command -v adb >/dev/null 2>&1; then
   brew install --cask android-platform-tools
 fi
 
-if [[ ! -d "$SDK_DIR/platforms/android-35" ]]; then
+if [[ ! -d "$SDK_DIR/platforms/android-36" ]]; then
   if command -v sdkmanager >/dev/null 2>&1; then
-    echo "    Installing Android SDK Platform 35 & Build-Tools 35.0.0..."
+    echo "    Installing Android SDK Platform 36 & Build-Tools 36.0.0..."
     yes | sdkmanager --licenses >/dev/null 2>&1 || true
-    sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+    sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
   else
-    echo "ERROR: Android SDK Platform 35 not found under $SDK_DIR and sdkmanager is not on PATH." >&2
-    echo "Open Android Studio -> SDK Manager and install Android 15 (API 35), or run:" >&2
+    echo "ERROR: Android SDK Platform 36 not found under $SDK_DIR and sdkmanager is not on PATH." >&2
+    echo "Open Android Studio -> SDK Manager and install Android 16 (API 36), or run:" >&2
     echo "  brew install --cask android-commandlinetools" >&2
     exit 1
   fi
