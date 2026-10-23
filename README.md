@@ -400,6 +400,12 @@ What the app adds:
   which act when the app is already connected.
 - **SSH recovery** (Settings → Advanced): with your SSH key, check the hub,
   clear the web sign-in or restart Melodious's services. The key isn't saved.
+- **Logitech catalog** (a device's Commands → Import codes): sign in to your
+  own Logitech account in Chrome, search the catalog by brand and model,
+  download one device's code set, and import the commands whose IR protocol
+  this hub already has — the rest are listed, not dropped. Or open a
+  `harmony-catalog-*.json` package made on a computer. The sign-in stays on
+  the phone; the hub never sees it.
 
 Only the web app adds and deletes devices and has Edit details, device
 inputs, Find codes, Fetch from RemoteCentral, Type a code, the IR lab, the

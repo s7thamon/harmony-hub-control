@@ -381,40 +381,91 @@ private fun LearnSheet(state: MelodiousUiState, viewModel: MelodiousViewModel, d
     }
 }
 
+private enum class ImportTab { CATALOG, PASTE }
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ImportSheet(state: MelodiousUiState, viewModel: MelodiousViewModel, device: HubDevice, onDismiss: () -> Unit) {
-    var text by rememberSaveable { mutableStateOf("") }
+    var tab by rememberSaveable { mutableStateOf(ImportTab.CATALOG) }
+    androidx.compose.runtime.LaunchedEffect(device.id) { viewModel.openCatalogTab(device.id) }
+    androidx.compose.runtime.DisposableEffect(device.id) {
+        onDispose { viewModel.closeCatalogTab() }
+    }
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
     ) {
         Column(
-            Modifier.padding(horizontal = 20.dp).padding(bottom = 24.dp).navigationBarsPadding().imePadding(),
+            Modifier
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 24.dp)
+                .navigationBarsPadding()
+                .imePadding()
+                .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             Text("Import codes", fontSize = 20.sp, fontWeight = FontWeight.Medium)
-            Text(
-                "Paste codes from IRDB (CSV), name|mode|code lines, or a Pronto hex code. They'll be added to ${device.name}.",
-                fontSize = 14.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            OutlinedTextField(
-                value = text,
-                onValueChange = { text = it },
-                placeholder = { Text("Paste here") },
-                textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
-                shape = RoundedCornerShape(16.dp),
-                modifier = Modifier.fillMaxWidth().heightIn(min = 160.dp, max = 280.dp),
-            )
-            Button(
-                onClick = { if (viewModel.importIrPayload(device.id, text)) onDismiss() },
-                enabled = text.isNotBlank() && !state.irBusy,
-                modifier = Modifier.fillMaxWidth().height(52.dp),
+            // Tab row, in the web sheet's order; the sheet opens on the first tab.
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(50))
+                    .background(MelodiousColors.Card)
+                    .padding(4.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
             ) {
-                Text("Import")
+                ImportTab.entries.forEach { t ->
+                    val sel = t == tab
+                    Box(
+                        Modifier
+                            .weight(1f)
+                            .height(40.dp)
+                            .clip(RoundedCornerShape(50))
+                            .background(if (sel) MaterialTheme.colorScheme.primaryContainer else MelodiousColors.Card)
+                            .clickable(role = Role.Tab) { tab = t },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            if (t == ImportTab.CATALOG) "Logitech catalog" else "Paste",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = if (sel) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
             }
+            when (tab) {
+                ImportTab.CATALOG -> CatalogImportTab(state, viewModel, device, onImported = onDismiss)
+                ImportTab.PASTE -> PasteImportTab(state, viewModel, device, onDismiss)
+            }
+        }
+    }
+}
+
+@Composable
+private fun PasteImportTab(state: MelodiousUiState, viewModel: MelodiousViewModel, device: HubDevice, onDismiss: () -> Unit) {
+    var text by rememberSaveable { mutableStateOf("") }
+    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        Text(
+            "Paste codes from IRDB (CSV), name|mode|code lines, or a Pronto hex code. They'll be added to ${device.name}.",
+            fontSize = 14.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        OutlinedTextField(
+            value = text,
+            onValueChange = { text = it },
+            placeholder = { Text("Paste here") },
+            textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
+            shape = RoundedCornerShape(16.dp),
+            modifier = Modifier.fillMaxWidth().heightIn(min = 160.dp, max = 280.dp),
+        )
+        Button(
+            onClick = { if (viewModel.importIrPayload(device.id, text)) onDismiss() },
+            enabled = text.isNotBlank() && !state.irBusy,
+            modifier = Modifier.fillMaxWidth().height(52.dp),
+        ) {
+            Text("Import")
         }
     }
 }

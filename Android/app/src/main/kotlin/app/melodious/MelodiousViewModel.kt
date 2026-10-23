@@ -86,6 +86,21 @@ data class SendLogEntry(
 
 data class UiMessage(val id: Long, val text: String, val isError: Boolean)
 
+/** State of the Import sheet's Logitech catalog tab, kept in the ViewModel. */
+data class CatalogTabState(
+    val deviceId: String = "",
+    val matches: List<app.melodious.protocol.catalog.CatalogSearchMatch> = emptyList(),
+    val preview: app.melodious.protocol.catalog.CatalogRowsResult? = null,
+    val previewSummary: String = "",
+    /** True when the hub's protocol list couldn't be read, so no KeyCode was checked. */
+    val previewProtocolsUnreadable: Boolean = false,
+    val status: String = "",
+    val statusError: Boolean = false,
+    val modelCheck: String = "",
+    /** "brand\0model" the [modelCheck] text belongs to; stale results are dropped. */
+    val modelCheckKey: String = "",
+)
+
 data class MelodiousUiState(
     val connection: HubConnection = HubConnection.SEARCHING,
     val connectionError: String? = null,
@@ -136,6 +151,8 @@ data class MelodiousUiState(
     val catalogSignedIn: Boolean = false,
     val catalogBusy: Boolean = false,
     val logitechClientId: String = "",
+    /** In-tab catalog state: null while the Import sheet is closed. */
+    val catalogTab: CatalogTabState? = null,
 
     // Bluetooth & admin
     val btAdapterStatus: BtAdapterStatus = BtAdapterStatus(),
@@ -223,6 +240,9 @@ data class MelodiousUiState(
         }
     }
 }
+
+/** Largest catalog package the file picker reads (the Sony package is ~30 KB). */
+private const val MAX_CATALOG_FILE_BYTES = 4 * 1024 * 1024
 
 class MelodiousViewModel(application: Application) : AndroidViewModel(application) {
     private val prefs = HubPrefs(application)
@@ -595,6 +615,224 @@ class MelodiousViewModel(application: Application) : AndroidViewModel(applicatio
                     showMessage(err.message ?: "Sign-out failed.", isError = true)
                 }
         }
+    }
+
+    // ========================================================================
+    // Logitech catalog tab (Import sheet)
+    // ========================================================================
+
+    private var modelCheckInFlight = false
+
+    fun openCatalogTab(deviceId: String) {
+        if (_uiState.value.catalogTab?.deviceId == deviceId) return
+        _uiState.update { it.copy(catalogTab = CatalogTabState(deviceId = deviceId)) }
+    }
+
+    fun closeCatalogTab() {
+        _uiState.update { it.copy(catalogTab = null) }
+    }
+
+    /**
+     * The debounced model check: at most one request in flight, and a result
+     * is dropped when the fields have changed since it was sent. The tab
+     * composable debounces (600 ms) and never calls this for pre-filled or
+     * blank values. Anonymous: it never signs in.
+     */
+    fun checkCatalogModel(manufacturer: String, model: String) {
+        if (modelCheckInFlight) return
+        modelCheckInFlight = true
+        val m = manufacturer.trim()
+        val n = model.trim()
+        viewModelScope.launch {
+            try {
+                val res = catalogService.checkModel(m, n)
+                val tab = _uiState.value.catalogTab ?: return@launch
+                // Only publish when the tab is still open; the composable
+                // re-checks the displayed fields before showing it.
+                _uiState.update {
+                    it.copy(
+                        catalogTab = tab.copy(
+                            modelCheck = if (res.found) "Logitech knows this as ${res.model.ifBlank { n }}"
+                            else "Not found under that name",
+                            modelCheckKey = "$m\u0000$n",
+                        )
+                    )
+                }
+            } catch (_: Exception) {
+                _uiState.update { s ->
+                    s.catalogTab?.let { t -> s.copy(catalogTab = t.copy(modelCheck = "", modelCheckKey = "")) } ?: s
+                }
+            } finally {
+                modelCheckInFlight = false
+            }
+        }
+    }
+
+    fun catalogSearch(brand: String, model: String) {
+        val m = brand.trim()
+        val n = model.trim()
+        if (m.isEmpty() || n.isEmpty()) {
+            updateCatalogTab { it.copy(status = "Enter both the brand and the model (part of the model is enough).", statusError = true) }
+            return
+        }
+        if (_uiState.value.catalogBusy) return
+        _uiState.update { s ->
+            s.copy(
+                catalogBusy = true,
+                catalogTab = (s.catalogTab ?: CatalogTabState()).copy(matches = emptyList(), preview = null, previewSummary = "", status = "Searching Logitech's catalog…", statusError = false),
+            )
+        }
+        viewModelScope.launch {
+            runCatching { catalogService.search(m, n) }
+                .onSuccess { matches ->
+                    _uiState.update { s ->
+                        s.copy(
+                            catalogBusy = false,
+                            catalogSignedIn = true,
+                            catalogTab = (s.catalogTab ?: CatalogTabState()).copy(
+                                matches = matches,
+                                status = "Found ${matches.size} catalog match${if (matches.size == 1) "" else "es"}. Pick one to download its commands.",
+                                statusError = false,
+                            ),
+                        )
+                    }
+                }
+                .onFailure { err -> catalogTabError(err, "Catalog search failed.") }
+        }
+    }
+
+    fun catalogDownload(match: app.melodious.protocol.catalog.CatalogSearchMatch) {
+        if (_uiState.value.catalogBusy) return
+        _uiState.update { s ->
+            s.copy(
+                catalogBusy = true,
+                catalogTab = (s.catalogTab ?: CatalogTabState()).copy(
+                    preview = null, previewSummary = "",
+                    status = "Downloading ${match.displayText} from Logitech…", statusError = false,
+                ),
+            )
+        }
+        viewModelScope.launch {
+            runCatching { catalogService.download(match.id, match.manufacturer, match.model) }
+                .onSuccess { pkg ->
+                    _uiState.update { it.copy(catalogSignedIn = true) }
+                    previewCatalogPackage(pkg, "Logitech catalog")
+                }
+                .onFailure { err -> catalogTabError(err, "Catalog download failed.") }
+        }
+    }
+
+    /** The picker could not read the chosen file (or it was over 4 MB). */
+    fun openCatalogFileUnreadable(name: String) {
+        updateCatalogTab { it.copy(status = "$name is not a catalog package (not JSON)", statusError = true) }
+    }
+
+    /** Parse and preview a harmony-catalog-*.json file's contents (at most 4 MB). */
+    fun openCatalogFile(name: String, text: String) {
+        if (text.toByteArray(Charsets.UTF_8).size > MAX_CATALOG_FILE_BYTES) {
+            updateCatalogTab { it.copy(status = "$name is not a catalog package (not JSON)", statusError = true) }
+            return
+        }
+        val pkg = runCatching { kotlinx.serialization.json.Json.parseToJsonElement(text) }.getOrNull()
+        if (pkg == null) {
+            updateCatalogTab { it.copy(status = "$name is not a catalog package (not JSON)", statusError = true) }
+            return
+        }
+        if (!app.melodious.protocol.catalog.isCatalogPackage(pkg)) {
+            updateCatalogTab {
+                it.copy(status = "$name is not a Logitech catalog package from tools/catalog/harmony_catalog.py.", statusError = true)
+            }
+            return
+        }
+        previewCatalogPackage(pkg, name)
+    }
+
+    private fun previewCatalogPackage(pkg: kotlinx.serialization.json.JsonElement, label: String) {
+        val endpoint = _uiState.value.activeEndpoint
+        viewModelScope.launch {
+            if (endpoint == null) {
+                finishCatalogPreview(emptyList(), pkg, label, protocolsUnreadable = true)
+                return@launch
+            }
+            runCatching { restClient.getHubProtocolNames(endpoint) }
+                .onSuccess { names -> finishCatalogPreview(names, pkg, label, protocolsUnreadable = false) }
+                .onFailure { finishCatalogPreview(emptyList(), pkg, label, protocolsUnreadable = true) }
+        }
+    }
+
+    private fun finishCatalogPreview(
+        protocols: List<String>,
+        pkg: kotlinx.serialization.json.JsonElement,
+        label: String,
+        protocolsUnreadable: Boolean,
+    ) {
+        val converted = app.melodious.protocol.catalog.catalogRows(pkg, protocols)
+        val summary = app.melodious.protocol.catalog.describeCatalogRows(converted)
+        _uiState.update { s ->
+            s.copy(
+                catalogBusy = false,
+                catalogTab = (s.catalogTab ?: CatalogTabState()).copy(
+                    preview = converted,
+                    previewSummary = summary,
+                    previewProtocolsUnreadable = protocolsUnreadable,
+                    status = if (protocolsUnreadable) {
+                        "Loaded $label, but the hub's protocol list couldn't be read, so no KeyCode can be checked yet."
+                    } else {
+                        "Loaded $label: $summary."
+                    },
+                    statusError = false,
+                ),
+            )
+        }
+    }
+
+    /** Imports the preview rows to the tab's device; returns through the snackbar on success. */
+    fun catalogImport(device: HubDevice, onDone: () -> Unit) {
+        val tab = _uiState.value.catalogTab ?: return
+        val rows = tab.preview?.rows.orEmpty()
+        if (rows.isEmpty()) {
+            updateCatalogTab { it.copy(status = "Nothing to import yet: open a catalog package with importable commands first.", statusError = true) }
+            return
+        }
+        val endpoint = _uiState.value.activeEndpoint ?: return
+        if (_uiState.value.catalogBusy) return
+        _uiState.update { s ->
+            s.copy(catalogBusy = true, catalogTab = (s.catalogTab ?: CatalogTabState()).copy(status = "Importing… the hub backs up its device list first.", statusError = false))
+        }
+        viewModelScope.launch {
+            runCatching {
+                val reply = restClient.importCatalogCommands(endpoint, device.id, rows)
+                runCatching { reloadConfig(endpoint) }
+                reply
+            }.onSuccess { reply ->
+                _uiState.update { it.copy(catalogBusy = false) }
+                onDone()
+                val msg = reply["message"]?.jsonPrimitive?.content.orEmpty()
+                showMessage("Imported to ${device.name}. $msg".trim())
+            }.onFailure { err ->
+                _uiState.update { it.copy(catalogBusy = false) }
+                val msg = if (err is app.melodious.protocol.rest.HubApiException && err.statusCode == 404) {
+                    "Your hub's Melodious software is older than this app; update the hub"
+                } else {
+                    err.message ?: "Import failed."
+                }
+                updateCatalogTab { it.copy(status = msg, statusError = true) }
+            }
+        }
+    }
+
+    private fun catalogTabError(err: Throwable, fallback: String) {
+        _uiState.update { s ->
+            s.copy(
+                catalogBusy = false,
+                catalogSignedIn = if (err.message?.contains("sign in", ignoreCase = true) == true) false else s.catalogSignedIn,
+                catalogTab = (s.catalogTab ?: CatalogTabState()).copy(status = err.message ?: fallback, statusError = true),
+            )
+        }
+    }
+
+    private inline fun updateCatalogTab(crossinline f: (CatalogTabState) -> CatalogTabState) {
+        _uiState.update { s -> s.catalogTab?.let { s.copy(catalogTab = f(it)) } ?: s }
     }
 
     /** Returns false (and shows why) when the client_id is not usable. */

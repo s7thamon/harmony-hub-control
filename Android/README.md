@@ -2,7 +2,7 @@
 
 A native Kotlin + Jetpack Compose replacement for the discontinued Logitech Harmony Android app, built specifically around **Harmony Hub Control** (`codex_webui` on `:8080` + stock `hbus` WebSocket on `:8088`).
 
-No cloud login, no WebView wrapper, and zero outbound internet traffic required for normal operation.
+No cloud login, no WebView wrapper, and zero outbound internet traffic required for normal operation. The one optional exception is the Logitech catalog in a device's **Import codes** sheet: only when you sign in (in Chrome), search, download one device, or type in the Brand/Model fields does the app talk to Logitech's catalog services, from the phone, with your own account. Your Logitech sign-in stays on the phone (tokens encrypted with the Android Keystore); the hub only ever receives the same catalog-import command rows the web app sends.
 
 ---
 

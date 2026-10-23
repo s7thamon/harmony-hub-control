@@ -1,8 +1,11 @@
 # Melodious for Android: Logitech catalog lookup
 
-Status: plan for the owner's approval, 2026-10-22 (open decisions at the
-end). No app code yet. The Phase 0 sign-in spike passed on the owner's
-phone.
+Status: approved 2026-10-22 (decisions 1–4 taken as the recommended
+options). Slice 1 (build + sign-in, PR #43) and slice 2 (catalog client,
+PR #44) are merged; slice 1's sign-in is owner-confirmed on the phone.
+Slice 3 (the Import-sheet tab, version 1.1.0/versionCode 2, docs) is in
+progress. Slice 4 (sim/hub-emu cross-checks) follows. The Phase 0 sign-in
+spike passed on the owner's phone.
 
 This brings the macOS app's catalog feature (`docs/DESKTOP_APP.md`, slices
 2 and 3) to the Android app, one to one:
