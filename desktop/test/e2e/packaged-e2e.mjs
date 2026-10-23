@@ -15,11 +15,13 @@ import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
 const { _electron: electron } = require("playwright");
 const asar = require("@electron/asar");
+const { readUuid, appUuid } = require("../../scripts/macho-uuid.js");
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DESKTOP_DIR = path.resolve(__dirname, "../..");
 const REPO_ROOT = path.resolve(DESKTOP_DIR, "..");
 const SHELL_DIR = path.join(DESKTOP_DIR, "build", "shell");
+const STOCK_ELECTRON = path.join(DESKTOP_DIR, "node_modules/electron/dist/Electron.app/Contents/MacOS/Electron");
 const SIM_PORT = Number(process.env.SIM_PORT || 8798);
 
 const APPS = [
@@ -73,8 +75,17 @@ function checkBundle(appDir, arch) {
   const lipo = spawnSync("lipo", ["-archs", path.join(appDir, "Contents", "MacOS", "Melodious")], { encoding: "utf8" });
   assert.equal(lipo.stdout.trim(), arch === "x64" ? "x86_64" : "arm64", "one architecture per build");
 
+  // Its own LC_UUID, or macOS Local Network privacy files it under another
+  // Electron app and blocks the hub (electron/electron#55101).
+  const exe = fs.readFileSync(path.join(appDir, "Contents", "MacOS", "Melodious"));
+  assert.equal(readUuid(exe), appUuid("app.melodious.desktop", arch));
+  if (arch === process.arch && fs.existsSync(STOCK_ELECTRON)) {
+    assert.notEqual(readUuid(exe), readUuid(fs.readFileSync(STOCK_ELECTRON)));
+  }
+
   const plist = infoPlist(appDir);
   assert.equal(plist.CFBundleIdentifier, "app.melodious.desktop");
+  assert.match(plist.NSLocalNetworkUsageDescription ?? "", /Harmony Hub/);
   assert.equal(plist.CFBundleName, "Melodious");
   assert.equal(plist.CFBundleShortVersionString, require(path.join(DESKTOP_DIR, "package.json")).version);
   // No system components: no URL scheme handler, no update feed, no login item.
