@@ -1,6 +1,8 @@
 # Melodious for macOS: the desktop app with Logitech catalog lookup
 
 Status: plan approved by the owner, 2026-10-22 (decisions at the end).
+Slices 1 (app shell, PR #36) and 2 (catalog, PR #37) are merged; slice 3
+(packaging and docs) follows.
 
 Melodious for macOS is the hub's web UI in a desktop window, plus the one
 thing a page served by the hub can't do: sign in to the user's own Logitech
@@ -405,7 +407,9 @@ bundle copy, catalog package or token is ever committed.
   - Separate per-architecture builds, not a universal one, which would
     double the download.
   - Expected size: about 100 MB per download and over 250 MB installed,
-    almost all of it Electron's Chromium. Measured and reported in slice 3.
+    almost all of it Electron's Chromium. Measured in slice 3 (1.0.0,
+    Electron 45.0.0): dmg 123 MB (arm64) and 130 MB (x64), zip 121 MB and
+    128 MB, installed 254 MB and 261 MB.
 - Ad-hoc signed (`codesign --force --deep -s -`; electron-builder
   `identity: "-"`), with the hardened runtime off. No Developer ID, no
   notarisation.
