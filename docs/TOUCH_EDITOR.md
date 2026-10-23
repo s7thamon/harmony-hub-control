@@ -28,8 +28,10 @@ it is saved.
   the engine, and publishes a new configuration revision. There is no
   separate Touch write path.
 - After a save, the editor tells the owner to sync the Touch from its
-  menu. It does not claim the revision notice starts a sync by itself;
-  that is unproven on hardware.
+  menu. Nothing on the hub starts a Touch sync: the revision notice
+  doesn't, and on real hardware Refresh remote locally ends in an error
+  that the Harmony cloud can't be reached. Only the Touch's own Sync
+  works offline.
 
 ## The MapList contract
 
@@ -61,9 +63,9 @@ An on-screen button is a `SoftRemoteButton` whose `FunctionGroupType`
 is not 2 (the number pad). Its editable fields are its label
 (`TextOnRemote`, text only), its press, long-press and double-press
 actions, and its menu slot. Actions an editor can assign are a device
-command, a sequence in the same map, or starting an activity. Home
-control and program actions keep working and pass through; an editor
-does not create them.
+command or a sequence in the same map. Buttons that switch to another
+activity, and home control and program actions, keep working and pass
+through; an editor does not create them.
 
 A sequence lives in its map's `Sequences`. Its steps are device
 commands and delays only, run in `Order`. Deleting a sequence deletes
@@ -144,8 +146,9 @@ sent exactly as the hub returned them.
   so gaps stay visible.
 - A button that sends a device command can be renamed, pointed at
   another command, moved or removed. A button that runs a sequence or
-  starts an activity can be renamed, moved, removed, or changed to send
-  a command; the editor does not create sequence or activity buttons.
+  switches to another activity can be renamed, moved, removed, or
+  changed to send a command. The editor doesn't create sequence buttons
+  yet (the sequences slice adds them) and never creates activity ones.
 - Buttons with Touch-only actions (such as the number-pad toggle) are
   shown, keep their slot and can't be changed.
 - Move swaps slots with the nearest button that can move. Add takes the
