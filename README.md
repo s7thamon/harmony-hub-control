@@ -440,11 +440,9 @@ Open, or use System Settings → Privacy & Security → Open Anyway. In Terminal
 `xattr -dr com.apple.quarantine /Applications/Melodious.app` does the same. To
 build it yourself, see [`desktop/README.md`](desktop/README.md).
 
-**First run.** macOS asks whether Melodious may find and connect to devices on
-your local network: choose **Allow**, or the app can't reach the hub. (To
-change it later: System Settings → Privacy & Security → Local Network.) The app
-looks for the hub on your network (SSDP), or you type its address. If the hub
-has a sign-in, enter it once. Change either later in Melodious → Settings (⌘,).
+**First run.** The app looks for the hub on your network (SSDP), or you type
+its address. If the hub has a sign-in, enter it once. Change either later in
+Melodious → Settings (⌘,).
 
 **Logitech catalog.** Open a device, then Import codes → Logitech catalog:
 
