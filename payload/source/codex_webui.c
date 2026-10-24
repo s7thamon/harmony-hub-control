@@ -70,6 +70,8 @@
 #define MAX_REQUEST_BYTES (MAX_REQUEST_BODY + 8192)
 #define MAX_RESOURCE_FILE (2 * 1024 * 1024)
 #define MAX_DEVICE_SETTINGS 16384
+#define MAX_HA_DEVICE_SET (256 * 1024)
+#define MAX_HA_DEVICE_REPLY 32768
 #define MAX_IR_DEVICES 32
 #define MAX_IR_COMMANDS 160
 #define MAX_IR_STORED_COMMANDS 2048
@@ -2902,6 +2904,77 @@ static void render_device_settings_json(int fd, const struct request *req) {
 out:
     free(settings);
     free(request);
+}
+
+/* The Home Assistant device set: {"webhook":..,"devices":[..],"dryRun":bool}.
+   codexactivity validates it, reconciles the devices it owns, saves DeviceList
+   and ProtocolList with new etags, reloads the engine and publishes, so the
+   Touch pulls the change. Its JSON reply is the response body. */
+static void render_ha_devices_json(int fd, const struct request *req) {
+    const char *start = req->body, *end = NULL, *trail;
+    char request_id[96], msg[768];
+    char *request = NULL, *reply = NULL;
+    size_t set_len = 0, request_len;
+    int written, rc, dry_run;
+    FILE *f;
+    while (start && *start && isspace((unsigned char)*start)) start++;
+    if (start && *start == '{') end = find_matching_json(start, '{', '}');
+    for (trail = end ? end + 1 : NULL; trail && *trail; trail++) {
+        if (!isspace((unsigned char)*trail)) {
+            end = NULL;
+            break;
+        }
+    }
+    if (end) set_len = (size_t)(end - start) + 1;
+    if (!end || set_len > MAX_HA_DEVICE_SET) {
+        f = send_json_start(fd, "400 Bad Request");
+        if (f) {
+            fputs("{\"ok\":false,\"error\":\"body must be one JSON object with a webhook and a devices list\"}\n", f);
+            fclose(f);
+        }
+        return;
+    }
+    dry_run = json_bool(start, "dryRun", 0);
+    snprintf(request_id, sizeof(request_id), "%ld-%ld-%08x",
+        (long)getpid(), (long)time(NULL), resource_hash(start, set_len));
+    request_len = set_len + strlen(request_id) + 128;
+    request = (char *)malloc(request_len);
+    reply = (char *)malloc(MAX_HA_DEVICE_REPLY);
+    if (!request || !reply) {
+        f = send_json_start(fd, "503 Service Unavailable");
+        if (f) {
+            fputs("{\"ok\":false,\"error\":\"not enough memory for the Home Assistant devices\"}\n", f);
+            fclose(f);
+        }
+        goto out;
+    }
+    written = snprintf(request, request_len,
+        "{\"id\":\"%s\",\"op\":\"CommitHaDevices\",\"dryRun\":%s,\"set\":%.*s}",
+        request_id, dry_run ? "true" : "false", (int)set_len, start);
+    if (!dry_run) backup_resources();
+    reply[0] = 0;
+    msg[0] = 0;
+    rc = offline_writer_request(request, (size_t)written, request_id,
+        reply, MAX_HA_DEVICE_REPLY, msg, sizeof(msg));
+    if (reply[0] == '{') {
+        f = send_json_start(fd, rc == 0 ? "200 OK" : "422 Unprocessable Entity");
+        if (f) {
+            fputs(reply, f);
+            fputc('\n', f);
+            fclose(f);
+        }
+    } else {
+        f = send_json_start(fd, "503 Service Unavailable");
+        if (f) {
+            fputs("{\"ok\":false,\"localOnly\":true,\"error\":", f);
+            json_write_string(f, msg[0] ? msg : "The Home Assistant devices were not saved.");
+            fputs("}\n", f);
+            fclose(f);
+        }
+    }
+out:
+    free(request);
+    free(reply);
 }
 
 static int safe_activity_id(const char *value) {
@@ -10079,6 +10152,8 @@ static void handle_client(int client) {
         render_activity_save_json(client, &req);
     } else if (strcmp(req.method, "POST") == 0 && strcmp(req.path, "/api/device-settings") == 0) {
         render_device_settings_json(client, &req);
+    } else if (strcmp(req.method, "POST") == 0 && strcmp(req.path, "/api/ha-devices") == 0) {
+        render_ha_devices_json(client, &req);
     } else if (strcmp(req.method, "POST") == 0 && strcmp(req.path, "/api/activity-sync") == 0) {
         render_activity_sync_json(client);
     } else if (strcmp(req.method, "GET") == 0 && strcmp(req.path, "/api/inventory") == 0) {

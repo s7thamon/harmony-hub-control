@@ -374,11 +374,35 @@ RESOURCE_KEYS = (
 _last_commit_id = None
 
 
-def writer_respond(request_id, ok, error=None):
+def writer_respond(request_id, ok, error=None, extra=None):
     payload = {"id": request_id, "ok": ok}
     if error:
         payload["error"] = error
+    if extra:
+        payload.update(extra)
     write_atomic(RESPONSE_FILE, json.dumps(payload))
+
+
+def process_ha_devices(request_id, request):
+    # The real reconciliation runs in codexactivity.lua (tested under
+    # luajit). This stand-in only proves codex_webui's plumbing: the set
+    # arrives intact, dryRun is forwarded, and the reply is the body.
+    device_set = request.get("set")
+    devices = device_set.get("devices") if isinstance(device_set, dict) else None
+    if not isinstance(devices, list):
+        writer_respond(request_id, False, "devices must be a list")
+        add_event("ha-devices-rejected")
+        return
+    dry_run = request.get("dryRun") is True
+    writer_respond(request_id, True, extra={
+        "localOnly": True,
+        "dryRun": dry_run,
+        "changed": bool(devices),
+        "devices": [{"entity": d.get("entity"), "name": d.get("name")}
+                    for d in devices if isinstance(d, dict)],
+    })
+    add_event("ha-devices", dryRun=dry_run, count=len(devices),
+              webhook=device_set.get("webhook"))
 
 
 def process_commit_request():
@@ -403,7 +427,9 @@ def process_commit_request():
     if request_id == _last_commit_id:
         return
     _last_commit_id = request_id
-    if request.get("op") != "CommitActivityResources":
+    if request.get("op") == "CommitHaDevices":
+        process_ha_devices(request_id, request)
+    elif request.get("op") != "CommitActivityResources":
         writer_respond(request_id, False, f"unknown op {request.get('op')!r}")
     else:
         try:

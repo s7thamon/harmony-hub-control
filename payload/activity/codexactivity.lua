@@ -1262,16 +1262,598 @@ local function commitDeviceSettings(request)
   }
 end
 
+-- Home Assistant devices. Each entity the HA integration exposes becomes an
+-- ordinary device whose commands are TransportType 64. The engine renders
+-- their protocol's ControlSection into an HTTP POST to the integration's
+-- webhook (harmonyengine core/ipmanager.lua getRequest), filling {d} from
+-- the device's Tokens and {c} from the command's Parameters with
+-- string.gsub.
+local HA_PROTOCOL_NAME = "Melodious Home Assistant"
+local HA_DEVICE_TAG = "melodious-ha-"
+local HA_MANUFACTURER = "Home Assistant"
+local HA_DEFAULT_MODEL = "Home Assistant entity"
+local HA_MAX_DEVICES = 64
+local HA_MAX_COMMANDS = 128
+-- codex_webui numbers new commands from here too.
+local HA_MIN_ID = 39000000
+local HA_REFERENCE_RESOURCES = {"ActivityList", "MapList", "FunctionList"}
+
+-- The engine clears capodDeviceList[uid] after every answered IP command,
+-- and a device without AutoDetectedDevice.Id has no uid: that throws and
+-- kills the IP command task until the hub reboots. The tag is never a real
+-- SSDP uuid, so nothing else matches it, and it marks the devices this
+-- writer owns.
+local function isHaDevice(entry)
+  local device = type(entry) == "table" and entry.Device or nil
+  local detected = type(device) == "table" and device.AutoDetectedDevice or nil
+  return type(detected) == "table" and type(detected.Id) == "string" and
+    string.sub(detected.Id, 1, #HA_DEVICE_TAG) == HA_DEVICE_TAG
+end
+
+local function isHaProtocol(protocol)
+  return type(protocol) == "table" and protocol.Name == HA_PROTOCOL_NAME
+end
+
+-- A placeholder value lands in a JSON body and in string.gsub's
+-- replacement, so it may not carry quotes, backslashes, % or braces.
+local function haValue(value, maxLength)
+  if type(value) ~= "string" or value == "" or #value > maxLength or
+      string.find(value, '[%c"\\%%{}]') then
+    return nil
+  end
+  return value
+end
+
+local function haLabel(value, maxLength)
+  local text = type(value) == "string" and string.match(value, "^%s*(.-)%s*$") or ""
+  if text == "" or #text > maxLength or string.find(text, '[%c"\\]') then
+    return nil
+  end
+  return text
+end
+
+-- The hub's trust store lacks the Let's Encrypt root, so plain http only.
+local function haWebhook(value)
+  local host, path = string.match(type(value) == "string" and value or "", "^http://([^/]+)(/.*)$")
+  if not host or #value > 256 or
+      not (string.match(host, "^[%w%.%-]+$") or string.match(host, "^[%w%.%-]+:%d+$")) or
+      not string.match(path, "^/[%w%-%._~/]*$") then
+    return nil
+  end
+  return value
+end
+
+local function haList(value)
+  if value == nil or value == json.null then
+    return {}
+  end
+  if type(value) ~= "table" or (next(value) ~= nil and #value == 0) then
+    return nil
+  end
+  return value
+end
+
+-- Check one device of the set; command references resolve to the spelling
+-- the device itself uses.
+local function haDeviceSpecFrom(raw, index)
+  local label = "device " .. index
+  if type(raw) ~= "table" then
+    return nil, label .. " must be an object"
+  end
+  local spec = {
+    entity = haValue(raw.entity, 128),
+    name = haLabel(raw.name, 64),
+    model = (raw.model == nil or raw.model == json.null) and HA_DEFAULT_MODEL or
+      haLabel(raw.model, 64),
+    commands = {},
+    inputs = {}
+  }
+  if not spec.entity or not string.match(spec.entity, "^[a-z0-9_]+%.[a-z0-9_]+$") then
+    return nil, label .. " needs an entity ID such as light.kitchen"
+  end
+  label = spec.entity
+  if not spec.name then
+    return nil, label .. ": name must be 1-64 characters without quotes or backslashes"
+  end
+  if not spec.model then
+    return nil, label .. ": model must be 1-64 characters without quotes or backslashes"
+  end
+  local commands = haList(raw.commands)
+  if not commands or #commands == 0 or #commands > HA_MAX_COMMANDS then
+    return nil, label .. ": commands must list 1 to " .. HA_MAX_COMMANDS .. " commands"
+  end
+  local byName = {}
+  for i, command in ipairs(commands) do
+    local name = type(command) == "table" and command.name
+    if type(name) ~= "string" or #name > 48 or not string.match(name, "^[%w][%w _%.%+%-]*$") then
+      return nil, label .. ": command " .. i ..
+        " needs a name of letters, digits, spaces, . _ + or -"
+    end
+    if byName[string.lower(name)] then
+      return nil, label .. ": command " .. name .. " is listed twice"
+    end
+    local value = haValue(command.value, 96)
+    if not value then
+      return nil, label .. ": command " .. name ..
+        " needs a value without quotes, backslashes, % or braces"
+    end
+    byName[string.lower(name)] = name
+    spec.commands[i] = {name = name, value = value}
+  end
+  local function commandNamed(name)
+    return type(name) == "string" and byName[string.lower(name)] or nil
+  end
+  local power = raw.power
+  if power == nil or power == json.null then
+    spec.power = {type = 0}
+  elseif type(power) ~= "table" then
+    return nil, label .. ": power must be an object"
+  elseif power.toggle ~= nil and power.toggle ~= json.null then
+    spec.power = {type = 2, toggle = commandNamed(power.toggle)}
+    if not spec.power.toggle then
+      return nil, label .. ": power.toggle must name one of its commands"
+    end
+  else
+    spec.power = {type = 1, on = commandNamed(power.on), off = commandNamed(power.off)}
+    if not spec.power.on or not spec.power.off or spec.power.on == spec.power.off then
+      return nil, label .. ": power needs separate on and off commands from its list"
+    end
+  end
+  local inputs = haList(raw.inputs)
+  if not inputs or #inputs > MAX_INPUTS then
+    return nil, label .. ": inputs must list at most " .. MAX_INPUTS .. " inputs"
+  end
+  local seen = {}
+  for i, input in ipairs(inputs) do
+    local name = type(input) == "table" and haLabel(input.name, 64)
+    if not name then
+      return nil, label .. ": input names must be 1-64 characters without quotes or backslashes"
+    end
+    if seen[string.lower(name)] then
+      return nil, label .. ": input " .. name .. " is listed twice"
+    end
+    seen[string.lower(name)] = true
+    local command = commandNamed(input.command)
+    if not command then
+      return nil, label .. ": input " .. name .. " must name one of its commands"
+    end
+    spec.inputs[i] = {name = name, command = command}
+  end
+  return spec
+end
+
+local function haSetFrom(set)
+  if type(set) ~= "table" then
+    return nil, "the device set must be an object"
+  end
+  local devices = haList(set.devices)
+  if not devices or #devices > HA_MAX_DEVICES then
+    return nil, "devices must be a list of at most " .. HA_MAX_DEVICES .. " devices"
+  end
+  local out = {devices = {}, webhook = haWebhook(set.webhook)}
+  if #devices > 0 and not out.webhook then
+    return nil, "webhook must be a plain http:// URL the hub can reach"
+  end
+  local entities, names = {}, {}
+  for i, raw in ipairs(devices) do
+    local spec, specError = haDeviceSpecFrom(raw, i)
+    if not spec then
+      return nil, specError
+    end
+    if entities[spec.entity] then
+      return nil, spec.entity .. " is listed twice"
+    end
+    if names[string.lower(spec.name)] then
+      return nil, "two devices are named " .. spec.name
+    end
+    entities[spec.entity] = true
+    names[string.lower(spec.name)] = true
+    out.devices[i] = spec
+  end
+  return out
+end
+
+local function haEntityOf(entry)
+  local tokens = type(entry.Device.Tokens) == "table" and entry.Device.Tokens.Parameters
+  for _, token in ipairs(type(tokens) == "table" and tokens or {}) do
+    if type(token) == "table" and token.Key == "{d}" then
+      return token.Value
+    end
+  end
+  return nil
+end
+
+local function copyValue(value)
+  if type(value) ~= "table" then
+    return value
+  end
+  local out = {}
+  for key, item in pairs(value) do
+    out[key] = copyValue(item)
+  end
+  return out
+end
+
+local function maxId(value, found)
+  if type(value) ~= "table" then
+    return found
+  end
+  for key, item in pairs(value) do
+    if key == "Id-" and type(item) == "number" and item > found then
+      found = item
+    else
+      found = maxId(item, found)
+    end
+  end
+  return found
+end
+
+-- Every device and command each activity, map and function list names, so
+-- a device or command that is still in use is never dropped.
+local function haReferences()
+  local refs = {}
+  for _, name in ipairs(HA_REFERENCE_RESOURCES) do
+    local snapshot, readError = resourceSnapshot(name)
+    if not snapshot then
+      return nil, readError
+    end
+    local function visit(value)
+      if type(value) ~= "table" then
+        return
+      end
+      local id = normalizedId(value["DeviceId-"])
+      if id then
+        local ref = refs[id] or {resources = {}, commands = {}}
+        refs[id] = ref
+        ref.resources[name] = true
+        if type(value.CommandName) == "string" then
+          ref.commands[string.lower(value.CommandName)] = true
+        end
+      end
+      for _, item in pairs(value) do
+        visit(item)
+      end
+    end
+    visit(snapshot.resource)
+  end
+  return refs
+end
+
+local function haDeviceTable(spec, deviceId, now)
+  return {
+    DongleIndex = 0, InterDeviceDelay = 0, HoldInterKeyDelay = 0, DeviceType = 44,
+    RegisterSection = json.null, ContentProfileKey = tonumber(deviceId), DeviceOrder = 0,
+    DeviceProfileUri = "", SetupState = 1, DeviceSearchType = -1,
+    ["GlobalDeviceVersionId-"] = 0, DeviceTypeDisplayName = "Home Appliance",
+    FriendlyName = json.null, PressMinRepeats = 0, PrivateAddType = 1,
+    RegionalCharset = json.null, BTAddress = json.null, DongleRFID = 0,
+    ["GlobalLanguageVersionId-"] = 0, ParentDeviceId = json.null, DecodedEdid = json.null,
+    DefaultPressMinRepeats = 0, ParentDeviceModel = "", RenewSection = json.null,
+    IsMultiCode = false, GroupName = json.null, DefaultInterDeviceDelay = 0,
+    ["ParentDevice-"] = 0, DeviceAddedDate = now, AppLaunchConfigs = json.null,
+    PictureId = json.null, IsKeyboardAssociated = false, IsScartCableSupported = false,
+    Icon = 44, ["Id-"] = tonumber(deviceId), IsInterKeyDelayOptimized = false,
+    SuggestedDisplay = "DEFAULT", ControlPort = 7, EncodedEdid = json.null,
+    InterKeyDelay = 0, DeviceClassification = 0, DeviceCapabilitiesWithPriority = {},
+    CopiedDeviceSource = -1, State = 1, HoldInterDeviceDelay = 0, ActivityIds = json.null,
+    Characterization = 0, HoldMinRepeats = -1, DefaultInterKeyDelay = 0
+  }
+end
+
+-- Build one device entry from its spec, keeping the IDs, dates and timing
+-- an earlier commit or the device settings editor left on it.
+local function haDeviceEntry(spec, old, deviceId, protocolId, nextId, now)
+  local entry = old or {Device = haDeviceTable(spec, deviceId, now), DeviceFeatures = {}}
+  local device = entry.Device
+  device.Name = spec.name
+  device.Model = spec.model
+  device.Manufacturer = HA_MANUFACTURER
+  device.ParentDeviceManufacturer = HA_MANUFACTURER
+  device.Transport = 64
+  device.Tokens = {Parameters = {{Key = "{d}", Value = spec.entity}}}
+  device.AutoDetectedDevice = {Id = HA_DEVICE_TAG .. deviceId}
+  local previous = {}
+  for _, command in ipairs(type(entry.Commands) == "table" and entry.Commands or {}) do
+    if type(command) == "table" and type(command.Name) == "string" then
+      previous[string.lower(command.Name)] = command
+    end
+  end
+  entry.Commands = {}
+  for i, command in ipairs(spec.commands) do
+    local before = previous[string.lower(command.name)] or {}
+    entry.Commands[i] = {
+      -- Raw must be present: the engine string.subs Raw unless it is null.
+      Raw = json.null,
+      ["Id-"] = before["Id-"] or nextId(),
+      KeyCode = "",
+      DateTaught = before.DateTaught or now,
+      FunctionId = json.null,
+      Parameters = {{Key = "{c}", Value = command.value}},
+      Name = command.name,
+      FunctionGroupId = 0,
+      TransportType = 64,
+      ProtocolId = protocolId,
+      CommandTypeId = "",
+      IsLearned = false
+    }
+  end
+  if type(entry.DeviceFeatures) ~= "table" then
+    entry.DeviceFeatures = {}
+  end
+  local power = powerFeatureOf(entry)
+  power.PowerTypeId = spec.power.type
+  power.PowerOnActions = pressActions(spec.power.on)
+  power.PowerOffActions = pressActions(spec.power.off)
+  power.PowerToggleActions = pressActions(spec.power.toggle)
+  if not old then
+    power.PowerOnDelay = 0
+    power.DefaultPowerOnDelay = 0
+    power.IsPowerAlwaysOn = false
+    power.IsPoweredOnBetweenActivities = false
+  end
+  local inputFeature = featureOf(entry, "InputFeature")
+  applyInputs(entry, power, {
+    type = #spec.inputs > 0 and "discrete" or "none",
+    delay = inputFeature and tonumber(inputFeature.InputDelay) or 0,
+    list = spec.inputs
+  })
+  return entry
+end
+
+local function haProtocol(protocolId, webhook)
+  return {
+    Attributes = {}, IsPadded = false, IsFullSequence = false, Rating = json.null,
+    NumberOfLinkedLanguage = 0, Status = json.null, IsPublic = false, HoldDelay = json.null,
+    PressMinimumRepeats = 0, SendingType = 0, Name = HA_PROTOCOL_NAME,
+    ControlSection = {
+      Url = webhook,
+      Method = "POST",
+      -- The engine JSON-decodes Header after filling placeholders.
+      Header = '{"Content-Type":"application/json"}',
+      Body = '{"device":"{d}","command":"{c}"}',
+      Timeout = "2"
+    },
+    Flags = {},
+    -- Loaded as an IR protocol: the engine divides by the carrier and walks
+    -- both segment lists, so none of them may be missing.
+    __type = "IrProtocol", CarrierFrequency = 38000, ["Id-"] = protocolId,
+    KeyCode = json.null, HoldMinimumRepeats = json.null, RelatedProtocols = {},
+    IRSegments = {}, CodeSegments = {}
+  }
+end
+
+-- Make the hub's Home Assistant devices match the requested set: add,
+-- update and remove the devices this writer owns, and keep one protocol
+-- that points at the webhook. Other devices are never touched.
+local function commitHaDevices(request)
+  if not blockerActive() then
+    return {
+      ok = false,
+      localOnly = true,
+      error = "offline device writer refused to run because the cloud blocker is not active"
+    }
+  end
+  local set, setError = haSetFrom(request.set)
+  if not set then
+    return {ok = false, localOnly = true, error = setError}
+  end
+  if resources.isAnySyncInProgress() then
+    return {
+      ok = false,
+      localOnly = true,
+      error = "a Harmony sync is in progress; try again when it finishes"
+    }
+  end
+  local oldDevices, deviceReadError = resourceSnapshot("DeviceList")
+  local oldText = readFile(DEVICE_LIST_FILE)
+  local oldProtocols, protocolReadError = resourceSnapshot("ProtocolList")
+  if not oldDevices or not oldText or not oldProtocols then
+    return {
+      ok = false,
+      localOnly = true,
+      error = deviceReadError or protocolReadError or "could not read the local DeviceList"
+    }
+  end
+  local copied, deviceList = pcall(json.decode, oldText)
+  if not copied or type(deviceList) ~= "table" or
+      type(deviceList.DevicesWithFeatures) ~= "table" or
+      type(oldProtocols.resource.Protocols) ~= "table" then
+    return {ok = false, localOnly = true, error = "could not copy the local DeviceList"}
+  end
+  local refs, refError = haReferences()
+  if not refs then
+    return {ok = false, localOnly = true, error = refError}
+  end
+
+  local owned, kept, otherNames = {}, {}, {}
+  for _, entry in ipairs(deviceList.DevicesWithFeatures) do
+    local device = type(entry) == "table" and entry.Device or {}
+    if isHaDevice(entry) and haEntityOf(entry) then
+      owned[haEntityOf(entry)] = entry
+    else
+      kept[#kept + 1] = entry
+      if type(device.Name) == "string" then
+        otherNames[string.lower(device.Name)] = true
+      end
+    end
+  end
+  local counter = math.max(
+    maxId(deviceList, 0), maxId(oldProtocols.resource, 0), HA_MIN_ID
+  )
+  local function nextId()
+    counter = counter + 1
+    return counter
+  end
+  local protocolList = {}
+  for key, value in pairs(oldProtocols.resource) do
+    protocolList[key] = value
+  end
+  protocolList.Protocols = {}
+  local protocolId
+  for _, protocol in ipairs(oldProtocols.resource.Protocols) do
+    if isHaProtocol(protocol) then
+      protocolId = protocolId or protocol["Id-"]
+    else
+      protocolList.Protocols[#protocolList.Protocols + 1] = protocol
+    end
+  end
+  if #set.devices > 0 then
+    protocolId = protocolId or nextId()
+    protocolList.Protocols[#protocolList.Protocols + 1] = haProtocol(protocolId, set.webhook)
+  end
+
+  local now = "/Date(" .. tostring(os.time() or 0) .. "000+0000)/"
+  local result = {added = {}, updated = {}, removed = {}, unchanged = {}, devices = {}}
+  local wanted = {}
+  for _, spec in ipairs(set.devices) do
+    if otherNames[string.lower(spec.name)] then
+      return {
+        ok = false,
+        localOnly = true,
+        error = "another device is already named " .. spec.name
+      }
+    end
+    local old = owned[spec.entity]
+    local deviceId
+    if old then
+      deviceId = normalizedId(old.Device["Id-"])
+      local ref = refs[deviceId]
+      for name in pairs(ref and ref.commands or {}) do
+        local stillThere = false
+        for _, command in ipairs(spec.commands) do
+          if string.lower(command.name) == name then
+            stillThere = true
+          end
+        end
+        if not stillThere then
+          return {
+            ok = false,
+            localOnly = true,
+            error = spec.name .. ": an activity, button or sequence still uses command " .. name
+          }
+        end
+      end
+      local problems = inputsInUse(deviceId, {list = spec.inputs})
+      if #problems > 0 then
+        return {
+          ok = false,
+          localOnly = true,
+          error = spec.name .. ": activities still use inputs this change removes: " ..
+            table.concat(problems, "; ")
+        }
+      end
+    else
+      -- One counter for devices, commands and the protocol keeps every new
+      -- ID above all existing ones.
+      deviceId = tostring(nextId())
+    end
+    local before = old and copyValue(old) or nil
+    local entry = haDeviceEntry(spec, old, deviceId, protocolId, nextId, now)
+    wanted[spec.entity] = true
+    kept[#kept + 1] = entry
+    local bucket = not old and result.added or
+      (sameValue(before, entry) and result.unchanged or result.updated)
+    bucket[#bucket + 1] = spec.name
+    result.devices[#result.devices + 1] = {
+      entity = spec.entity,
+      deviceId = deviceId,
+      name = spec.name
+    }
+  end
+  for entity, entry in pairs(owned) do
+    if not wanted[entity] then
+      local deviceId = normalizedId(entry.Device["Id-"])
+      local ref = refs[deviceId]
+      if ref then
+        local where = {}
+        for name in pairs(ref.resources) do
+          where[#where + 1] = name
+        end
+        table.sort(where)
+        return {
+          ok = false,
+          localOnly = true,
+          error = tostring(entry.Device.Name) .. " is still used by " ..
+            table.concat(where, ", ") .. "; remove it from its activities and buttons first"
+        }
+      end
+      result.removed[#result.removed + 1] = tostring(entry.Device.Name)
+    end
+  end
+  deviceList.DevicesWithFeatures = kept
+
+  local devicesChanged = #result.added > 0 or #result.updated > 0 or #result.removed > 0
+  local protocolsChanged = not sameValue(oldProtocols.resource, protocolList)
+  result.ok = true
+  result.localOnly = true
+  result.changed = devicesChanged or protocolsChanged
+  if request.dryRun == true or not result.changed then
+    result.dryRun = request.dryRun == true
+    return result
+  end
+
+  local encoded, text = pcall(encodeDeviceList, deviceList)
+  if not encoded then
+    return {ok = false, localOnly = true, error = "could not encode DeviceList: " .. tostring(text)}
+  end
+  local function restore()
+    local protocolsOk = not protocolsChanged or saveResource(
+      "ProtocolList", oldProtocols.resource, oldProtocols.etag, oldProtocols.hetag
+    )
+    local devicesOk = not devicesChanged or
+      saveDeviceListText(oldText, oldDevices.resource, oldDevices.etag, oldDevices.hetag)
+    return protocolsOk and devicesOk
+  end
+  -- Save only what changed: each new etag makes the Touch pull that list.
+  -- The protocol goes first, so the engine never loads a device without it.
+  local saved, saveError = true, nil
+  if protocolsChanged then
+    saved, saveError = saveResource("ProtocolList", protocolList, localEtag(), localHetag())
+  end
+  if saved and devicesChanged then
+    tokenCounter = tokenCounter + 1
+    saved, saveError = saveDeviceListText(text, deviceList, localEtag(), localHetag())
+  end
+  if not saved then
+    local restored = restore()
+    return {ok = false, localOnly = true, rolledBack = restored and true or false, error = saveError}
+  end
+  local sent, reloaded = pcall(system.sendMessage, "config_new", {"DeviceList", "ProtocolList"})
+  if not sent or reloaded ~= true then
+    local restored = restore()
+    pcall(system.sendMessage, "config_new", {"DeviceList", "ProtocolList"})
+    return {
+      ok = false,
+      localOnly = true,
+      rolledBack = restored and true or false,
+      error = "Harmony engine rejected the Home Assistant device reload"
+    }
+  end
+  -- New etags plus a new revision: the Touch pulls both lists on its own.
+  result.reloaded = true
+  result.activityEngineReady = publishLocalRevision()
+  result.configVersion = digest.configVersion
+  return result
+end
+
 local function processRequest(raw)
   local ok, request = pcall(json.decode, raw)
   if not ok or type(request) ~= "table" then
-    return {ok = false, localOnly = true, error = "invalid local request JSON"}
+    -- Answer with the id when it can be read, so codex_webui stops waiting.
+    return {
+      ok = false,
+      localOnly = true,
+      id = type(raw) == "string" and string.match(raw, '^%s*{%s*"id"%s*:%s*"([^"]*)"') or "",
+      error = "invalid local request JSON"
+    }
   end
   local response
   if request.op == "CommitActivityResources" then
     response = commitActivityResources(request)
   elseif request.op == "CommitDeviceSettings" then
     response = commitDeviceSettings(request)
+  elseif request.op == "CommitHaDevices" then
+    response = commitHaDevices(request)
   elseif request.op == "Status" then
     response = statusResponse()
   else
