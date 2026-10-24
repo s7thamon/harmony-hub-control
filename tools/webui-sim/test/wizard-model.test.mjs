@@ -11,7 +11,9 @@ import {
   draftButtonsFromMap,
   inputOptions,
   isKeyboardHidActivityMap,
+  isTouchActivityMap,
   isWizardOwnedActivityMap,
+  touchHardKey,
 } from "../public/js/wizard-model.js";
 import { inputNames } from "../public/js/views/device-settings-model.js";
 
@@ -266,7 +268,11 @@ describe("buildActivityGraph — map ownership", () => {
       /^16417Activity/.test(String(m.ButtonMapIdentifier ?? "")),
     );
     assert.ok(secondSurface, "hub-wide second remote surface is cloned for the new activity");
-    assert.equal((secondSurface.Buttons ?? []).length, 0, "cloned surface starts action-less-free");
+    assert.deepEqual(
+      secondSurface.Buttons.map((b) => [b.__type, b.ButtonKey, b.ButtonAction?.CommandName]),
+      [["HardRemoteButton", "Play", "Play"]],
+      "the Touch surface gets the wizard's hard buttons and nothing else",
+    );
 
     /* Other activities keep every map they had. */
     for (const activity of FIXTURE.activityList.Activities) {
@@ -709,6 +715,102 @@ describe("cloneJsonResource — structured-clone seam", () => {
       graph.activityList.ExtraActivityListKey.deep.k = 99;
       assert.equal(config.activityList.ExtraActivityListKey.deep.k, 1);
     });
+  });
+});
+
+describe("Harmony Touch hard buttons", () => {
+  const touchMap = (maps, id) => maps.find((m) => isTouchActivityMap(m, id));
+  const hardKeys = (map) => map.Buttons.filter((b) => b.__type === "HardRemoteButton").map((b) => b.ButtonKey);
+  const notHard = (map) => map.Buttons.filter((b) => b.__type !== "HardRemoteButton");
+  const command = (deviceId, name) => ({ deviceId, command: { name, functionId: 0 }, hold: null });
+
+  it("names keys the way the Touch does and skips keys it doesn't have", () => {
+    assert.equal(touchHardKey("Dvr"), "DVR");
+    assert.equal(touchHardKey("VolumeUp"), "VolumeUp");
+    assert.equal(touchHardKey("Number5"), "");
+    assert.equal(touchHardKey("WatchTVActivity"), "");
+  });
+
+  it("a new activity's Touch map gets every hard button the Touch has", () => {
+    const draft = {
+      name: "Touch keys",
+      type: 1,
+      roles: [{ deviceId: "74521691", roleType: "VolumeActivityRole", input: "", powerDelay: "" }],
+      buttons: {
+        VolumeUp: command("74521691", "VolumeUp"),
+        Dvr: command("74521691", "Guide"),
+        Number1: command("74521691", "1"),
+      },
+    };
+    draft.buttons.VolumeUp.hold = { deviceId: "74521691", command: { name: "VolumeUp", functionId: 0 } };
+    const graph = buildActivityGraph({ config: FIXTURE, draft, editId: null });
+    const touch = touchMap(graph.mapList.ButtonMaps, graph.activityId);
+    assert.ok(touch, "the Touch surface is created");
+    assert.deepEqual(hardKeys(touch).sort(), ["DVR", "VolumeUp"]);
+    const volume = touch.Buttons.find((b) => b.ButtonKey === "VolumeUp");
+    const wizard = graph.mapList.ButtonMaps.find((m) => isWizardOwnedActivityMap(m, graph.activityId))
+      .Buttons.find((b) => b.ButtonKey === "VolumeUp");
+    assert.deepEqual(volume.ButtonAction, wizard.ButtonAction);
+    assert.deepEqual(volume.ButtonLongPressAction, wizard.ButtonLongPressAction, "hold mirrors too");
+    assert.notEqual(volume.ButtonId, wizard.ButtonId, "each map has its own button identities");
+    assertNoActionlessActivityButtons([touch]);
+    assertUniqueIdentities(graph.mapList.ButtonMaps);
+  });
+
+  it("an unchanged save leaves a Logitech Touch map exactly as it was", () => {
+    for (const activity of FIXTURE.activityList.Activities) {
+      const id = String(activity["Id-"]);
+      const before = touchMap(FIXTURE.mapList.ButtonMaps, id);
+      if (!before) continue;
+      const graph = buildActivityGraph({ config: FIXTURE, draft: draftFromActivity(FIXTURE, id), editId: id });
+      assert.deepEqual(touchMap(graph.mapList.ButtonMaps, id), before, activity.Name);
+    }
+  });
+
+  it("a changed key reaches the Touch; its other buttons stay put", () => {
+    // Music's 16414 map has Stop; its Touch map was set up without it.
+    const id = "49051068";
+    const before = touchMap(FIXTURE.mapList.ButtonMaps, id);
+    assert.ok(!hardKeys(before).includes("Stop"));
+    const draft = draftFromActivity(FIXTURE, id);
+    assert.ok(draft.buttons.Stop);
+    const [removed] = hardKeys(before).filter((k) => k !== "VolumeUp" && draft.buttons[k]);
+    draft.buttons.VolumeUp = command("78760839", "ChannelUp");
+    delete draft.buttons[removed];
+    const graph = buildActivityGraph({ config: FIXTURE, draft, editId: id });
+    const after = touchMap(graph.mapList.ButtonMaps, id);
+
+    const volumeBefore = before.Buttons.find((b) => b.ButtonKey === "VolumeUp");
+    const volumeAfter = after.Buttons.find((b) => b.ButtonKey === "VolumeUp");
+    assert.equal(volumeAfter.ButtonAction.CommandName, "ChannelUp");
+    assert.equal(volumeAfter.ButtonId, volumeBefore.ButtonId, "the button keeps its identity");
+    const order = (map) => map.Buttons.filter((b) => b.ButtonKey !== removed).map((b) => b.ButtonId);
+    assert.deepEqual(order(after), order(before), "every button keeps its place");
+    assert.ok(!hardKeys(after).includes(removed), "a removed key leaves the Touch too");
+    assert.ok(!hardKeys(after).includes("Stop"), "Stop stays off the Touch");
+    assert.deepEqual(notHard(after), notHard(before), "gestures and on-screen buttons are untouched");
+  });
+
+  it("an activity made without Touch buttons gets them on its next save", () => {
+    const id = "48113644";
+    const config = structuredClone(FIXTURE);
+    const touch = touchMap(config.mapList.ButtonMaps, id);
+    touch.Buttons = touch.Buttons.filter((b) => b.__type !== "HardRemoteButton");
+    const graph = buildActivityGraph({ config, draft: draftFromActivity(config, id), editId: id });
+    const wizardKeys = graph.mapList.ButtonMaps.find((m) => isWizardOwnedActivityMap(m, id))
+      .Buttons.map((b) => touchHardKey(b.ButtonKey)).filter(Boolean);
+    const after = touchMap(graph.mapList.ButtonMaps, id);
+    assert.deepEqual(hardKeys(after).sort(), wizardKeys.sort());
+    assert.deepEqual(notHard(after), touch.Buttons, "its on-screen buttons stay as they were");
+    assertUniqueIdentities(graph.mapList.ButtonMaps);
+  });
+
+  it("a hub without a Touch gets no Touch map", () => {
+    const config = structuredClone(FIXTURE);
+    config.mapList.ButtonMaps = config.mapList.ButtonMaps.filter((m) => !/^16417/.test(m.ButtonMapIdentifier));
+    const draft = { name: "No Touch", type: 1, roles: [], buttons: {} };
+    const graph = buildActivityGraph({ config, draft, editId: null });
+    assert.equal(touchMap(graph.mapList.ButtonMaps, graph.activityId), undefined);
   });
 });
 

@@ -5,11 +5,14 @@
    genuine Logitech fixture — same floors, same __type names, same fields.
 
    Ownership rule: the wizard may only create/replace the 16414Activity<ID>
-   map for the activity being saved. Every other ButtonMap (second surfaces,
-   conditional 16420 keyboard HID maps, root/device maps, other activities)
-   is preserved byte-for-byte. When a KeyboardTextEntryActivityRole is present
-   the wizard also ensures exactly one 16420Activity<ID> map exists, matching
-   the advanced editor's reconcile/validate contract. */
+   map for the activity being saved, plus the hard buttons of its Harmony
+   Touch map (16417Activity<ID>; see mirrorTouchHardButtons). The Touch's
+   on-screen buttons, number pad, gestures and sequences belong to the Touch
+   editor. Every other ButtonMap (second surfaces, conditional 16420 keyboard
+   HID maps, root/device maps, other activities) is preserved byte-for-byte.
+   When a KeyboardTextEntryActivityRole is present the wizard also ensures
+   exactly one 16420Activity<ID> map exists, matching the advanced editor's
+   reconcile/validate contract. */
 
 import * as api from "./api.js";
 import {
@@ -663,6 +666,95 @@ function mergeActivityButtonMaps({
   return { buttonMaps: result, preservedHid: existingHid };
 }
 
+/* The Harmony Touch's hard keys, as Logitech's own 16417Activity maps name
+   them. The Touch has no hard number keys (its number pad is on screen) and
+   spells the 16414 surface's "Dvr" as "DVR". */
+const TOUCH_HARD_KEYS = new Set([
+  "Blue", "ChannelDown", "ChannelUp", "DVR", "DirectionDown", "DirectionLeft",
+  "DirectionRight", "DirectionUp", "Exit", "FastForward", "Green", "Guide",
+  "Info", "Menu", "Pause", "Play", "PrevChannel", "Record", "Red", "Rewind",
+  "Select", "Stop", "VolumeDown", "VolumeMute", "VolumeUp", "Yellow",
+]);
+
+/** The Touch's name for a wizard key, or "" when the Touch has no such key. */
+export function touchHardKey(buttonKey) {
+  const key = buttonKey === "Dvr" ? "DVR" : String(buttonKey ?? "");
+  return TOUCH_HARD_KEYS.has(key) ? key : "";
+}
+
+export function isTouchActivityMap(map, activityId) {
+  return String(map?.ButtonMapIdentifier ?? "") === `16417Activity${activityId}`;
+}
+
+function actionShape(action) {
+  if (!action) return null;
+  return [action.__type, String(action["DeviceId-"] ?? ""), action.CommandName ?? null, action["ActivityId-"] ?? null];
+}
+
+function sameButton(left, right) {
+  if (!left || !right) return !left && !right;
+  return ["ButtonAction", "ButtonLongPressAction", "ButtonDoublePressAction"].every(
+    (field) => JSON.stringify(actionShape(left[field])) === JSON.stringify(actionShape(right[field])),
+  );
+}
+
+function hardButtonsByTouchKey(map) {
+  const out = new Map();
+  for (const button of map?.Buttons ?? []) {
+    if (button?.__type !== "HardRemoteButton") continue;
+    const key = touchHardKey(button.ButtonKey);
+    if (key && !out.has(key)) out.set(key, button);
+  }
+  return out;
+}
+
+/* The Touch answers its hard buttons from its own 16417Activity map, never
+   the 16414 one; Logitech's maps carry the same hard buttons on both. A
+   Touch map with no hard buttons (made by Melodious) gets every one the
+   wizard map has. A Touch map that already has some keeps them, and only
+   the keys this edit changed are copied over, so a Touch-only mapping set
+   up in MyHarmony survives. Buttons that aren't hard buttons are untouched. */
+export function mirrorTouchHardButtons({ buttonMaps, activityId, wizardMap, previousWizardMap, alloc }) {
+  const touch = buttonMaps.find((m) => isTouchActivityMap(m, activityId));
+  if (!touch) return;
+  const next = hardButtonsByTouchKey(wizardMap);
+  const before = hardButtonsByTouchKey(previousWizardMap);
+  const current = hardButtonsByTouchKey(touch);
+  const mirrorAll = current.size === 0;
+  const result = new Map(); // key -> button, or null to drop it
+  for (const key of new Set([...next.keys(), ...current.keys()])) {
+    const wanted = next.get(key);
+    if (!mirrorAll && sameButton(wanted, before.get(key))) continue;
+    if (!wanted) {
+      result.set(key, null);
+      continue;
+    }
+    if (current.has(key) && sameButton(wanted, current.get(key))) continue;
+    const copy = cloneJsonResource(wanted);
+    copy.ButtonId = current.get(key)?.ButtonId ?? alloc.id();
+    copy.FunctionGroupType = 0;
+    copy.ButtonKey = key;
+    result.set(key, copy);
+  }
+  if (result.size === 0) return;
+  // Changed buttons keep their place; new ones go after the rest.
+  const buttons = [];
+  for (const button of touch.Buttons ?? []) {
+    const key = button?.__type === "HardRemoteButton" ? touchHardKey(button.ButtonKey) : "";
+    if (!key || !result.has(key)) {
+      buttons.push(button);
+      continue;
+    }
+    if (result.get(key)) buttons.push(result.get(key));
+    result.delete(key);
+  }
+  for (const button of result.values()) {
+    if (button) buttons.push(button);
+  }
+  touch.Buttons = buttons;
+  touch.DateModified = harmonyDate();
+}
+
 /* Pure graph builder used by saveDraft and unit tests. Does not touch the network. */
 export function buildActivityGraph({ config, draft, editId }) {
   const alloc = createAllocator(config);
@@ -700,6 +792,7 @@ export function buildActivityGraph({ config, draft, editId }) {
 
   const activityId = activity["Id-"];
   const existingWizardMap = buttonMaps.find((m) => isWizardOwnedActivityMap(m, activityId));
+  const previousWizardMap = cloneJsonResource(existingWizardMap ?? null);
   const wizardMap = composeButtonMap(draft, activityId, config, alloc, existingWizardMap);
   const keyboardDeviceIds = keyboardDeviceIdsFromRoles(activity.Roles);
 
@@ -712,6 +805,7 @@ export function buildActivityGraph({ config, draft, editId }) {
     alloc,
   });
   mapList.ButtonMaps = mergedMaps;
+  mirrorTouchHardButtons({ buttonMaps: mergedMaps, activityId, wizardMap, previousWizardMap, alloc });
 
   const existingFunction = functionMaps.find((m) => isActivityFunctionMap(m, activityId));
   if (!existingFunction) {

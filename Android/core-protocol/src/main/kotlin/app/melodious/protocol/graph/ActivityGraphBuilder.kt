@@ -431,6 +431,129 @@ object ActivityGraphBuilder {
     fun isKeyboardHidActivityMap(map: JsonObject): Boolean =
         map["ButtonMapIdentifier"]?.jsonPrimitive?.content?.matches(Regex("^16420Activity-?\\d+$")) == true
 
+    /**
+     * The Harmony Touch's hard keys, as Logitech's own 16417Activity maps name them. The Touch has
+     * no hard number keys (its number pad is on screen) and spells the 16414 surface's "Dvr" as "DVR".
+     */
+    private val TOUCH_HARD_KEYS = setOf(
+        "Blue", "ChannelDown", "ChannelUp", "DVR", "DirectionDown", "DirectionLeft",
+        "DirectionRight", "DirectionUp", "Exit", "FastForward", "Green", "Guide",
+        "Info", "Menu", "Pause", "Play", "PrevChannel", "Record", "Red", "Rewind",
+        "Select", "Stop", "VolumeDown", "VolumeMute", "VolumeUp", "Yellow",
+    )
+
+    /** The Touch's name for a wizard key, or "" when the Touch has no such key. */
+    fun touchHardKey(buttonKey: String): String {
+        val key = if (buttonKey == "Dvr") "DVR" else buttonKey
+        return if (key in TOUCH_HARD_KEYS) key else ""
+    }
+
+    private fun JsonObject.text(key: String): String? = (this[key] as? JsonPrimitive)?.contentOrNull
+
+    private fun actionShape(action: JsonElement?): List<String?>? =
+        (action as? JsonObject)?.let { obj -> listOf("__type", "DeviceId-", "CommandName", "ActivityId-").map { obj.text(it) } }
+
+    private fun sameButton(left: JsonObject?, right: JsonObject?): Boolean {
+        if (left == null || right == null) return left == null && right == null
+        return listOf("ButtonAction", "ButtonLongPressAction", "ButtonDoublePressAction")
+            .all { actionShape(left[it]) == actionShape(right[it]) }
+    }
+
+    private fun hardButtonsByTouchKey(map: JsonObject?): Map<String, JsonObject> {
+        val out = LinkedHashMap<String, JsonObject>()
+        for (button in (map?.get("Buttons") as? JsonArray).orEmpty().mapNotNull { it as? JsonObject }) {
+            if (button.text("__type") != "HardRemoteButton") continue
+            val key = touchHardKey(button.text("ButtonKey").orEmpty())
+            if (key.isNotEmpty() && key !in out) out[key] = button
+        }
+        return out
+    }
+
+    /**
+     * The Touch answers its hard buttons from its own 16417Activity map, never the 16414 one;
+     * Logitech's maps carry the same hard buttons on both. Mirrors wizard-model.js
+     * mirrorTouchHardButtons: a Touch map with no hard buttons gets every one the wizard map has;
+     * one that already has some keeps them and takes only the keys this edit changed, so a
+     * Touch-only mapping set up in MyHarmony survives. Buttons that aren't hard buttons are
+     * untouched. A hub with a Touch surface but no map for this activity gets one.
+     */
+    fun mirrorTouchHardButtons(
+        maps: List<JsonObject>,
+        activityId: Int,
+        wizardMap: JsonObject,
+        previousWizardMap: JsonObject?,
+        alloc: IdAllocator,
+        now: String,
+    ): List<JsonObject> {
+        val identifier = TouchScreenGraph.identifier(activityId.toString())
+        val result = maps.toMutableList()
+        var index = result.indexOfFirst { it.text("ButtonMapIdentifier") == identifier }
+        if (index < 0) {
+            val sibling = maps.firstOrNull { it.text("ButtonMapIdentifier")?.startsWith("16417Activity") == true }
+                ?: maps.firstOrNull { it.text("ButtonMapIdentifier")?.startsWith("16417") == true }
+                ?: return maps
+            result.add(
+                JsonObject(
+                    mapOf(
+                        "ButtonMapId-" to JsonPrimitive(alloc.allocateMapId()),
+                        "ActivityId-" to JsonPrimitive(activityId),
+                        "Buttons" to JsonArray(emptyList()),
+                        "ButtonMapSurfaceId-" to (sibling["ButtonMapSurfaceId-"] ?: JsonNull),
+                        "__type" to JsonPrimitive("ActivityButtonMap"),
+                        "RemoteId-" to (sibling["RemoteId-"] ?: JsonNull),
+                        "ButtonMapIdentifier" to JsonPrimitive(identifier),
+                        "DateModified" to JsonPrimitive(now),
+                        "Sequences" to JsonArray(emptyList()),
+                        "SurfaceId-" to (sibling["SurfaceId-"] ?: JsonNull),
+                    )
+                )
+            )
+            index = result.size - 1
+        }
+        val touch = result[index]
+        val next = hardButtonsByTouchKey(wizardMap)
+        val before = hardButtonsByTouchKey(previousWizardMap)
+        val current = hardButtonsByTouchKey(touch)
+        val mirrorAll = current.isEmpty()
+        val changes = LinkedHashMap<String, JsonObject?>() // null drops the key
+        for (key in next.keys + current.keys) {
+            val wanted = next[key]
+            if (!mirrorAll && sameButton(wanted, before[key])) continue
+            if (wanted == null) {
+                changes[key] = null
+                continue
+            }
+            if (current[key] != null && sameButton(wanted, current[key])) continue
+            changes[key] = JsonObject(
+                wanted.toMutableMap().apply {
+                    put("ButtonId", current[key]?.get("ButtonId") ?: JsonPrimitive(alloc.allocateId()))
+                    put("FunctionGroupType", JsonPrimitive(0))
+                    put("ButtonKey", JsonPrimitive(key))
+                }
+            )
+        }
+        if (changes.isEmpty()) return result
+        // Changed buttons keep their place; new ones go after the rest.
+        val buttons = mutableListOf<JsonElement>()
+        for (element in (touch["Buttons"] as? JsonArray).orEmpty()) {
+            val button = element as? JsonObject
+            val key = if (button?.text("__type") == "HardRemoteButton") touchHardKey(button.text("ButtonKey").orEmpty()) else ""
+            if (key.isEmpty() || key !in changes) {
+                buttons.add(element)
+                continue
+            }
+            changes.remove(key)?.let { buttons.add(it) }
+        }
+        changes.values.filterNotNull().forEach { buttons.add(it) }
+        result[index] = JsonObject(
+            touch.toMutableMap().apply {
+                put("Buttons", JsonArray(buttons))
+                put("DateModified", JsonPrimitive(now))
+            }
+        )
+        return result
+    }
+
     data class BuiltActivityGraph(
         val activityId: String,
         val name: String,
@@ -508,12 +631,19 @@ object ActivityGraphBuilder {
             .filter { it.roleType.contains("KeyboardTextEntryActivityRole") && it.deviceId.isNotBlank() }
             .map { it.deviceId }
 
-        val mergedMaps = mergeActivityButtonMaps(
-            buttonMaps = existingMaps,
+        val mergedMaps = mirrorTouchHardButtons(
+            maps = mergeActivityButtonMaps(
+                buttonMaps = existingMaps,
+                activityId = targetActivityId,
+                wizardMap = wizardMap,
+                keyboardDeviceIds = keyboardDeviceIds,
+                snapshot = snapshot,
+                alloc = alloc,
+                now = now,
+            ),
             activityId = targetActivityId,
             wizardMap = wizardMap,
-            keyboardDeviceIds = keyboardDeviceIds,
-            snapshot = snapshot,
+            previousWizardMap = existingWizardMap,
             alloc = alloc,
             now = now,
         )
