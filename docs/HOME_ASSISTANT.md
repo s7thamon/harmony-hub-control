@@ -89,9 +89,17 @@ untested.
 
 ## The Home Assistant integration
 
-`custom_components/melodious/` sets up the devices and answers their
-webhook calls. Install it through HACS: add this repository as a
-custom repository of type Integration.
+The integration lives in its own repository,
+[schlambos/ha-melodious](https://github.com/schlambos/ha-melodious), with
+its own releases. HACS installs from a repository's latest release, and
+this repository's releases carry the hub, desktop and Android builds. It
+sets up the devices and answers their webhook calls. Install it through
+HACS: add `https://github.com/schlambos/ha-melodious` as a custom
+repository of type Integration.
+
+Verified on 2026-10-24 with four Hue lights, from the hub and from the
+Touch. Lights that were off (unavailable) when they were picked joined
+the hub by themselves once switched on.
 
 ### Setup
 
