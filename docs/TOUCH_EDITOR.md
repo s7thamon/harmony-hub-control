@@ -16,8 +16,12 @@ it is saved.
 
 - The hub never pushes config to the Touch. The Touch pulls it: it asks
   the hub for each resource, then reads the large files, and commits the
-  staged copy when the sync finishes. A no-change sync on the owner's
-  hardware confirms this pull runs locally against the hub.
+  staged copy when the sync finishes. This pull runs locally against
+  the hub; the owner's hardware confirms it.
+- The Touch starts that pull by itself when the hub publishes a new
+  configuration revision, which every save does. Its own Sync menu does
+  not work offline: it reports "Unable to connect to MyHarmony. A time
+  out error occurred." What that path waits on is not yet known.
 - The hub resolves a Touch press against its current maps. An on-screen
   press arrives as a menu index; the Touch draws labels from its own
   synced copy. Until the Touch syncs after a save, a slot whose action
@@ -27,11 +31,6 @@ it is saved.
   writes ActivityList, MapList and FunctionList with new etags, reloads
   the engine, and publishes a new configuration revision. There is no
   separate Touch write path.
-- After a save, the editor tells the owner to sync the Touch from its
-  menu. Nothing on the hub starts a Touch sync: the revision notice
-  doesn't, and on real hardware Refresh remote locally ends in an error
-  that the Harmony cloud can't be reached. Only the Touch's own Sync
-  works offline.
 
 ## The MapList contract
 
@@ -162,9 +161,9 @@ sent exactly as the hub returned them.
   changed on the hub since the screen opened, and runs the validation
   rules above. It refuses to save a config without its FunctionList
   rather than send an empty one.
-- After a save it asks the owner to sync the Touch from its menu and
-  says why: until then, a moved or changed button can run its new
-  action under its old label.
+- After a save it says the Touch picks up the change by itself, and
+  that until it does, a moved or changed button can run its new action
+  under its old label.
 - When the hub reports a failed save, the editor reloads and compares:
   if the hub has the edits, it says they were saved; if the screen is as
   the editor found it, it says nothing changed and keeps the edits; if
@@ -209,24 +208,29 @@ the Touch or the hub's save routes.
 A failure at step 1 stops the programme: the Touch is not on the local
 pull this design assumes.
 
+This gate is kept as it was run. Its "sync from the menu" steps were
+written before it was known that the menu Sync fails offline; the Touch
+picked the edit up by itself.
+
 ## Hardware gate for slice (b)
 
 After deploying, on an activity whose screen has at least two buttons,
-with hub logging running:
+with hub logging running. After each save, wait for the Touch to pull
+the change (the `proxy.resource?get` lines in the log) rather than
+using its Sync menu.
 
-1. In On-screen buttons, rename one button, save, and sync the Touch
-   from its menu. The new label shows; pressing it sends the same
-   command as before.
-2. Move that button one place and save. Before syncing, note what the
-   Touch shows. Sync, then check the two buttons sit in their new
+1. In On-screen buttons, rename one button and save. The new label
+   shows; pressing it sends the same command as before.
+2. Move that button one place and save. Before the Touch pulls, note
+   what it shows. Once it has, check the two buttons sit in their new
    places and each sends its own command.
-3. Add a button that sends a harmless command, save, sync, and check it
-   appears in the lowest free slot and sends that command.
-4. Remove the added button, undo the move and the rename, save, and
-   sync. The screen matches how it started.
+3. Add a button that sends a harmless command and save. It appears in
+   the lowest free slot and sends that command.
+4. Remove the added button, undo the move and the rename, and save.
+   The screen matches how it started.
 
 Stop and report if the Touch shows no screen or an error after any
-sync.
+pull.
 
 ## Saves while the engine is busy
 
@@ -244,5 +248,5 @@ checks the wait against a fake clock and against the limit in
 
 Owner check after deploying a change to this path: start an activity
 from the Touch, and while it is still starting, rename one on-screen
-button and save. The save succeeds; sync the Touch and confirm the
-label; rename it back, save and sync.
+button and save. The save succeeds; once the Touch has pulled the
+change, confirm the label; rename it back and save.
