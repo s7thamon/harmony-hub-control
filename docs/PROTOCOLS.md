@@ -21,6 +21,7 @@ see `SECURITY.md`.
 | `127.0.0.1:16716` | loopback | LTCP | Hardware server (IR, RF, Bluetooth, LED, Wi-Fi, flash). The hub's hardware daemon listens here. |
 | `127.0.0.1:16717` | loopback | LTCP | Engine server. The hardware daemon connects *out* to this to deliver events (a remote button, a Bluetooth status change) up to the control engine. |
 | `127.0.0.1:8333` | loopback | HTTP | A thin `GET/POST /api/<command>` bridge to the engine, used by local helpers. |
+| `127.0.0.1:80`, `127.0.0.1:443` | loopback | TCP accept only | `codex_webui` accepts and closes connections here; nothing is read or sent. While the cloud blocker is on, `/etc/hosts` points `ping.myharmony.com` here, so the hardware daemon's `wifi.status` connectivity probe, which the Harmony Touch checks before its own Sync, succeeds. |
 | `<hub-ip>:8088` | LAN | HTTP + WebSocket | The engine's LAN control channel (the "hbus" message bus over HTTP/WS). |
 | `<hub-ip>:5222` | LAN | XMPP | The engine's XMPP control channel (the classic Harmony app/remote API). |
 | `<hub-ip>:5224` (UDP) | LAN | custom | A discovery responder: a client announces a callback port and the hub connects back and sends an info blob. |

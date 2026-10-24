@@ -11,6 +11,9 @@
 #include <string.h>
 #include <strings.h>
 #include <sys/file.h>
+#ifdef __linux__
+#include <sys/prctl.h>
+#endif
 #include <sys/select.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
@@ -318,10 +321,82 @@ static int load_cloud_blocker(void) {
     return cloud_value_enabled(raw);
 }
 
+/* The Harmony Touch's Sync menu first asks hal for wifi.status, which
+   resolves ping.myharmony.com and connects to it on ports 80 and 443. With
+   the cloud blocked both connects fail and the Touch gives up ("Unable to
+   connect to MyHarmony") before it asks the hub for anything. While the
+   blocker is on, that name points at the hub itself and the probe sink
+   below accepts those connects. Only hal resolves this name: the hub's own
+   online check resolves its discovery server instead. */
+#define HOSTS_FILE "/etc/hosts"
+#define TOUCH_PROBE_MARK "# codex: Harmony Touch sync probe"
+#define TOUCH_PROBE_LINE "127.0.0.1\tping.myharmony.com\t" TOUCH_PROBE_MARK
+
+/* hosts text with our line dropped, then added back when enabled. Other
+   lines keep their order and bytes; every line ends in a newline. Returns
+   the length, or -1 when it doesn't fit. */
+static int touch_probe_hosts_text(const char *current, int enabled, char *out, size_t outlen) {
+    size_t used = 0;
+    const char *line = current ? current : "";
+    while (*line) {
+        const char *end = strchr(line, '\n');
+        size_t len = end ? (size_t)(end - line) : strlen(line);
+        int ours = 0;
+        const char *hit = strstr(line, TOUCH_PROBE_MARK);
+        if (hit && (size_t)(hit - line) < len) ours = 1;
+        if (!ours) {
+            if (used + len + 1 >= outlen) return -1;
+            memcpy(out + used, line, len);
+            used += len;
+            out[used++] = '\n';
+        }
+        line += len;
+        if (*line == '\n') line++;
+    }
+    if (enabled) {
+        size_t len = strlen(TOUCH_PROBE_LINE);
+        if (used + len + 1 >= outlen) return -1;
+        memcpy(out + used, TOUCH_PROBE_LINE, len);
+        used += len;
+        out[used++] = '\n';
+    }
+    if (used >= outlen) return -1;
+    out[used] = 0;
+    return (int)used;
+}
+
+/* Rewrites /etc/hosts only when our line has to come or go. */
+static void sync_touch_probe_hosts(int enabled) {
+    char current[4096], next[4096 + sizeof(TOUCH_PROBE_LINE) + 2];
+    int n = read_text(HOSTS_FILE, current, sizeof(current));
+    int len;
+    if (n < 0 || n >= (int)sizeof(current) - 1) return;
+    len = touch_probe_hosts_text(current, enabled, next, sizeof(next));
+    if (len <= 0 || strcmp(next, current) == 0) return;
+    next[len - 1] = 0; /* write_file_atomic adds the final newline */
+    if (write_file_atomic(HOSTS_FILE, next, (size_t)len - 1) != 0) {
+        /* Some mounts refuse a rename over /etc/hosts; rewrite it in place. */
+        FILE *f = fopen(HOSTS_FILE, "w");
+        next[len - 1] = '\n';
+        if (!f || fwrite(next, 1, (size_t)len, f) != (size_t)len || fflush(f) != 0 ||
+                fsync(fileno(f)) != 0) {
+            if (f) fclose(f);
+            fprintf(stderr, "codex_webui: could not %s the Touch sync probe in %s: %s\n",
+                enabled ? "add" : "remove", HOSTS_FILE, strerror(errno));
+            return;
+        }
+        fclose(f);
+    }
+    chmod(HOSTS_FILE, 0644);
+    fprintf(stderr, "codex_webui: Touch sync probe %s %s\n",
+        enabled ? "added to" : "removed from", HOSTS_FILE);
+}
+
 static int save_cloud_blocker(int enabled) {
     const char *value = enabled ? "1" : "0";
     if (write_file_atomic(CLOUD_BLOCKER_CONFIG, value, strlen(value)) != 0) return -1;
     chmod(CLOUD_BLOCKER_CONFIG, 0644);
+    sync_touch_probe_hosts(enabled);
     if (access(OFFLINE_EGRESS_GUARD, X_OK) == 0) {
         system(OFFLINE_EGRESS_GUARD " >/dev/null 2>&1");
     }
@@ -10156,7 +10231,68 @@ static void start_bthid_keyboard_runtime(void) {
     }
 }
 
+static int touch_probe_listen(unsigned short port) {
+    int fd = socket(AF_INET, SOCK_STREAM, 0), one = 1;
+    struct sockaddr_in addr;
+    if (fd < 0) return -1;
+    setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(port);
+    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) != 0 || listen(fd, 8) != 0) {
+        fprintf(stderr, "codex_webui: Touch sync probe can't listen on 127.0.0.1:%u: %s\n",
+            (unsigned)port, strerror(errno));
+        close(fd);
+        return -1;
+    }
+    return fd;
+}
+
+/* Accepts and closes the Touch sync probe's connects (see
+   sync_touch_probe_hosts) on 127.0.0.1:80 and :443, in its own process so
+   the web server's loop is untouched. Loopback only: nothing on the LAN
+   sees these ports. It ends with its parent. */
+static void start_touch_probe_sink(void) {
+    int fds[2], i;
+    pid_t pid = fork();
+    if (pid != 0) return;
+#ifdef __linux__
+    prctl(PR_SET_PDEATHSIG, SIGTERM);
+#endif
+    fds[0] = touch_probe_listen(80);
+    fds[1] = touch_probe_listen(443);
+    if (fds[0] < 0 && fds[1] < 0) _exit(1);
+    while (1) {
+        fd_set rfds;
+        int maxfd = -1;
+        FD_ZERO(&rfds);
+        for (i = 0; i < 2; i++) {
+            if (fds[i] < 0) continue;
+            FD_SET(fds[i], &rfds);
+            if (fds[i] > maxfd) maxfd = fds[i];
+        }
+        if (select(maxfd + 1, &rfds, NULL, NULL, NULL) < 0) continue;
+        for (i = 0; i < 2; i++) {
+            if (fds[i] >= 0 && FD_ISSET(fds[i], &rfds)) {
+                int client = accept(fds[i], NULL, NULL);
+                if (client >= 0) close(client);
+            }
+        }
+    }
+}
+
 #ifdef CODEX_WEBUI_SEMANTIC_TEST
+static int touch_probe_hosts_case(const char *name, const char *current, int enabled, const char *expected) {
+    char out[512];
+    int len = touch_probe_hosts_text(current, enabled, out, sizeof(out));
+    if (len < 0 || strcmp(out, expected) != 0) {
+        fprintf(stderr, "FAIL Touch sync probe hosts: %s\n  got: %s\n", name, len < 0 ? "(overflow)" : out);
+        return 1;
+    }
+    return 0;
+}
+
 static int semantic_test_case(
     const char *name,
     const char *left,
@@ -10217,8 +10353,27 @@ int main(void) {
             failures++;
         }
     }
+    {
+        const char *stock = "127.0.0.1\tlocalhost.localdomain\t\tlocalhost\n";
+        const char *probe = TOUCH_PROBE_LINE "\n";
+        char with[256], other[256], out[64];
+        snprintf(with, sizeof(with), "%s%s", stock, probe);
+        snprintf(other, sizeof(other), "%s%s10.0.0.5\tnas\n", stock, probe);
+        failures += touch_probe_hosts_case("adds the line when enabled", stock, 1, with);
+        failures += touch_probe_hosts_case("adding twice is a no-op", with, 1, with);
+        failures += touch_probe_hosts_case("removes the line when disabled", with, 0, stock);
+        failures += touch_probe_hosts_case("leaves a stock file alone when disabled", stock, 0, stock);
+        failures += touch_probe_hosts_case("keeps other lines and moves ours last", other, 1,
+            "127.0.0.1\tlocalhost.localdomain\t\tlocalhost\n10.0.0.5\tnas\n" TOUCH_PROBE_LINE "\n");
+        failures += touch_probe_hosts_case("ends an unterminated last line",
+            "127.0.0.1\tlocalhost", 0, "127.0.0.1\tlocalhost\n");
+        if (touch_probe_hosts_text(stock, 1, out, sizeof(out)) != -1) {
+            fputs("FAIL Touch sync probe hosts: overflow is refused\n", stderr);
+            failures++;
+        }
+    }
     if (failures) return 1;
-    puts("PASS semantic JSON, resource backup, and Bluetooth native response validation");
+    puts("PASS semantic JSON, resource backup, Bluetooth native response and Touch sync probe hosts validation");
     return 0;
 }
 #else
@@ -10235,6 +10390,8 @@ int main(int argc, char **argv) {
     sigaction(SIGCHLD, &sa, NULL);
     ensure_bt_hid_control_runtime();
     start_bthid_keyboard_runtime();
+    sync_touch_probe_hosts(load_cloud_blocker());
+    start_touch_probe_sink();
     fd = socket(AF_INET, SOCK_STREAM, 0);
     if (fd < 0) {
         perror("socket");

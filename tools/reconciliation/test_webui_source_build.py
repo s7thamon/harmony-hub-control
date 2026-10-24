@@ -17,7 +17,7 @@ official Zig 0.16.0 pin:
 The exact source tuples (from the verified webui-repro and
 zig-distribution-sweep pilot reports):
 
-  codex_webui.c          b48e532f92b2f83873dec227680f7c7243db9dad (box 2026-10-20 + LED + state-digest endpoints + system-status, delete guard, RAM agent logs, device settings, inputs + shell without the photo + hold-to-repeat + Logitech catalog)
+  codex_webui.c          df3cee78a06a1c641c4c1525a6120640e708d9bc (box 2026-10-20 + LED + state-digest endpoints + system-status, delete guard, RAM agent logs, device settings, inputs + shell without the photo + hold-to-repeat + Logitech catalog)
   activity_ui_assets.h   5dad607f7c09a0d5cc0034969b76e6c5df1eb2bc
   harmony_shell_assets.h d0babd751726d4975ca1b2342820e1ff21ce4810 (box 2026-10-20 + state-digest liveness + integrity fixes + device settings + inputs + Melodious shell + Activities + Devices + hold-to-repeat + Logitech catalog + desktop catalog)
   remote_skin_jpg.h      419611c5ff0713f1f5de2dd684d699f6d77238d5
@@ -76,9 +76,9 @@ BUILD_SCRIPT = os.path.join(REPO_ROOT, "build", "build_harmony_tools_kali.sh")
 #: constants from the verified pilot reports.
 PINNED_SOURCES = {
     "codex_webui.c": (
-        "b48e532f92b2f83873dec227680f7c7243db9dad",
-        "4be618d51b6bbe6598d9acbc4fd7336288c816bd0d765bbdb94acfb873899c54",
-        580868,
+        "df3cee78a06a1c641c4c1525a6120640e708d9bc",
+        "c4cf5d45fd85c863e598c8f5ea6e7db3ea79882a3526a11307e2127139071f17",
+        587546,
     ),
     "activity_ui_assets.h": (
         "5dad607f7c09a0d5cc0034969b76e6c5df1eb2bc",
@@ -105,8 +105,8 @@ PINNED_SOURCES = {
 #: exact live binary targets (verified pilot reports)
 TARGETS = {
     "codex_webui": (
-        "0179d38fb692f3a97a91513961ade4ee277d59fe497bb0a63552fc4e0880cd54",
-        1136468,
+        "e97ffb760af99ed6ff1516b61181534a961285025477e1b5c3a354d7aeabb1ac",
+        1138708,
     ),
     "codex_bt_pair_agent": (
         "563c6c58a3629edfebd7ec30ebcf14e6384a2d84e89669b1d7c3d79c75b619c8",
