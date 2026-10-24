@@ -30,8 +30,17 @@ it is saved.
   `127.0.0.1` in `/etc/hosts` and accepts connections on loopback ports
   80 and 443. Nothing else on the hub resolves that name: its own
   online check resolves its discovery server. Turning the blocker off
-  removes the line. What the Touch does once the check passes is
-  confirmed on hardware before the README lists it.
+  removes the line.
+- Once that check passes, the Touch asks the hub to check for hub
+  firmware (`setup.firmware?check`), asks it to sync (`setup.sync`,
+  answered locally), pulls every resource, and asks for the time
+  (`harmony.engine?getTime`) several times. Stock code answers the
+  firmware check and the time only with internet. So while the blocker
+  is on, `netservicestarter.lua` answers the firmware check with the
+  "up to date" result and the time from the hub's own NTP-set clock
+  (only once that clock is past 2026-01-01). Turning the blocker off
+  restores the stock answers. The full Sync is confirmed on hardware
+  before the README lists it.
 - The hub resolves a Touch press against its current maps. An on-screen
   press arrives as a menu index; the Touch draws labels from its own
   synced copy. Until the Touch syncs after a save, a slot whose action
