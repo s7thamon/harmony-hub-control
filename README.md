@@ -652,6 +652,7 @@ When `codex_webui` changes, update its pins in the build script,
 | --- | --- |
 | [DESIGN.md](DESIGN.md) | The Melodious design system, shared by the web app and the Android app |
 | [docs/API.md](docs/API.md) | The hub's HTTP API and the activity rules the paired remote needs |
+| [docs/HOME_ASSISTANT.md](docs/HOME_ASSISTANT.md) | Home Assistant entities as Harmony devices, and their hardware gate |
 | [docs/BUILD.md](docs/BUILD.md) | Building the MIPS binaries with the pinned toolchain |
 | [docs/PROTOCOLS.md](docs/PROTOCOLS.md) | The hub's own protocols and ports |
 | [docs/DESKTOP_APP.md](docs/DESKTOP_APP.md) | The macOS app's design and security model |

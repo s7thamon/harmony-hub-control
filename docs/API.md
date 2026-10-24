@@ -226,6 +226,63 @@ The body carries a numeric `deviceId` and a `settings` object (at most
 with `saved: true` and `localOnly: true`. An invalid body gives `400`; a
 writer refusal gives `422`; a writer that cannot be reached gives `503`.
 
+## Home Assistant devices
+
+Replace the hub's Home Assistant devices (`render_ha_devices_json()`):
+
+```text
+POST /api/ha-devices
+Content-Type: application/json
+```
+
+```json
+{
+  "webhook": "http://<ha-host>:8123/api/webhook/<webhook-id>",
+  "dryRun": false,
+  "devices": [{
+    "entity": "media_player.living_room",
+    "name": "Living Room Speaker",
+    "commands": [
+      {"name": "PowerOn", "value": "turn_on"},
+      {"name": "PowerOff", "value": "turn_off"},
+      {"name": "InputTv", "value": "select_source:TV"}
+    ],
+    "power": {"on": "PowerOn", "off": "PowerOff"},
+    "inputs": [{"name": "TV", "command": "InputTv"}]
+  }]
+}
+```
+
+Each device becomes an ordinary Harmony device whose commands are IP
+commands (`TransportType` 64). They can sit in activities and on buttons
+like any other device. When one runs, the Hub engine posts
+`{"device":"<entity>","command":"<value>"}` to the webhook. The body goes
+to the offline writer as a `CommitHaDevices` operation (at most 256 KiB),
+after a resource backup unless `dryRun` is true.
+
+- The writer owns the devices whose `AutoDetectedDevice.Id` starts with
+  `melodious-ha-` and matches them by `entity`. It adds, updates and
+  removes only those, and keeps device and command IDs across updates.
+  It never touches other devices.
+- `power` is `{"on","off"}`, `{"toggle"}` or absent. Each input names
+  one of the device's commands.
+- `webhook` must be plain `http://`: the Hub cannot verify Let's Encrypt
+  certificates. An empty `devices` list needs no webhook; it removes
+  every Home Assistant device and their protocol.
+- Command values may not contain quotes, backslashes, `%` or braces.
+- It refuses to remove a device, command or input that an activity,
+  button or sequence still uses. It also refuses a name another device
+  already has.
+- A changed set saves DeviceList and ProtocolList with new etags, reloads
+  the engine and publishes a new revision, so a paired Touch pulls it. An
+  unchanged set saves nothing.
+
+The writer's reply is the body: `200` with `ok`, `changed`, `dryRun`,
+the `added`, `updated`, `removed` and `unchanged` device names, and
+`devices` (`entity`, `deviceId`, `name`). A non-object body gives `400`;
+a writer refusal gives `422` with `error`; a writer that cannot be
+reached gives `503`. See [HOME_ASSISTANT.md](HOME_ASSISTANT.md).
+
 ## Inventory
 
 ```powershell
@@ -791,6 +848,7 @@ carries.
 | POST | `/api/activity-run` | `render_activity_run_json()` |
 | POST | `/api/activity-save` | `render_activity_save_json()` |
 | POST | `/api/device-settings` | `render_device_settings_json()` |
+| POST | `/api/ha-devices` | `render_ha_devices_json()` |
 | POST | `/api/activity-sync` | `render_activity_sync_json()` |
 | GET | `/api/inventory` | `render_inventory_json()` |
 | GET | `/api/state` | `render_state_json()` |

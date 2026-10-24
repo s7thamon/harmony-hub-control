@@ -150,6 +150,61 @@ check("POST /api/control-button -> 404 (sim-only endpoint)", controlButton.statu
 const simEvents = await req(API, "/api/sim/events");
 check("GET /api/sim/events -> 404 (sim-only endpoint)", simEvents.status === 404, `got ${simEvents.status}`);
 
+console.log("\n== Home Assistant devices: codex_webui -> offline writer plumbing ==");
+// engine-emu stands in for codexactivity's CommitHaDevices; the real
+// reconciliation is tested by tools/touch-validator/codexactivity-ha-devices-test.lua.
+const haSet = {
+  webhook: "http://ha.hub-emu.invalid:8123/api/webhook/qa",
+  devices: [{ entity: "light.qa", name: "QA lamp", commands: [{ name: "PowerOn", value: "turn_on" }] }],
+};
+const haForm = await req(API, "/api/ha-devices", form({ payload: JSON.stringify(haSet) }));
+check("POST /api/ha-devices form-encoded -> 400 (JSON object only)", haForm.status === 400, `got ${haForm.status}`);
+const haTrailing = await req(API, "/api/ha-devices", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify(haSet) + " x",
+});
+check("POST /api/ha-devices with trailing data -> 400", haTrailing.status === 400, `got ${haTrailing.status}`);
+const haDry = await req(API, "/api/ha-devices", jsonBody({ ...haSet, dryRun: true }));
+check(
+  "POST /api/ha-devices dryRun -> 200 with the writer's reply as the body",
+  haDry.status === 200 && haDry.json?.ok === true && haDry.json?.dryRun === true &&
+    haDry.json?.devices?.[0]?.entity === "light.qa",
+  haDry.text.slice(0, 200),
+);
+const haCommit = await req(API, "/api/ha-devices", jsonBody(haSet));
+check(
+  "POST /api/ha-devices -> 200, not a dry run",
+  haCommit.status === 200 && haCommit.json?.ok === true && haCommit.json?.dryRun === false,
+  haCommit.text.slice(0, 200),
+);
+const haRejected = await req(API, "/api/ha-devices", jsonBody({ webhook: haSet.webhook, devices: "light.qa" }));
+check(
+  "POST /api/ha-devices the writer rejects -> 422 with its error",
+  haRejected.status === 422 && haRejected.json?.ok === false && /devices/.test(haRejected.json?.error ?? ""),
+  `got ${haRejected.status} ${haRejected.text.slice(0, 160)}`,
+);
+// codex_webui reads bodies by Content-Length only; a chunked body arrives empty.
+const haChunked = await req(API, "/api/ha-devices", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: new ReadableStream({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode(JSON.stringify(haSet)));
+      controller.close();
+    },
+  }),
+  duplex: "half",
+});
+check("POST /api/ha-devices chunked -> 400 (no Content-Length, empty body)", haChunked.status === 400, `got ${haChunked.status}`);
+const haEvents = ((await req(CTRL, "/events")).json?.events ?? []).filter((e) => e.kind.startsWith("ha-devices"));
+check(
+  "the writer saw one dry run, one commit and one rejection, with the webhook intact",
+  haEvents.length === 3 && haEvents[0].dryRun === true && haEvents[1].dryRun === false &&
+    haEvents[1].webhook === haSet.webhook && haEvents[2].kind === "ha-devices-rejected",
+  JSON.stringify(haEvents),
+);
+
 console.log("\n== full-graph save: writer daemon + revision semantics ==");
 const noop = await req(
   API,

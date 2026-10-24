@@ -1,0 +1,135 @@
+# Home Assistant devices
+
+Home Assistant already controls the Hub through HA's built-in Harmony
+integration (WebSocket on 8088). This page covers the other direction:
+Home Assistant entities as ordinary Harmony devices, which can sit in
+activities, go on buttons and run from the web and Android apps.
+
+## How a command reaches Home Assistant
+
+- Each entity is a device in DeviceList whose commands are IP commands
+  (`TransportType` 64). The stock engine sends those through
+  `harmonyengine/core/ipmanager.lua`, not the IR blaster.
+- All Home Assistant devices share one protocol, "Melodious Home
+  Assistant", whose `ControlSection` holds the request:
+  - `Url`: the integration's webhook;
+  - `Method`: `POST`;
+  - `Header`: a JSON string;
+  - `Body`: `{"device":"{d}","command":"{c}"}`;
+  - `Timeout`: `"2"`.
+- The engine fills the placeholders with `string.gsub`: `{d}` from the
+  device's `Tokens.Parameters` (the entity ID), `{c}` from the command's
+  `Parameters` (an action the integration maps to a service call).
+- A tap sends one request. A held key repeats it about every 250 ms
+  until release.
+- The request comes from LuaSocket 2.0.2: plain `http://` only (the Hub
+  lacks the Let's Encrypt root), and the `Host` header has no port.
+- No Home Assistant token lives on the Hub; the webhook ID is the only
+  secret.
+
+## Rules the device data must follow
+
+Each one was learned on hardware. `codexactivity`'s `CommitHaDevices`
+writes them; nothing else should create these devices.
+
+1. **`Device.AutoDetectedDevice.Id` is set** (`melodious-ha-<deviceId>`).
+   After every answered IP command the engine runs
+   `capodDeviceList[params.uid] = nil`. Without a uid that throws, which
+   kills the unprotected `ipqueuehandler` task: every later IP command
+   drops silently until the Hub reboots, while the Hub still answers
+   200. The made-up Id never matches a real SSDP device.
+2. **The protocol looks like an IR protocol:** `__type: "IrProtocol"`,
+   `IRSegments: []`, `CodeSegments: []`, `CarrierFrequency: 38000`,
+   `KeyCode: null`. `model/protocol.lua` reads `ControlSection` only for
+   that type.
+3. **Each command has** `TransportType: 64`, the protocol's
+   `ProtocolId`, `KeyCode: ""`, `Raw: null` written out (the engine
+   string-slices `Raw` unless it is null), and its `{c}` parameter.
+   The device's `Transport` is 64, not 65 (65 adds an IR fallback).
+4. **The webhook always answers 200.** A 404 or no answer makes the
+   engine run an SSDP rescan inside the IP task. Unknown commands get
+   200 too and are logged on the Home Assistant side.
+5. **The webhook answers fast.** The engine discards an IP command that
+   waited more than 500 ms in its queue. The integration answers first
+   and calls the service afterwards.
+6. Devices Melodious makes have no `CD_<id>` content record. The offline
+   guard answers that request with an empty record (PR #54), so a Touch
+   menu Sync still finishes.
+
+## Saving: why only the writer reaches the Touch
+
+The Touch asks the Hub for each list with `proxy.resource?get`, sending
+the etag and hetag it holds. The Hub answers 304 when both match its
+in-memory `index.json` (`harmonywebservices/apihandler/resource.lua`,
+`isResourceMatch`). A file written straight to disk, as `/import` and
+the IR device forms do, keeps its old etag. The Touch therefore keeps
+its old copy, even though the reload and publish make it sync.
+
+`CommitHaDevices` saves through `resMgr.saveResource` with a new etag and
+hetag for each list it changes. It then reloads the engine with
+`config_new` and publishes a new revision. The protocol is saved before
+the devices, and a failed save or reload restores both lists. An
+unchanged set saves nothing, so a Home Assistant restart that pushes the
+same set does not make the Touch sync.
+
+The 2026-10-24 spike wrote through `/import`, so it probably never put
+its device on the Touch. Whether the Touch accepts an IP device is still
+untested.
+
+## What the Touch shows
+
+- **Devices list:** the device appears there. Tapping it shows no
+  commands until it has a `DeviceFunctionMap` and a `DeviceButtonMap`,
+  the same as the IR devices Melodious creates. Device screens come with
+  the Touch editor's device-screens slice.
+- **Activities:** the device's power and inputs run at activity start
+  and end, like any other device's.
+- **Activity on-screen buttons and sequences:** these can send its
+  commands; set them up in the web editor.
+
+## Hardware gate
+
+The owner watches the Touch throughout. Steps run one at a time, and the
+gate stops at the first surprise. `HUB` is the Hub's address, `MAC` this
+computer's.
+
+1. **Baseline.**
+   - Start `node tools/ha_devices.mjs listen --port 8770`.
+   - Read the Touch's `/data/loggly/SyncCounter.json` over HOT (see
+     `touch-hot.md`): note `lastSyncSuccess` and `lastSyncAbort`.
+   - Note the Touch's Devices list.
+   - Check that `node tools/ha_devices.mjs status --hub http://HUB:8080`
+     shows no devices.
+2. **Deploy** with the installer: `--preflight-only` first, then the
+   install.
+   - `node tools/ha_devices.mjs plan --hub http://HUB:8080 --webhook
+     http://MAC:8770/api/webhook/melodious-gate` runs the real writer as
+     a dry run, with nothing saved.
+   - Expect `200`, `changed: true`, and `added: ["HA test"]`.
+3. **Add the test device** with `apply` and the same options.
+   - Expect the Touch to sync by itself within a minute. `logread` shows
+     its `proxy.resource?get` for DeviceList and ProtocolList.
+   - SyncCounter shows a new `lastSyncSuccess` and no new abort.
+   - The Touch's Devices list shows every earlier device plus "HA test",
+     and its activities are unchanged.
+4. **Send from the Hub:** `node tools/ha_devices.mjs send --hub
+   http://HUB:8080 --entity light.melodious_test --command PowerOn`.
+   - The listener shows
+     `{"device":"light.melodious_test","command":"turn_on"}`.
+5. **Activity.**
+   - In the web editor, make a test activity that uses "HA test" with
+     Input A, and add an on-screen button for its VolumeUp.
+   - Start the activity from the Touch: the listener shows `turn_on` and
+     `select_source:A`.
+   - Tap the button: `volume_up` arrives.
+   - End the activity: `turn_off` arrives.
+6. **Revert.**
+   - Delete the test activity in the editor.
+   - Run `node tools/ha_devices.mjs revert --hub http://HUB:8080`.
+   - The Touch syncs again, SyncCounter shows success, and "HA test" is
+     gone.
+
+If step 3 goes wrong, revert at once; the device is not used yet, so the
+writer allows it. Then change one field at a time to find the cause:
+Transport, AutoDetectedDevice, Tokens, Parameters, and then the
+protocol's shape.
