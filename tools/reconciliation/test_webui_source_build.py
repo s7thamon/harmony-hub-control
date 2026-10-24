@@ -17,7 +17,7 @@ official Zig 0.16.0 pin:
 The exact source tuples (from the verified webui-repro and
 zig-distribution-sweep pilot reports):
 
-  codex_webui.c          d7004ce23e95349a7a38ba659d612b64be1aaa6a (box 2026-10-20 + LED + state-digest endpoints + system-status, delete guard, RAM agent logs, device settings, inputs + shell without the photo + hold-to-repeat + Logitech catalog + HA devices)
+  codex_webui.c          69a3539144145f66f302e9b9e58ca127fe82df7f (box 2026-10-20 + LED + state-digest endpoints + system-status, delete guard, RAM agent logs, device settings, inputs + shell without the photo + hold-to-repeat + Logitech catalog + HA devices + writer lock)
   activity_ui_assets.h   5dad607f7c09a0d5cc0034969b76e6c5df1eb2bc
   harmony_shell_assets.h 84b7f4e7bbf65d9fa4211bb51e2427c626b5db8e (box 2026-10-20 + state-digest liveness + integrity fixes + device settings + inputs + Melodious shell + Activities + Devices + hold-to-repeat + Logitech catalog + desktop catalog + Touch hard buttons)
   remote_skin_jpg.h      419611c5ff0713f1f5de2dd684d699f6d77238d5
@@ -76,9 +76,9 @@ BUILD_SCRIPT = os.path.join(REPO_ROOT, "build", "build_harmony_tools_kali.sh")
 #: constants from the verified pilot reports.
 PINNED_SOURCES = {
     "codex_webui.c": (
-        "d7004ce23e95349a7a38ba659d612b64be1aaa6a",
-        "4a174928c14fc49317f727267ff3e521192dc53b6eabb299be06a8b4ca78c295",
-        590575,
+        "69a3539144145f66f302e9b9e58ca127fe82df7f",
+        "569e5626bf7a7f8bc366809fcad7fa1c5d32d1c0fcb6e88926fcb4bd0235f4c2",
+        591467,
     ),
     "activity_ui_assets.h": (
         "5dad607f7c09a0d5cc0034969b76e6c5df1eb2bc",
@@ -105,8 +105,8 @@ PINNED_SOURCES = {
 #: exact live binary targets (verified pilot reports)
 TARGETS = {
     "codex_webui": (
-        "4b09910a3c677e5b7021aea76780e1ba8d006134bb05af7d7ca27782621cf28e",
-        1141684,
+        "2dd74a227c4c4c5356e4e45c08fa33b5241f988984bd739e55aa554c40c2a9d6",
+        1141892,
     ),
     "codex_bt_pair_agent": (
         "563c6c58a3629edfebd7ec30ebcf14e6384a2d84e89669b1d7c3d79c75b619c8",

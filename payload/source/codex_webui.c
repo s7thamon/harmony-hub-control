@@ -45,6 +45,7 @@
 #define RESOURCE_BACKUP_DIR "/data/codex/resource-backups"
 #define ACTIVITY_REQUEST_FILE "/var/volatile/codex-activity-request.json"
 #define ACTIVITY_RESPONSE_FILE "/var/volatile/codex-activity-response.json"
+#define ACTIVITY_LOCK_FILE "/var/volatile/codex-activity.lock"
 #define IR_EVENT_LOG "/data/codex/ir-events.log"
 #define IR_CANCEL_PREFIX "/tmp/codex_ir_cancel_"
 #define BT_TEXT_FIFO "/tmp/bthid_input"
@@ -2730,6 +2731,22 @@ static int harmony_hbus_call(
     return rc;
 }
 
+/* Each connection is served by its own child, and every writer request
+   shares one request file and one response file: two at once delete each
+   other's files, and one waits out its whole 45 s. So requests take turns.
+   The wait outlasts one whole request; the lock goes when the fd closes or
+   the child exits. */
+static int offline_writer_lock(void) {
+    int fd = open(ACTIVITY_LOCK_FILE, O_RDWR | O_CREAT, 0600), turn;
+    if (fd < 0) return -1;
+    for (turn = 0; turn < 500; turn++) {
+        if (flock(fd, LOCK_EX | LOCK_NB) == 0) return fd;
+        usleep(100 * 1000);
+    }
+    close(fd);
+    return -1;
+}
+
 /* Hand one request to the codexactivity plugin through its request file and
    wait up to 45 s for the response that carries the same id. */
 static int offline_writer_request(
@@ -2744,7 +2761,12 @@ static int offline_writer_request(
     char response_id[96], error[512];
     char *response = NULL;
     size_t response_len = 0;
-    int attempt, rc = -1;
+    int attempt, rc = -1, lock_fd;
+    lock_fd = offline_writer_lock();
+    if (lock_fd < 0) {
+        snprintf(msg, msg_len, "another change is still being saved on the hub; try again");
+        return -1;
+    }
     unlink(ACTIVITY_RESPONSE_FILE);
     unlink(ACTIVITY_REQUEST_FILE);
     if (write_file_atomic(ACTIVITY_REQUEST_FILE, request, request_len) != 0) {
@@ -2780,6 +2802,7 @@ static int offline_writer_request(
 out:
     unlink(ACTIVITY_REQUEST_FILE);
     free(response);
+    close(lock_fd);
     return rc;
 }
 
