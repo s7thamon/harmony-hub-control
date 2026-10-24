@@ -78,10 +78,12 @@ untested.
 
 ## What the Touch shows
 
-- **Devices list:** the device appears there. Tapping it shows no
-  commands until it has a `DeviceFunctionMap` and a `DeviceButtonMap`,
-  the same as the IR devices Melodious creates. Device screens come with
-  the Touch editor's device-screens slice.
+- **Devices list:** tapping the device opens its screen. The writer
+  builds that screen from the device's commands whenever the set
+  changes: `BrightnessUp` and `BrightnessDown` on the volume keys, a
+  command named like a hard key on that key, and every other command as
+  an on-screen button. Removing the device removes its screen. See
+  [Touch device screens](API.md#touch-device-screens).
 - **Activities:** the device's power and inputs run at activity start
   and end, like any other device's.
 - **Activity on-screen buttons and sequences:** these can send its

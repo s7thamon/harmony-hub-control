@@ -1175,6 +1175,10 @@ async function handleApi(req, res, pathname, url) {
     case "POST /api/device-settings":
       handleDeviceSettings(res, params);
       return;
+    case "POST /api/device-screen":
+      // The hub builds Touch screens in codexactivity.lua; a copy here could drift.
+      sendJson(res, 501, { ok: false, error: "The simulator doesn't build Touch screens; the hub does." });
+      return;
     case "GET /api/inventory":
       handleInventory(res);
       return;

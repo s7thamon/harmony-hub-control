@@ -190,6 +190,15 @@ class CodexHubRestClient(
         }
 
     /**
+     * `POST /api/device-screen`: makes, rebuilds or removes one device's Harmony Touch screen. The
+     * hub builds it from the device's commands, saves MapList and publishes, so the Touch pulls it.
+     */
+    suspend fun saveDeviceScreen(endpoint: HubEndpoint, deviceId: String, remove: Boolean): JsonObject =
+        withContext(Dispatchers.IO) {
+            postJson(endpoint, "/api/device-screen", app.melodious.protocol.model.DeviceTouchScreens.requestBody(deviceId, remove))
+        }
+
+    /**
      * `POST /api/ir-send`: Dispatches a single IR or Bluetooth HID command through the hub.
      */
     suspend fun irSend(

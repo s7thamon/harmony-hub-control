@@ -2,14 +2,14 @@
      #devices                 the list: search, + (Add a device), Tools
      #devices/lab             the IR lab (ir-lab.js)
      #devices/<id>            a device: Remote and Commands tabs; ⋮ holds
-                              Edit details and Delete device
+                              Edit details, its Touch screen and Delete device
      #devices/<id>/settings   power, inputs and timing (device-settings.js)
      #devices/<id>/sweep      send all commands (device-sweep.js)
    On the Commands tab, Learn a button and Import codes open sheets, and a
    command's ⋮ edits or deletes it. The remote sends straight to the device,
    outside any activity. */
 
-import { getConfig, postHubForm, saveActivity } from "../api.js";
+import { getConfig, postHubForm, saveActivity, saveDeviceScreen } from "../api.js";
 import * as hub from "../state.js";
 import {
   confirmDialog,
@@ -31,7 +31,7 @@ import { createDeviceSettings } from "./device-settings.js";
 import { changeNote, hubChange, openCommandSheet, openDeviceSheet, openLearnSheet, storedCommand } from "./device-sheets.js";
 import { createDeviceSweep } from "./device-sweep.js";
 import { createIrLab, labNote } from "./ir-lab.js";
-import { LIMITS, deviceUsage, withoutDeviceMaps } from "./ir-model.js";
+import { LIMITS, deviceUsage, touchScreenState, withoutDeviceMaps } from "./ir-model.js";
 import { deviceIconName, deviceKeys } from "./remote-model.js";
 import {
   describe,
@@ -423,6 +423,42 @@ export function createDevicesView(section) {
 
   /* -- menus ------------------------------------------------------------------------- */
 
+  /* -- Touch screen ------------------------------------------------------------------ */
+
+  /* The hub builds the screen from the device's commands: hard keys for the
+     ones named like them, every other command on screen. The Touch pulls
+     the change by itself. */
+  async function saveTouchScreen(d, remove) {
+    snackbar(remove ? `Removing ${d.name}'s Touch screen…` : `Building ${d.name}'s Touch screen…`);
+    try {
+      const result = await saveDeviceScreen({ deviceId: d.id, remove });
+      await hub.refreshConfig().catch(() => {});
+      if (!result.changed) {
+        snackbar(remove ? `${d.name} has no Touch screen` : `${d.name}'s Touch screen is already up to date`);
+      } else if (remove) {
+        snackbar(`Removed ${d.name}'s Touch screen. The Touch picks this up by itself.`);
+      } else {
+        const keys = result.hardKeys?.length ?? 0;
+        const onScreen = result.onScreen ?? 0;
+        snackbar(`${d.name}'s Touch screen: ${keys} hard key${keys === 1 ? "" : "s"}, ${onScreen} on-screen button${onScreen === 1 ? "" : "s"}. The Touch picks it up by itself.`);
+      }
+    } catch (error) {
+      snackbar(error.message || "The Touch screen was not saved.", { error: true });
+    }
+  }
+
+  function touchScreenItems(d) {
+    const screen = touchScreenState(hub.state.config, d.id);
+    if (screen === "none") return [{ id: "screen-make", label: "Make Touch screen", icon: "settings_remote_outlined" }];
+    if (screen === "made") {
+      return [
+        { id: "screen-make", label: "Rebuild Touch screen", icon: "refresh" },
+        { id: "screen-remove", label: "Remove Touch screen", icon: "remove" },
+      ];
+    }
+    return [];
+  }
+
   function openDeviceMenu(anchor) {
     const d = device;
     openMenu({
@@ -430,10 +466,13 @@ export function createDevicesView(section) {
       label: `${d.name} options`,
       items: [
         { id: "edit", label: "Edit details", icon: "edit_outlined" },
+        ...touchScreenItems(d),
         { id: "delete", label: "Delete device", icon: "delete_outlined", destructive: true },
       ],
       onSelect: (choice) => {
         if (choice === "edit") track(openDeviceSheet({ device: d }), "[data-act='device-menu']");
+        else if (choice === "screen-make") saveTouchScreen(d, false);
+        else if (choice === "screen-remove") saveTouchScreen(d, true);
         else if (choice === "delete") deleteDevice(d);
       },
     });

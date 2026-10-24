@@ -36,13 +36,18 @@ import app.melodious.protocol.model.ResolvedButtonAction
 import app.melodious.protocol.model.SoftButton
 import app.melodious.protocol.model.DeviceSettings
 import app.melodious.protocol.model.DeviceSettingsModel
+import app.melodious.protocol.model.DeviceTouchScreen
+import app.melodious.protocol.model.DeviceTouchScreens
 import app.melodious.protocol.hbus.SleepTimerState
 import app.melodious.protocol.graph.SequenceStep
 import app.melodious.protocol.graph.SoftButtonDraft
 import app.melodious.protocol.graph.TouchScreenDraft
 import app.melodious.protocol.graph.TouchScreenGraph
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import app.melodious.protocol.model.SavedBtDevice
 import app.melodious.protocol.model.SystemStatusSnapshot
@@ -139,6 +144,7 @@ data class MelodiousUiState(
     val touchDraftDirty: Boolean = false,
     val touchSaving: Boolean = false,
     val deviceSettingsSaving: Boolean = false,
+    val deviceScreenSaving: Boolean = false,
 
     // IR tools
     val irCapturing: Boolean = false,
@@ -189,6 +195,10 @@ data class MelodiousUiState(
     /** A device's power and timing settings as the hub stores them; null if the device is gone. */
     fun deviceSettings(deviceId: String): DeviceSettings? =
         configSnapshot?.let { DeviceSettingsModel.deviceEntry(it, deviceId) }?.let(DeviceSettingsModel::read)
+
+    /** Where the device's Harmony Touch screen comes from, and so what the app may do with it. */
+    fun deviceTouchScreen(deviceId: String): DeviceTouchScreen =
+        configSnapshot?.let { DeviceTouchScreens.state(it, deviceId) } ?: DeviceTouchScreen.NO_TOUCH
 
     fun deviceCommandNames(deviceId: String): List<String> =
         configSnapshot?.let { DeviceSettingsModel.deviceEntry(it, deviceId) }?.let(DeviceSettingsModel::commandNames).orEmpty()
@@ -1043,6 +1053,47 @@ class MelodiousViewModel(application: Application) : AndroidViewModel(applicatio
                 showMessage(
                     if (notSupported) "Your hub's firmware doesn't support device settings yet. Update the hub and try again."
                     else "Hub didn't save the settings — ${friendlyError(err)}",
+                    isError = true,
+                )
+            }
+        }
+    }
+
+    /**
+     * Makes, rebuilds or removes a device's Harmony Touch screen. The hub builds it from the
+     * device's commands; the Touch pulls the change by itself.
+     */
+    fun saveDeviceScreen(deviceId: String, remove: Boolean) {
+        val state = _uiState.value
+        val endpoint = state.activeEndpoint ?: return
+        if (state.deviceScreenSaving) return
+        val name = state.device(deviceId)?.name ?: "the device"
+        _uiState.update { it.copy(deviceScreenSaving = true) }
+        viewModelScope.launch {
+            runCatching {
+                val result = restClient.saveDeviceScreen(endpoint, deviceId, remove)
+                reloadConfig(endpoint)
+                result
+            }.onSuccess { result ->
+                _uiState.update { it.copy(deviceScreenSaving = false) }
+                val changed = (result["changed"] as? JsonPrimitive)?.booleanOrNull ?: true
+                val keys = (result["hardKeys"] as? JsonArray)?.size ?: 0
+                val onScreen = (result["onScreen"] as? JsonPrimitive)?.intOrNull ?: 0
+                showMessage(
+                    when {
+                        !changed && remove -> "$name has no Touch screen"
+                        !changed -> "$name's Touch screen is already up to date"
+                        remove -> "Removed $name's Touch screen. The Touch picks this up by itself."
+                        else -> "$name's Touch screen: $keys hard key${if (keys == 1) "" else "s"}, " +
+                            "$onScreen on-screen button${if (onScreen == 1) "" else "s"}. The Touch picks it up by itself."
+                    }
+                )
+            }.onFailure { err ->
+                _uiState.update { it.copy(deviceScreenSaving = false) }
+                val notSupported = (err as? app.melodious.protocol.rest.HubApiException)?.statusCode == 404
+                showMessage(
+                    if (notSupported) "Your hub's firmware doesn't build Touch screens yet. Update the hub and try again."
+                    else "Hub didn't save the Touch screen — ${friendlyError(err)}",
                     isError = true,
                 )
             }

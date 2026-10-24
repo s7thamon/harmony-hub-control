@@ -205,6 +205,38 @@ check(
   JSON.stringify(haEvents),
 );
 
+console.log("\n== Touch device screens: codex_webui -> offline writer plumbing ==");
+// engine-emu stands in for codexactivity's CommitDeviceScreen; the real
+// builder is tested by tools/touch-validator/codexactivity-device-screens-test.lua.
+const screenBadId = await req(API, "/api/device-screen", jsonBody({ deviceId: "amp" }));
+check("POST /api/device-screen without a numeric deviceId -> 400", screenBadId.status === 400, `got ${screenBadId.status}`);
+const screenDry = await req(API, "/api/device-screen", jsonBody({ deviceId: "40000001", dryRun: true }));
+check(
+  "POST /api/device-screen dryRun -> 200 with the writer's reply as the body",
+  screenDry.status === 200 && screenDry.json?.ok === true && screenDry.json?.dryRun === true &&
+    screenDry.json?.deviceId === "40000001" && screenDry.json?.removed === false,
+  screenDry.text.slice(0, 200),
+);
+const screenRemove = await req(API, "/api/device-screen", jsonBody({ deviceId: "40000001", remove: true }));
+check(
+  "POST /api/device-screen remove -> 200, not a dry run",
+  screenRemove.status === 200 && screenRemove.json?.removed === true && screenRemove.json?.dryRun === false,
+  screenRemove.text.slice(0, 200),
+);
+const screenRejected = await req(API, "/api/device-screen", jsonBody({ deviceId: "0" }));
+check(
+  "POST /api/device-screen the writer rejects -> 422 with its error",
+  screenRejected.status === 422 && /no device 0/.test(screenRejected.json?.error ?? ""),
+  `got ${screenRejected.status} ${screenRejected.text.slice(0, 160)}`,
+);
+const screenEvents = ((await req(CTRL, "/events")).json?.events ?? []).filter((e) => e.kind.startsWith("device-screen"));
+check(
+  "the writer saw a dry run, a removal and a rejection",
+  screenEvents.length === 3 && screenEvents[0].dryRun === true && screenEvents[1].remove === true &&
+    screenEvents[2].kind === "device-screen-rejected",
+  JSON.stringify(screenEvents),
+);
+
 console.log("\n== writer requests take turns ==");
 // Each connection is its own codex_webui child and all writer requests share
 // one request file; without a lock, overlapping requests delete each other's

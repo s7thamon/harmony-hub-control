@@ -405,6 +405,29 @@ def process_ha_devices(request_id, request):
               webhook=device_set.get("webhook"))
 
 
+def process_device_screen(request_id, request):
+    # The real screen builder runs in codexactivity.lua (tested under
+    # luajit). This stand-in proves the plumbing: the device ID and the
+    # remove and dryRun flags arrive, and the reply is the body.
+    device_id = request.get("deviceId")
+    if device_id == "0":
+        writer_respond(request_id, False, "DeviceList has no device 0")
+        add_event("device-screen-rejected")
+        return
+    remove = request.get("remove") is True
+    dry_run = request.get("dryRun") is True
+    writer_respond(request_id, True, extra={
+        "localOnly": True,
+        "deviceId": device_id,
+        "dryRun": dry_run,
+        "changed": True,
+        "removed": remove,
+        "hardKeys": [] if remove else ["VolumeUp"],
+        "onScreen": 0 if remove else 1,
+    })
+    add_event("device-screen", deviceId=device_id, remove=remove, dryRun=dry_run)
+
+
 def process_commit_request():
     global _last_commit_id
     try:
@@ -429,6 +452,8 @@ def process_commit_request():
     _last_commit_id = request_id
     if request.get("op") == "CommitHaDevices":
         process_ha_devices(request_id, request)
+    elif request.get("op") == "CommitDeviceScreen":
+        process_device_screen(request_id, request)
     elif request.get("op") != "CommitActivityResources":
         writer_respond(request_id, False, f"unknown op {request.get('op')!r}")
     else:

@@ -387,6 +387,29 @@ export function deviceUsage(config, deviceId) {
   return { uses: [...uses], ownMaps };
 }
 
+/* The device's Touch screen (16417Device<id>), which the hub builds from its
+   commands (POST /api/device-screen):
+     "none"     the hub has a Touch and the device has no screen yet
+     "made"     made on this hub, so it can be rebuilt or removed
+     "logitech" Logitech's own, never touched
+     "managed"  a Home Assistant device; its screen follows the device set
+     "no-touch" the hub has no Touch screens to copy
+   Logitech issued every map ID at or below the floor (codexactivity.lua). */
+const TOUCH_SCREEN_MAP_FLOOR = 52944089;
+
+export function touchScreenState(config, deviceId) {
+  const id = String(deviceId);
+  const maps = config?.mapList?.ButtonMaps ?? [];
+  const entry = (config?.deviceList?.DevicesWithFeatures ?? []).find((d) => String(d?.Device?.["Id-"]) === id);
+  const screen = maps.find((m) => m?.ButtonMapIdentifier === `16417Device${id}`);
+  if (screen && !(Number(screen["ButtonMapId-"]) > TOUCH_SCREEN_MAP_FLOOR)) return "logitech";
+  if (String(entry?.Device?.AutoDetectedDevice?.Id ?? "").startsWith("melodious-ha-")) return "managed";
+  if (screen) return "made";
+  const hasTouch = maps.some((m) => /^16417/.test(String(m?.ButtonMapIdentifier ?? "")) &&
+    m?.["SurfaceId-"] != null && m?.["RemoteId-"] != null);
+  return hasTouch ? "none" : "no-touch";
+}
+
 /* The map and function lists without the device's own device-mode maps, for
    the activity save that has to precede deleting a device that has them. */
 export function withoutDeviceMaps(config, deviceId) {

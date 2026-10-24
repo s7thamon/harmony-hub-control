@@ -25,6 +25,7 @@ import {
   normalizeRemoteCentralPath,
   describeInventory,
   deviceUsage,
+  touchScreenState,
   withoutDeviceMaps,
 } from "../public/js/views/ir-model.js";
 
@@ -535,5 +536,34 @@ describe("withoutDeviceMaps", () => {
     withoutDeviceMaps(USAGE_CONFIG, 1);
     assert.equal(USAGE_CONFIG.mapList.ButtonMaps.length, 5);
     assert.equal(USAGE_CONFIG.functionList.FunctionMaps.length, 2);
+  });
+});
+describe("touchScreenState", () => {
+  const touchMap = (identifier, mapId, extra = {}) => ({
+    ButtonMapIdentifier: identifier, "ButtonMapId-": mapId, "SurfaceId-": 14551427, "RemoteId-": 12345678, ...extra,
+  });
+  const config = (maps, devices = []) => ({
+    mapList: { ButtonMaps: maps },
+    deviceList: { DevicesWithFeatures: devices.map((Device) => ({ Device })) },
+  });
+  const maps = [touchMap("16417Device1", 46597140), touchMap("16417Device2", 52944100), touchMap("16417Activity9", 52944093)];
+  const devices = [{ "Id-": 1 }, { "Id-": 2 }, { "Id-": 3 }, { "Id-": 4, AutoDetectedDevice: { Id: "melodious-ha-4" } }];
+
+  it("tells Logitech's screens from ones made on the hub", () => {
+    assert.equal(touchScreenState(config(maps, devices), "1"), "logitech");
+    assert.equal(touchScreenState(config(maps, devices), 2), "made");
+  });
+
+  it("offers a screen when the hub has a Touch and the device has none", () => {
+    assert.equal(touchScreenState(config(maps, devices), "3"), "none");
+  });
+
+  it("leaves Home Assistant devices to the device set", () => {
+    assert.equal(touchScreenState(config(maps, devices), "4"), "managed");
+  });
+
+  it("offers nothing on a hub without a Touch screen to copy", () => {
+    assert.equal(touchScreenState(config([touchMap("16414Root", 40550459)], devices), "3"), "no-touch");
+    assert.equal(touchScreenState(config([touchMap("16417Activity9", 52944093, { "SurfaceId-": null })], devices), "3"), "no-touch");
   });
 });

@@ -1262,6 +1262,420 @@ local function commitDeviceSettings(request)
   }
 end
 
+-- Touch device screens. The Touch opens a device (Devices, then the device)
+-- from its 16417Device<id> map alone: its sync never pulls FunctionList
+-- (sync.lua getResourceListForHub), so no DeviceFunctionMap is needed. A
+-- device without the map is listed but opens nothing.
+local TOUCH_SCREEN_PREFIX = "16417Device"
+-- Logitech issued every map and button ID at or below these floors, so a
+-- screen above the floor was made here and may be rebuilt. Same floors as
+-- the web wizard's createAllocator.
+local MAP_ID_FLOOR = 52944089
+local BUTTON_ID_FLOOR = 1878029713
+local ID_CEILING = 2147483000
+local IDENTITY_KEYS = {
+  Id = true,
+  ["Id-"] = true,
+  ButtonId = true,
+  ButtonMapId = true,
+  ["ButtonMapId-"] = true
+}
+-- The Touch's hard keys and the command names the activity wizard matches
+-- to each (remote-layout.js REMOTE_BUTTONS, in its order). A lamp's
+-- brightness rides on the volume keys.
+local TOUCH_SCREEN_KEYS = {
+  {"Rewind", "rewind|rev|skipback|previous track"},
+  {"Play", "play"},
+  {"FastForward", "fastforward|forward|ffwd|next track|skipforward"},
+  {"Record", "record|rec"},
+  {"Pause", "pause"},
+  {"Stop", "stop"},
+  {"Red", "red"},
+  {"Green", "green"},
+  {"Yellow", "yellow"},
+  {"Blue", "blue"},
+  {"DVR", "dvr|recordings"},
+  {"Guide", "guide|epg"},
+  {"Info", "info|information|displayinfo|settings|setting|setup|option|options"},
+  {"Exit", "exit|clear|cancel"},
+  {"Menu", "menu|home"},
+  {"DirectionUp", "up|directionup|arrowup|cursorup"},
+  {"DirectionLeft", "left|directionleft|arrowleft|cursorleft"},
+  {"DirectionRight", "right|directionright|arrowright|cursorright"},
+  {"DirectionDown", "down|directiondown|arrowdown|cursordown"},
+  {"Select", "ok|select|enter"},
+  {"VolumeUp", "volumeup|volup|vol up|vol_up|volume up|brightnessup"},
+  {"VolumeDown", "volumedown|voldown|voldn|vol down|vol_down|vol_dn|volume down|brightnessdown"},
+  {"ChannelUp", "channelup|chup|chnext|ch_next|ch up|channel next|channelnext|pageup|pgup"},
+  {"ChannelDown", "channeldown|chdown|chdn|chprev|ch_prev|ch down|ch_dn|channel prev|" ..
+    "channel previous|channel down|channelprev|channeldn|pagedown|pgdown"},
+  {"VolumeMute", "mute"},
+  -- Logitech's maps store the Back key as PrevChannel.
+  {"PrevChannel", "back|return|previous"}
+}
+
+-- Every map and button ID in use, and the next free one above the floors.
+local function identityAllocator(...)
+  local seen, nextMap, nextButton = {}, MAP_ID_FLOOR + 1, BUTTON_ID_FLOOR + 1
+  local function walk(value)
+    if type(value) ~= "table" then
+      return
+    end
+    for key, child in pairs(value) do
+      if IDENTITY_KEYS[key] then
+        local n = tonumber(child)
+        if n and n > 0 then
+          seen[n] = true
+          if string.sub(key, 1, 11) == "ButtonMapId" then
+            nextMap = math.max(nextMap, n + 1)
+          else
+            nextButton = math.max(nextButton, n + 1)
+          end
+        end
+      else
+        walk(child)
+      end
+    end
+  end
+  for i = 1, select("#", ...) do
+    walk((select(i, ...)))
+  end
+  local function take(cursor)
+    while seen[cursor] do
+      cursor = cursor + 1
+    end
+    if cursor >= ID_CEILING then
+      return nil
+    end
+    seen[cursor] = true
+    return cursor
+  end
+  return {
+    mapId = function()
+      local id = take(nextMap)
+      nextMap = (id or nextMap) + 1
+      return id
+    end,
+    buttonId = function()
+      local id = take(nextButton)
+      nextButton = (id or nextButton) + 1
+      return id
+    end
+  }
+end
+
+-- ir_command_key: lower case, letters and digits only.
+local function screenCommandKey(name)
+  return (string.gsub(string.lower(tostring(name or "")), "[^%w]", ""))
+end
+
+-- The first command named exactly as one of the aliases. Unlike the
+-- wizard, no substring matches: "right" is in "BrightnessUp" and "clear" in
+-- "ClearVoice", and a command no key takes is still on screen.
+local function screenCommandFor(commands, aliases)
+  local keys = {}
+  for alias in string.gmatch(aliases, "[^|]+") do
+    keys[screenCommandKey(alias)] = true
+  end
+  for _, command in ipairs(commands) do
+    local name = screenCommandKey(command.Name)
+    if name ~= "" and keys[name] then
+      return command
+    end
+  end
+  return nil
+end
+
+local function isTouchScreenId(identifier)
+  return type(identifier) == "string" and
+    string.sub(identifier, 1, #TOUCH_SCREEN_PREFIX) == TOUCH_SCREEN_PREFIX
+end
+
+local function touchScreenOf(buttonMaps, deviceId)
+  for _, map in ipairs(buttonMaps) do
+    if type(map) == "table" and map.ButtonMapIdentifier == TOUCH_SCREEN_PREFIX .. deviceId then
+      return map
+    end
+  end
+  return nil
+end
+
+-- Logitech's own screens are never rebuilt or removed.
+local function isLocalTouchScreen(map)
+  local id = tonumber(map["ButtonMapId-"])
+  return id ~= nil and id > MAP_ID_FLOOR
+end
+
+-- A new screen copies its surface and remote from one the Touch already has.
+local function touchScreenTemplate(buttonMaps)
+  local found
+  for _, map in ipairs(buttonMaps) do
+    if type(map) == "table" and type(map.ButtonMapIdentifier) == "string" and
+        string.sub(map.ButtonMapIdentifier, 1, 5) == "16417" and
+        tonumber(map["SurfaceId-"]) and tonumber(map["RemoteId-"]) then
+      if isTouchScreenId(map.ButtonMapIdentifier) then
+        return map
+      end
+      found = found or map
+    end
+  end
+  return found
+end
+
+-- Build a device's screen from its commands: the hard keys the wizard's
+-- aliases find, and every other command on screen in the device's order,
+-- one to a slot, so no two buttons share an IndexInMenu. Buttons that keep
+-- their key or command keep their ButtonId.
+local function touchScreenMap(entry, old, template, alloc)
+  local deviceId = normalizedId(entry.Device["Id-"])
+  local commands = {}
+  for _, command in ipairs(type(entry.Commands) == "table" and entry.Commands or {}) do
+    if type(command) == "table" and type(command.Name) == "string" and command.Name ~= "" then
+      commands[#commands + 1] = command
+    end
+  end
+  if not deviceId or #commands == 0 then
+    return nil, "the device has no commands to put on its screen"
+  end
+  local oldIds = {}
+  for _, button in ipairs(old and type(old.Buttons) == "table" and old.Buttons or {}) do
+    local kind = type(button) == "table" and tostring(button.__type or "") or ""
+    local action = type(button) == "table" and button.ButtonAction or nil
+    local id = type(button) == "table" and tonumber(button.ButtonId) or nil
+    if id and id > 0 then
+      if string.find(kind, "HardRemoteButton", 1, true) and type(button.ButtonKey) == "string" then
+        oldIds["hard:" .. button.ButtonKey] = id
+      elseif string.find(kind, "SoftRemoteButton", 1, true) and type(action) == "table" and
+          type(action.CommandName) == "string" then
+        oldIds["soft:" .. string.lower(action.CommandName)] = oldIds["soft:" .. string.lower(action.CommandName)] or id
+      end
+    end
+  end
+  local function buttonId(key)
+    return oldIds[key] or alloc.buttonId()
+  end
+  local function commandAction(command, eventType)
+    return {
+      ["DeviceId-"] = tonumber(deviceId),
+      __type = "ButtonCommandAction",
+      ["FunctionId-"] = tonumber(command.FunctionId) or 0,
+      Order = 0,
+      CommandName = command.Name,
+      EventType = eventType,
+      Id = 0
+    }
+  end
+  local hard, onKey = {}, {}
+  for _, key in ipairs(TOUCH_SCREEN_KEYS) do
+    local command = screenCommandFor(commands, key[2])
+    if command then
+      onKey[command] = true
+      hard[#hard + 1] = {
+        ButtonId = buttonId("hard:" .. key[1]),
+        __type = "HardRemoteButton",
+        ButtonAction = commandAction(command, 1),
+        ButtonDoublePressAction = json.null,
+        FunctionGroupType = 0,
+        ButtonState = 1,
+        ButtonKey = key[1],
+        ButtonLongPressAction = json.null
+      }
+    end
+  end
+  local buttons = {}
+  for _, command in ipairs(commands) do
+    if not onKey[command] then
+      buttons[#buttons + 1] = {
+        FunctionGroupType = 0,
+        ButtonImageKey = json.null,
+        ["ImageId-"] = 0,
+        MenuItem = {IndexInMenu = #buttons, MenuName = "Device." .. deviceId},
+        ButtonId = buttonId("soft:" .. string.lower(command.Name)),
+        ButtonState = 1,
+        ButtonAction = commandAction(command, 0),
+        TextOnRemote = command.Name,
+        __type = "SoftRemoteButton",
+        ButtonImagePath = json.null,
+        ButtonDoublePressAction = json.null,
+        ButtonLongPressAction = json.null
+      }
+    end
+  end
+  for _, button in ipairs(hard) do
+    buttons[#buttons + 1] = button
+  end
+  local surface = old or template
+  local map = {
+    ["ButtonMapId-"] = old and tonumber(old["ButtonMapId-"]) or alloc.mapId(),
+    ["ButtonMapSurfaceId-"] = surface["ButtonMapSurfaceId-"],
+    ["DeviceId-"] = tonumber(deviceId),
+    __type = "DeviceButtonMap",
+    ["RemoteId-"] = surface["RemoteId-"],
+    ButtonMapIdentifier = TOUCH_SCREEN_PREFIX .. deviceId,
+    DateModified = json.null,
+    Sequences = json.null,
+    ["SurfaceId-"] = surface["SurfaceId-"],
+    Buttons = buttons
+  }
+  for _, button in ipairs(buttons) do
+    if not button.ButtonId then
+      return nil, "no free button IDs are left"
+    end
+  end
+  if not map["ButtonMapId-"] then
+    return nil, "no free map IDs are left"
+  end
+  return map
+end
+
+-- The map list with a device's screen put in place of its old one, or
+-- after the other device screens; map nil takes the screen out.
+local function withTouchScreen(buttonMaps, deviceId, map)
+  local identifier = TOUCH_SCREEN_PREFIX .. deviceId
+  local out, at = {}, nil
+  for _, existing in ipairs(buttonMaps) do
+    if type(existing) == "table" and existing.ButtonMapIdentifier == identifier then
+      at = at or #out + 1
+    else
+      out[#out + 1] = existing
+    end
+  end
+  if map then
+    if not at then
+      at = #out + 1
+      for i, existing in ipairs(out) do
+        if type(existing) == "table" and isTouchScreenId(existing.ButtonMapIdentifier) then
+          at = i + 1
+        end
+      end
+    end
+    table.insert(out, at, map)
+  end
+  return out
+end
+
+local function touchScreenSummary(map)
+  local summary = {hardKeys = {}, onScreen = 0}
+  for _, button in ipairs(map and map.Buttons or {}) do
+    if button.ButtonKey then
+      summary.hardKeys[#summary.hardKeys + 1] = button.ButtonKey
+    else
+      summary.onScreen = summary.onScreen + 1
+    end
+  end
+  return summary
+end
+
+-- Make, rebuild or remove one device's Touch screen. Only MapList changes,
+-- with a new etag, so the Touch pulls just that list.
+local function commitDeviceScreen(request)
+  if not blockerActive() then
+    return {
+      ok = false,
+      localOnly = true,
+      error = "offline device writer refused to run because the cloud blocker is not active"
+    }
+  end
+  if resources.isAnySyncInProgress() then
+    return {
+      ok = false,
+      localOnly = true,
+      error = "a Harmony sync is in progress; try again when it finishes"
+    }
+  end
+  local deviceId = normalizedId(request.deviceId)
+  if not deviceId then
+    return {ok = false, localOnly = true, error = "deviceId must be a device ID"}
+  end
+  local snapshots = {}
+  for _, name in ipairs({"ActivityList", "MapList", "FunctionList", "DeviceList"}) do
+    local snapshot, readError = resourceSnapshot(name)
+    if not snapshot then
+      return {ok = false, localOnly = true, error = readError}
+    end
+    snapshots[name] = snapshot
+  end
+  local oldMaps = snapshots.MapList
+  if type(oldMaps.resource.ButtonMaps) ~= "table" then
+    return {ok = false, localOnly = true, error = "MapList.ButtonMaps must be an array"}
+  end
+  local old = touchScreenOf(oldMaps.resource.ButtonMaps, deviceId)
+  if old and not isLocalTouchScreen(old) then
+    return {
+      ok = false,
+      localOnly = true,
+      error = "device " .. deviceId .. " keeps the Touch screen Logitech made for it"
+    }
+  end
+  local map
+  if request.remove ~= true then
+    local entry = deviceEntry(snapshots.DeviceList.resource, deviceId)
+    if not entry then
+      return {ok = false, localOnly = true, error = "DeviceList has no device " .. deviceId}
+    end
+    local template = touchScreenTemplate(oldMaps.resource.ButtonMaps)
+    if not template then
+      return {ok = false, localOnly = true, error = "this hub has no Harmony Touch screens to copy"}
+    end
+    local mapError
+    map, mapError = touchScreenMap(entry, old, template, identityAllocator(
+      snapshots.ActivityList.resource, oldMaps.resource,
+      snapshots.FunctionList.resource, snapshots.DeviceList.resource
+    ))
+    if not map then
+      return {ok = false, localOnly = true, error = mapError}
+    end
+  end
+  local mapList = {}
+  for key, value in pairs(oldMaps.resource) do
+    mapList[key] = value
+  end
+  mapList.ButtonMaps = withTouchScreen(oldMaps.resource.ButtonMaps, deviceId, map)
+  local summary = touchScreenSummary(map)
+  local result = {
+    ok = true,
+    localOnly = true,
+    deviceId = deviceId,
+    changed = not sameValue(old, map),
+    removed = map == nil and old ~= nil,
+    hardKeys = summary.hardKeys,
+    onScreen = summary.onScreen
+  }
+  if request.dryRun == true or not result.changed then
+    result.dryRun = request.dryRun == true
+    return result
+  end
+  local valid, validationError = validateGraph(
+    snapshots.ActivityList.resource, mapList,
+    snapshots.FunctionList.resource, snapshots.DeviceList.resource
+  )
+  if not valid then
+    return {ok = false, localOnly = true, error = validationError}
+  end
+  local mapEtag = localEtag()
+  local saved, saveError = saveResource("MapList", mapList, mapEtag, localHetag())
+  if not saved then
+    local restored = saveResource("MapList", oldMaps.resource, oldMaps.etag, oldMaps.hetag)
+    return {ok = false, localOnly = true, rolledBack = restored and true or false, error = saveError}
+  end
+  local sent, reloaded = pcall(system.sendMessage, "config_new", {"MapList"})
+  if not sent or reloaded ~= true then
+    local restored = saveResource("MapList", oldMaps.resource, oldMaps.etag, oldMaps.hetag)
+    pcall(system.sendMessage, "config_new", {"MapList"})
+    return {
+      ok = false,
+      localOnly = true,
+      rolledBack = restored and true or false,
+      error = "Harmony engine rejected the Touch screen reload"
+    }
+  end
+  result.reloaded = true
+  result.activityEngineReady = publishLocalRevision()
+  result.configVersion = digest.configVersion
+  result.mapEtag = mapEtag
+  return result
+end
+
 -- Home Assistant devices. Each entity the HA integration exposes becomes an
 -- ordinary device whose commands are TransportType 64. The engine renders
 -- their protocol's ControlSection into an HTTP POST to the integration's
@@ -1489,7 +1903,8 @@ local function maxId(value, found)
 end
 
 -- Every device and command each activity, map and function list names, so
--- a device or command that is still in use is never dropped.
+-- a device or command that is still in use is never dropped. A device's
+-- own Touch screen is rebuilt with it, so it doesn't count.
 local function haReferences()
   local refs = {}
   for _, name in ipairs(HA_REFERENCE_RESOURCES) do
@@ -1497,12 +1912,15 @@ local function haReferences()
     if not snapshot then
       return nil, readError
     end
-    local function visit(value)
+    local function visit(value, screenOf)
       if type(value) ~= "table" then
         return
       end
+      if isTouchScreenId(value.ButtonMapIdentifier) and isLocalTouchScreen(value) then
+        screenOf = string.sub(value.ButtonMapIdentifier, #TOUCH_SCREEN_PREFIX + 1)
+      end
       local id = normalizedId(value["DeviceId-"])
-      if id then
+      if id and id ~= screenOf then
         local ref = refs[id] or {resources = {}, commands = {}}
         refs[id] = ref
         ref.resources[name] = true
@@ -1511,7 +1929,7 @@ local function haReferences()
         end
       end
       for _, item in pairs(value) do
-        visit(item)
+        visit(item, screenOf)
       end
     end
     visit(snapshot.resource)
@@ -1664,6 +2082,18 @@ local function commitHaDevices(request)
   if not refs then
     return {ok = false, localOnly = true, error = refError}
   end
+  local oldMaps, mapReadError = resourceSnapshot("MapList")
+  local activities, activityReadError = resourceSnapshot("ActivityList")
+  local functions, functionReadError = resourceSnapshot("FunctionList")
+  if not oldMaps or not activities or not functions or
+      type(oldMaps.resource.ButtonMaps) ~= "table" then
+    return {
+      ok = false,
+      localOnly = true,
+      error = mapReadError or activityReadError or functionReadError or
+        "MapList.ButtonMaps must be an array"
+    }
+  end
 
   local owned, kept, otherNames = {}, {}, {}
   for _, entry in ipairs(deviceList.DevicesWithFeatures) do
@@ -1704,7 +2134,7 @@ local function commitHaDevices(request)
 
   local now = "/Date(" .. tostring(os.time() or 0) .. "000+0000)/"
   local result = {added = {}, updated = {}, removed = {}, unchanged = {}, devices = {}}
-  local wanted = {}
+  local wanted, screens, gone = {}, {}, {}
   for _, spec in ipairs(set.devices) do
     if otherNames[string.lower(spec.name)] then
       return {
@@ -1751,6 +2181,7 @@ local function commitHaDevices(request)
     local entry = haDeviceEntry(spec, old, deviceId, protocolId, nextId, now)
     wanted[spec.entity] = true
     kept[#kept + 1] = entry
+    screens[#screens + 1] = {deviceId = deviceId, entry = entry}
     local bucket = not old and result.added or
       (sameValue(before, entry) and result.unchanged or result.updated)
     bucket[#bucket + 1] = spec.name
@@ -1778,15 +2209,55 @@ local function commitHaDevices(request)
         }
       end
       result.removed[#result.removed + 1] = tostring(entry.Device.Name)
+      gone[#gone + 1] = deviceId
     end
   end
   deviceList.DevicesWithFeatures = kept
 
+  -- Each device gets a Touch screen built from its commands, on a hub with
+  -- a Touch, and a removed device's screen goes with it.
+  local buttonMaps = oldMaps.resource.ButtonMaps
+  for _, deviceId in ipairs(gone) do
+    local old = touchScreenOf(buttonMaps, deviceId)
+    if old and isLocalTouchScreen(old) then
+      buttonMaps = withTouchScreen(buttonMaps, deviceId, nil)
+    end
+  end
+  local template = touchScreenTemplate(buttonMaps)
+  local alloc = identityAllocator(
+    activities.resource, oldMaps.resource, functions.resource, deviceList
+  )
+  for _, screen in ipairs(template and screens or {}) do
+    local old = touchScreenOf(buttonMaps, screen.deviceId)
+    if not old or isLocalTouchScreen(old) then
+      local map, mapError = touchScreenMap(screen.entry, old, template, alloc)
+      if not map then
+        return {ok = false, localOnly = true, error = mapError}
+      end
+      buttonMaps = withTouchScreen(buttonMaps, screen.deviceId, map)
+    end
+  end
+  local mapList = {}
+  for key, value in pairs(oldMaps.resource) do
+    mapList[key] = value
+  end
+  mapList.ButtonMaps = buttonMaps
+
   local devicesChanged = #result.added > 0 or #result.updated > 0 or #result.removed > 0
   local protocolsChanged = not sameValue(oldProtocols.resource, protocolList)
+  local mapsChanged = not sameValue(oldMaps.resource.ButtonMaps, buttonMaps)
   result.ok = true
   result.localOnly = true
-  result.changed = devicesChanged or protocolsChanged
+  result.screensChanged = mapsChanged
+  result.changed = devicesChanged or protocolsChanged or mapsChanged
+  if mapsChanged then
+    local valid, validationError = validateGraph(
+      activities.resource, mapList, functions.resource, deviceList
+    )
+    if not valid then
+      return {ok = false, localOnly = true, error = validationError}
+    end
+  end
   if request.dryRun == true or not result.changed then
     result.dryRun = request.dryRun == true
     return result
@@ -1802,10 +2273,13 @@ local function commitHaDevices(request)
     )
     local devicesOk = not devicesChanged or
       saveDeviceListText(oldText, oldDevices.resource, oldDevices.etag, oldDevices.hetag)
-    return protocolsOk and devicesOk
+    local mapsOk = not mapsChanged or
+      saveResource("MapList", oldMaps.resource, oldMaps.etag, oldMaps.hetag)
+    return protocolsOk and devicesOk and mapsOk
   end
   -- Save only what changed: each new etag makes the Touch pull that list.
-  -- The protocol goes first, so the engine never loads a device without it.
+  -- The protocol goes first, so the engine never loads a device without it,
+  -- and the screens last, after the devices they name.
   local saved, saveError = true, nil
   if protocolsChanged then
     saved, saveError = saveResource("ProtocolList", protocolList, localEtag(), localHetag())
@@ -1814,14 +2288,22 @@ local function commitHaDevices(request)
     tokenCounter = tokenCounter + 1
     saved, saveError = saveDeviceListText(text, deviceList, localEtag(), localHetag())
   end
+  if saved and mapsChanged then
+    tokenCounter = tokenCounter + 1
+    saved, saveError = saveResource("MapList", mapList, localEtag(), localHetag())
+  end
   if not saved then
     local restored = restore()
     return {ok = false, localOnly = true, rolledBack = restored and true or false, error = saveError}
   end
-  local sent, reloaded = pcall(system.sendMessage, "config_new", {"DeviceList", "ProtocolList"})
+  local reload = {"DeviceList", "ProtocolList"}
+  if mapsChanged then
+    reload[#reload + 1] = "MapList"
+  end
+  local sent, reloaded = pcall(system.sendMessage, "config_new", reload)
   if not sent or reloaded ~= true then
     local restored = restore()
-    pcall(system.sendMessage, "config_new", {"DeviceList", "ProtocolList"})
+    pcall(system.sendMessage, "config_new", reload)
     return {
       ok = false,
       localOnly = true,
@@ -1854,6 +2336,8 @@ local function processRequest(raw)
     response = commitDeviceSettings(request)
   elseif request.op == "CommitHaDevices" then
     response = commitHaDevices(request)
+  elseif request.op == "CommitDeviceScreen" then
+    response = commitDeviceScreen(request)
   elseif request.op == "Status" then
     response = statusResponse()
   else

@@ -23,13 +23,18 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.outlined.ContentPaste
+import androidx.compose.material.icons.outlined.Refresh
+import androidx.compose.material.icons.outlined.Remove
 import androidx.compose.material.icons.outlined.SettingsRemote
 import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -71,6 +76,7 @@ import app.melodious.ui.remote.ButtonsSurface
 import app.melodious.ui.remote.MoreKeysSheet
 import app.melodious.ui.remote.rememberRemoteController
 import app.melodious.ui.theme.MelodiousColors
+import app.melodious.protocol.model.DeviceTouchScreen
 import app.melodious.protocol.model.HubDevice
 
 @Composable
@@ -186,6 +192,10 @@ fun DeviceDetailScreen(
     var showMoreKeys by rememberSaveable { mutableStateOf(false) }
     var showLearn by rememberSaveable { mutableStateOf(false) }
     var showImport by rememberSaveable { mutableStateOf(false) }
+    var menuOpen by rememberSaveable { mutableStateOf(false) }
+    // The hub builds the Touch screen from the device's commands; Logitech's own screens and
+    // Home Assistant devices (whose screens follow the device set) are left alone.
+    val touchScreen = state.deviceTouchScreen(device.id)
 
     DisposableEffect(device.id) {
         viewModel.visibleRemoteTarget = target
@@ -204,6 +214,32 @@ fun DeviceDetailScreen(
             }
             IconButton(onClick = { haptics.longPress(); viewModel.powerOffDevice(device.id) }) {
                 Icon(Icons.Filled.PowerSettingsNew, contentDescription = "Power ${device.name}", tint = MelodiousColors.OnPowerContainer)
+            }
+            if (touchScreen == DeviceTouchScreen.NONE || touchScreen == DeviceTouchScreen.MADE) {
+                Box {
+                    IconButton(onClick = { menuOpen = true }, enabled = !state.deviceScreenSaving) {
+                        Icon(Icons.Filled.MoreVert, contentDescription = "More options for ${device.name}")
+                    }
+                    DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                        DropdownMenuItem(
+                            text = { Text(if (touchScreen == DeviceTouchScreen.MADE) "Rebuild Touch screen" else "Make Touch screen") },
+                            leadingIcon = {
+                                Icon(
+                                    if (touchScreen == DeviceTouchScreen.MADE) Icons.Outlined.Refresh else Icons.Outlined.SettingsRemote,
+                                    contentDescription = null,
+                                )
+                            },
+                            onClick = { menuOpen = false; viewModel.saveDeviceScreen(device.id, remove = false) },
+                        )
+                        if (touchScreen == DeviceTouchScreen.MADE) {
+                            DropdownMenuItem(
+                                text = { Text("Remove Touch screen") },
+                                leadingIcon = { Icon(Icons.Outlined.Remove, contentDescription = null) },
+                                onClick = { menuOpen = false; viewModel.saveDeviceScreen(device.id, remove = true) },
+                            )
+                        }
+                    }
+                }
             }
         },
     ) { pad ->

@@ -46,7 +46,7 @@ EXACT_PAYLOADS = {
         "6dc30113d4333a25a626f6c9c04c8e19ffb113bfa593cae4f528f5e756da0166",
         0o644),
     "payload/activity/codexactivity.lua": (
-        "7a011936d28a32f3923ab7fd837f6db022294ef4dae9a85276087cfb20a25311",
+        "c8d8e9577400eb8faf559f6449fc88f0b169f35420034e531cdcef19aafd754f",
         0o644),
     "payload/mqtt/codexmqtt.lua": (
         "61a101caab2fcd607c5914f15d5875c723efd857f892f16074bc647f2c8b6c78",
@@ -140,7 +140,7 @@ class TestExactReconstruction(unittest.TestCase):
             "payload/scripts/init.sh": 3707,
             "payload/scripts/offline_egress_guard.sh": 1753,
             "payload/scripts/netservicestarter.lua": 32017,
-            "payload/activity/codexactivity.lua": 67390,
+            "payload/activity/codexactivity.lua": 84655,
             "payload/mqtt/codexmqtt.lua": 24405,
         }
         for rel, size in expected_sizes.items():
