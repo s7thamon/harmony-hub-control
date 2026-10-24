@@ -785,10 +785,15 @@ local function offlineDeleteResources(cmd, verb, params)
   })
 end
 
--- The Harmony Touch's own Sync asks the hub for the time and for a hub
--- firmware check. Stock code answers both only with internet, so offline
--- the Touch gets 506 "Wi-Fi is not available" and its clock is never set.
--- The hub keeps NTP time itself, and offline there is never an update.
+-- The Harmony Touch's own Sync asks the hub for the time. Stock code answers
+-- only with internet, so offline the Touch gets 506 "Wi-Fi is not available"
+-- and its clock is never set. The hub keeps NTP time itself.
+--
+-- The same Sync also asks for a hub firmware check (setup.firmware?check).
+-- Leave that to the stock handler, which fails offline: a Touch that gets a
+-- successful check goes on to judge its own update status, which the offline
+-- sus:// answer leaves empty, and stops on a "myharmony.com" screen that
+-- needs a forced restart. Failing the check ends the Sync harmlessly.
 local function offlineGetTime(cmd, verb, params)
   if not cloudBlockerEnabled() or os.time() < NTP_MIN_VALID then
     local native = require("tasks.harmonyengine.apihandler.harmonyengine")
@@ -800,27 +805,6 @@ local function offlineGetTime(cmd, verb, params)
     utcTime = os.date("!*t"),
     tz = localDigest.tz
   })
-end
-
-local function offlineFirmwareCheck(cmd, verb, params)
-  if not cloudBlockerEnabled() then
-    local native = require("tasks.setup.apihandler.firmware")
-    return native.processCmdDefault(cmd, verb, params)
-  end
-  log.notice("codex offline guard answered firmware check: no update offline", cmd)
-  -- The shape of a check that found nothing (softwareupdate status 0).
-  return connectUtils.createResponse(cmd, "200", json.encode({"OK"}), json.encode({
-    bytesDownloaded = 0,
-    totalBytes = 0,
-    currentVersion = system.getFirmwareVersion(),
-    status = 0,
-    packages = {},
-    stage = 0,
-    expectedStages = 0,
-    maxStageTimeRemaining = 0,
-    packageId = "",
-    expectedTimeRemaining = 0
-  }))
 end
 
 local function installOfflineApiGuards()
@@ -853,9 +837,6 @@ local function installOfflineApiGuards()
   )
   engine.registerMessage(
     "harmony.engine?gettime", nil, offlineGetTime
-  )
-  engine.registerMessage(
-    "setup.firmware?check", nil, offlineFirmwareCheck
   )
   log.notice("codex offline HBus guards registered")
 end

@@ -1,5 +1,7 @@
 -- LuaJIT tests for the offline guards in payload/scripts/netservicestarter.lua
--- that answer the Harmony Touch's own Sync: the time and the firmware check.
+-- that answer the Harmony Touch's own Sync: the time is answered locally, and
+-- the hub firmware check is deliberately left to the stock handler (a
+-- successful check strands the Touch on a "myharmony.com" screen offline).
 --
 -- Loads the script with stubbed hub modules (mfgData.hasNetwork = false, so
 -- it only "loads" its transport tasks), captures what it registers with the
@@ -110,26 +112,21 @@ local function check(name, ok, detail)
 end
 
 local getTime = handlers["harmony.engine?gettime"]
-local firmwareCheck = handlers["setup.firmware?check"]
 check("registers the time guard under the stock name", type(getTime) == "function")
-check("registers the firmware check guard for the check verb only",
-  type(firmwareCheck) == "function" and handlers["setup.firmware"] == nil)
-if type(getTime) ~= "function" or type(firmwareCheck) ~= "function" then
+check("leaves every firmware command to the stock handlers",
+  handlers["setup.firmware?check"] == nil and handlers["setup.firmware"] == nil and
+  handlers["harmony.firmware"] == nil)
+if type(getTime) ~= "function" then
   print(string.format("%d/%d checks passed", count - failures, count))
   os.exit(1)
 end
 
--- Blocker on, clock set: the hub answers both itself.
+-- Blocker on, clock set: the hub answers the time itself.
 blocker, fakeNow, nativeCalls = "1", 1792850000, {}
 local r = getTime("harmony.engine?getTime", nil, {})
 check("blocker on: the time comes from the hub clock",
   r.code == "200" and type(r.data) == "table" and type(r.data.utcTime) == "table" and
   r.data.utcTime.year == 2026 and r.data.tz == "EST5EDT,M3.2.0,M11.1.0" and #nativeCalls == 0,
-  encode(r))
-r = firmwareCheck("setup.firmware?check", "check", {})
-check("blocker on: the firmware check says up to date",
-  r.code == "200" and r.msg == '["OK"]' and r.data:find('"status":0', 1, true) and
-  r.data:find('"currentVersion":"4.15.600"', 1, true) and #nativeCalls == 0,
   encode(r))
 
 -- Blocker on, clock never set: don't hand the Touch a 1970 date.
@@ -137,12 +134,10 @@ blocker, fakeNow, nativeCalls = "1", 3600, {}
 r = getTime("harmony.engine?getTime", nil, {})
 check("blocker on, clock unset: falls back to the stock answer", r.native ~= nil and #nativeCalls == 1)
 
--- Blocker off: stock behaviour for both.
+-- Blocker off: the stock answer.
 blocker, fakeNow, nativeCalls = "0", 1792850000, {}
 r = getTime("harmony.engine?getTime", nil, {})
-check("blocker off: the time is the stock answer", r.native ~= nil)
-r = firmwareCheck("setup.firmware?check", "check", {})
-check("blocker off: the firmware check is the stock answer", r.native ~= nil and #nativeCalls == 2)
+check("blocker off: the time is the stock answer", r.native ~= nil and #nativeCalls == 1)
 
 print(string.format("%d/%d checks passed", count - failures, count))
 os.exit(failures == 0 and 0 or 1)

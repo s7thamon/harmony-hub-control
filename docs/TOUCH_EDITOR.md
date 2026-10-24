@@ -31,16 +31,22 @@ it is saved.
   80 and 443. Nothing else on the hub resolves that name: its own
   online check resolves its discovery server. Turning the blocker off
   removes the line.
-- Once that check passes, the Touch asks the hub to check for hub
-  firmware (`setup.firmware?check`), asks it to sync (`setup.sync`,
-  answered locally), pulls every resource, and asks for the time
-  (`harmony.engine?getTime`) several times. Stock code answers the
-  firmware check and the time only with internet. So while the blocker
-  is on, `netservicestarter.lua` answers the firmware check with the
-  "up to date" result and the time from the hub's own NTP-set clock
-  (only once that clock is past 2026-01-01). Turning the blocker off
-  restores the stock answers. The full Sync is confirmed on hardware
-  before the README lists it.
+- Once that check passes, the Touch checks its own firmware (a
+  `sus://` resource the offline guard refuses), asks the hub to check
+  for hub firmware (`setup.firmware?check`), asks it to sync
+  (`setup.sync`, answered locally), pulls every resource, and asks for
+  the time (`harmony.engine?getTime`). While the blocker is on,
+  `netservicestarter.lua` answers the time from the hub's own NTP-set
+  clock (once that clock is past 2026-01-01), which sets the Touch's
+  clock.
+- The hub firmware check is left to the stock handler, which fails
+  offline, and the menu Sync then stops partway with every resource
+  already pulled. Answering that check with "up to date" was tried:
+  the Touch then went on to judge its own update status, which the
+  refused `sus://` answer leaves empty, and stopped on a
+  "myharmony.com" screen that needed a forced restart. A full menu
+  Sync needs a local answer for the Touch's own firmware check first,
+  proven on hardware, before the README lists it.
 - The hub resolves a Touch press against its current maps. An on-screen
   press arrives as a menu index; the Touch draws labels from its own
   synced copy. Until the Touch syncs after a save, a slot whose action
