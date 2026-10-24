@@ -19,9 +19,19 @@ it is saved.
   staged copy when the sync finishes. This pull runs locally against
   the hub; the owner's hardware confirms it.
 - The Touch starts that pull by itself when the hub publishes a new
-  configuration revision, which every save does. Its own Sync menu does
-  not work offline: it reports "Unable to connect to MyHarmony. A time
-  out error occurred." What that path waits on is not yet known.
+  configuration revision, which every save does.
+- Its own Sync menu checks for internet first. It asks the hub for
+  `wifi.status`, which the hub's hardware daemon answers by resolving
+  `ping.myharmony.com` and connecting to it on ports 80 and 443, and it
+  goes on only if both connect. With the cloud blocked they can't, and
+  after a few tries the Touch reports "Unable to connect to MyHarmony. A
+  time out error occurred." without asking the hub for anything else.
+  So while the blocker is on, `codex_webui` points that name at
+  `127.0.0.1` in `/etc/hosts` and accepts connections on loopback ports
+  80 and 443. Nothing else on the hub resolves that name: its own
+  online check resolves its discovery server. Turning the blocker off
+  removes the line. What the Touch does once the check passes is
+  confirmed on hardware before the README lists it.
 - The hub resolves a Touch press against its current maps. An on-screen
   press arrives as a menu index; the Touch draws labels from its own
   synced copy. Until the Touch syncs after a save, a slot whose action
