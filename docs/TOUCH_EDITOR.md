@@ -92,6 +92,19 @@ only. Editors work to these rules:
 | `16417Device<id>` | On-screen buttons (device screens slice) | Everything else on the map |
 | `16414*`, any root map | Nothing | The whole map |
 
+The activity wizard (web and Android) owns each activity's
+`16414Activity<id>` map and the hard buttons of its `16417Activity<id>`
+map. The Touch answers its hard keys from its own map only; Logitech's
+configs carry the same hard buttons on both maps, minus the number keys,
+which are on screen on the Touch, and with `Dvr` spelled `DVR`.
+
+- When the Touch map has no hard buttons (activities made in Melodious),
+  a wizard save copies all of them.
+- When it already has some, a save copies only the keys that the edit
+  changed. A Touch-only mapping made in MyHarmony survives.
+- A hub with a Touch surface gets a `16417Activity<id>` map for each
+  activity the wizard saves.
+
 An on-screen button is a `SoftRemoteButton` whose `FunctionGroupType`
 is not 2 (the number pad). Its editable fields are its label
 (`TextOnRemote`, text only), its press, long-press and double-press
