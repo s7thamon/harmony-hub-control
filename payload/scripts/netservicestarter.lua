@@ -545,6 +545,32 @@ local function localResourceName(params)
   return nil
 end
 
+-- During every sync the Harmony Touch fetches CD_<device> for some of its
+-- devices and aborts the whole sync (553) unless the answer is 200 or 304,
+-- so it then retries on every button press and never takes a new setup.
+-- Devices made on the hub have no such file, so answer with the record
+-- Logitech kept for a device with no content services. The id and etag
+-- depend only on the device, so repeated syncs see the same record.
+local function emptyDeviceContent(cmd, uri, deviceId, encode)
+  local resource = {
+    id = string.format("00000000-0000-4000-8000-%012d", tonumber(deviceId)),
+    device_profile_uri = "svcs.myharmony.com/res/device/" .. deviceId .. "-melodious",
+    services = {}
+  }
+  if encode then
+    resource = json.encode(resource)
+  end
+  log.notice("codex offline guard served empty device content", deviceId)
+  return connectUtils.createResponse(cmd, "200", "OK", {
+    code = "200",
+    uri = uri,
+    etag = "\"melodious-empty-content-" .. deviceId .. "\"",
+    hetag = "1",
+    resource = resource,
+    localOnly = true
+  })
+end
+
 local function offlineResourceGet(cmd, verb, params)
   if not cloudBlockerEnabled() then
     return nativeResourceHandler.processGetResource(cmd, verb, params)
@@ -564,6 +590,10 @@ local function offlineResourceGet(cmd, verb, params)
   end
   local status, etag, resource = resMgr.getResource(resourceName)
   if tostring(status or "") ~= "200" then
+    local deviceId = string.match(resourceName, "^CD_(%d+)$")
+    if deviceId then
+      return emptyDeviceContent(cmd, uri, deviceId, params.encode)
+    end
     log.notice(
       "codex offline guard could not serve local resource",
       resourceName
