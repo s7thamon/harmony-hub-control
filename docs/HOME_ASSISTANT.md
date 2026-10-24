@@ -102,6 +102,10 @@ computer's.
      shows no devices.
 2. **Deploy** with the installer: `--preflight-only` first, then the
    install.
+   - The engine keeps the old `codexactivity.lua` loaded until the Hub
+     reboots: a request answers `422 unknown local operation`.
+   - After the reboot, the writer starts a minute or two after the web UI.
+     Until then a request answers `503`.
    - `node tools/ha_devices.mjs plan --hub http://HUB:8080 --webhook
      http://MAC:8770/api/webhook/melodious-gate` runs the real writer as
      a dry run, with nothing saved.
@@ -128,6 +132,35 @@ computer's.
    - Run `node tools/ha_devices.mjs revert --hub http://HUB:8080`.
    - The Touch syncs again, SyncCounter shows success, and "HA test" is
      gone.
+
+Don't send a set while a web editor save is still running. Each request to
+the writer goes through one shared request file and one shared response
+file, with no lock. If two requests overlap, one waits the full 45 s and
+answers `503`; send it again.
+
+### Results, 2026-10-24
+
+- The Touch synced the IP device by itself and listed it beside every
+  earlier device. Its activities were intact, and its sync log showed
+  success with no abort.
+- Tapping the device on the Touch does nothing (it has no device maps),
+  as expected.
+- Commands sent from the Hub reached the webhook. Repeated sends worked,
+  so the IP command task survives.
+- Starting and ending an activity from the Touch sent `turn_on` and
+  `turn_off`. Overlapping Off and Start presses run side by side in the
+  stock engine, so the earlier Off's power-off can land after the
+  Start's power-on. IR devices behave the same way.
+- The writer refused to remove the device while an activity and its
+  button map still used it. After the activity was deleted, revert
+  removed the device and the protocol, and the Touch synced back to the
+  earlier DeviceList.
+- Not tested:
+  - **Input selection:** the activity had no input set.
+  - **Touch buttons sending an HA command:** the web activity editor
+    writes hard buttons only to the `16414Activity<id>` map, never to the
+    Touch's `16417Activity<id>` map. This affects every activity made in
+    Melodious, not only Home Assistant devices.
 
 If step 3 goes wrong, revert at once; the device is not used yet, so the
 writer allows it. Then change one field at a time to find the cause:
