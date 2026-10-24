@@ -14,6 +14,7 @@ import {
   neighbourOf,
   readTouchScreen,
   removeButton,
+  saveOutcome,
   setCommand,
   setLabel,
   touchSavePayload,
@@ -341,6 +342,33 @@ describe("editor output and the hub validator", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("saveOutcome (after a save the hub didn't confirm)", () => {
+  const edited = (cfg) => {
+    const d = readTouchScreen(cfg, SCREEN);
+    return addButton(moveButton(setLabel(d, d.rows[0].key, "Mine"), d.rows[0].key, 1), { label: "New", ...pick() });
+  };
+  const withMapList = (cfg, mapList) => ({ ...cfg, mapList });
+
+  it("says saved when the hub has the draft, new buttons included", () => {
+    const cfg = config();
+    const draft = edited(cfg);
+    assert.equal(saveOutcome(withMapList(cfg, buildTouchMapList(cfg, draft, { now: NOW })), draft), "saved");
+  });
+
+  it("says unchanged when the hub still has the screen the draft started from", () => {
+    const cfg = config();
+    assert.equal(saveOutcome(cfg, edited(cfg)), "unchanged");
+  });
+
+  it("says changed when the hub has something else", () => {
+    const cfg = config();
+    const draft = edited(cfg);
+    const other = structuredClone(cfg);
+    mapOf(other, SCREEN).Buttons.find((b) => b.__type === "SoftRemoteButton").TextOnRemote = "Theirs";
+    assert.equal(saveOutcome(other, draft), "changed");
   });
 });
 

@@ -14,8 +14,13 @@ local CLOUD_BLOCKER_FILE = "/data/codex/cloud_blocker.conf"
 -- synchronous send is a FIFO barrier behind the init_activity_engine that
 -- harmonyengine broadcasts while handling config_new.
 local ACTIVITY_ENGINE_BARRIER_MESSAGE = "process_activity"
--- A long activity start can hold the engine; bound the wait (100 ms steps).
-local ACTIVITY_ENGINE_BARRIER_STEPS = 600
+-- A long activity start can hold the engine; bound the wait. codex_webui
+-- gives the whole transaction 45 s (offline_writer_request) and rolls the
+-- save back when no answer comes, even though the reloaded engine already
+-- runs the new config. So the wait ends well inside that, by the clock;
+-- the step count only backs it up if the clock can't be read.
+local ACTIVITY_ENGINE_BARRIER_MS = 25000
+local ACTIVITY_ENGINE_BARRIER_STEPS = 250
 -- codex_webui leaves this flag (resource names, one per line) after it edits
 -- IR devices or commands. codexmqtt used to be its only reader and never looks
 -- while its broker is unreachable, so the reload lives here, with the other
@@ -112,11 +117,16 @@ local function localEtag()
     string.format("%012d", tokenCounter % 1000000000000) .. '"'
 end
 
-local function localHetag()
-  local millis = 0
-  pcall(function()
-    millis = system.jiffies():tomillis()
+-- Milliseconds since boot, or nil when the clock can't be read.
+local function nowMillis()
+  local ok, millis = pcall(function()
+    return system.jiffies():tomillis()
   end)
+  return ok and tonumber(millis) or nil
+end
+
+local function localHetag()
+  local millis = nowMillis() or 0
   local value = (
     ((tonumber(os.time()) or 0) % 1000000) * 1000 +
     (tonumber(millis) or 0) % 1000 +
@@ -214,9 +224,12 @@ local function waitForActivityEngine()
     )
     state.ok, state.result, state.done = ok, result, true
   end)
+  local started = nowMillis()
   local steps = 0
   while not state.done do
-    if steps >= ACTIVITY_ENGINE_BARRIER_STEPS then
+    local now = nowMillis()
+    if steps >= ACTIVITY_ENGINE_BARRIER_STEPS or
+        (started and now and now - started >= ACTIVITY_ENGINE_BARRIER_MS) then
       return nil, "activity engine did not finish rebuilding in time"
     end
     steps = steps + 1

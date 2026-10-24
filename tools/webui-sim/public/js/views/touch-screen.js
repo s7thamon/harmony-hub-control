@@ -14,6 +14,7 @@ import {
   neighbourOf,
   readTouchScreen,
   removeButton,
+  saveOutcome,
   setCommand,
   setLabel,
   touchSavePayload,
@@ -30,7 +31,9 @@ import {
 } from "../ui/shell.js";
 import { humanizeLabel } from "./remote-model.js";
 
-const SYNC_NOTE = "Until the Touch syncs, a button you moved or changed can run its new action under its old label.";
+/* A save publishes a new revision, and the Touch syncs by itself when it
+   sees it. Its own Sync menu asks the cloud and fails offline. */
+const SYNC_NOTE = "The Touch picks up the change by itself. Until it does, a button you moved or changed can run its new action under its old label.";
 
 export function createTouchScreenView(section) {
   let activityId = "";
@@ -120,7 +123,7 @@ export function createTouchScreenView(section) {
     const intro = `<div class="wiz-intro"><h2 tabindex="-1">${escapeHtml(activityName())}</h2>
         <p>The buttons on the Harmony Touch's screen for this activity, in screen order. Tap one to rename it or change what it sends.</p></div>`;
     const syncNote = saved
-      ? `<div class="notice notice-warn touch-sync" role="status"><strong>Sync the Touch now, from its menu.</strong> ${escapeHtml(SYNC_NOTE)}</div>`
+      ? `<div class="notice notice-warn touch-sync" role="status"><strong>Saved to the hub.</strong> ${escapeHtml(SYNC_NOTE)}</div>`
       : "";
     if (!draft.canCreate) {
       return `${intro}<div class="m-empty">
@@ -135,7 +138,7 @@ export function createTouchScreenView(section) {
     return `${intro}${syncNote}${list}
       <button type="button" class="wiz-add" data-act="add" aria-haspopup="dialog"${saving ? " disabled" : ""}>${icon("add")}<span>Add a button</span></button>
       ${keptNote()}
-      ${dirty ? `<p class="wiz-hint">${escapeHtml(`After you save, sync the Touch from its menu. ${SYNC_NOTE}`)}</p>` : ""}`;
+      ${dirty ? `<p class="wiz-hint">${escapeHtml(`Nothing reaches the hub until you save. ${SYNC_NOTE}`)}</p>` : ""}`;
   }
 
   function footMarkup() {
@@ -344,12 +347,27 @@ export function createTouchScreenView(section) {
       saved = true;
       await hub.reloadConfig();
       draft = readTouchScreen(hub.state.config, activityId);
-      snackbar("Saved. Now sync the Touch from its menu.");
+      snackbar("Saved. The Touch picks up the change by itself.");
     } catch (error) {
-      // A refused save usually means the setup changed elsewhere: reload it,
-      // so trying again saves onto the latest copy.
+      // The hub can apply a save and still report a failure (a slow engine),
+      // so look at what it has now before saying what happened.
       await hub.reloadConfig();
-      snackbar(`Couldn't save — ${error.message || "hub error"}`, { error: true });
+      const outcome = hub.state.configError ? "unknown" : saveOutcome(hub.state.config, draft);
+      if (outcome === "saved") {
+        dirty = false;
+        saved = true;
+        draft = readTouchScreen(hub.state.config, activityId);
+        snackbar("Saved, though the hub was slow to confirm. The Touch picks up the change by itself.");
+      } else if (outcome === "unchanged") {
+        snackbar(`Not saved — ${error.message || "hub error"}. Nothing changed on the hub; your changes are still here, so you can try again.`, { error: true });
+      } else if (outcome === "changed") {
+        dirty = false;
+        saved = true;
+        draft = readTouchScreen(hub.state.config, activityId);
+        snackbar(`The hub didn't confirm the save, and its copy of this screen changed. This shows what the hub has now.`, { error: true });
+      } else {
+        snackbar(`Couldn't save — ${error.message || "hub error"}. Reload to see what the hub has.`, { error: true });
+      }
     } finally {
       saving = false;
       if (!section.hidden) render();

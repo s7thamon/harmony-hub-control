@@ -57,4 +57,17 @@ describe("codexactivity.lua validateGraph (LuaJIT)", () => {
     );
     assert.match(out, /18\/18 cases passed/);
   });
+
+  it("ends its engine wait in time for codex_webui's transaction limit", (t) => {
+    const probe = spawnSync("luajit", ["-v"], { encoding: "utf8" });
+    if (probe.error || probe.status !== 0) {
+      t.skip("luajit is not available");
+      return;
+    }
+    const out = execFileSync("luajit", ["tools/touch-validator/codexactivity-barrier-test.lua"], {
+      cwd: new URL("../../../", import.meta.url).pathname,
+      encoding: "utf8",
+    });
+    assert.match(out, /5\/5 checks passed/);
+  });
 });
