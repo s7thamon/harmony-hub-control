@@ -205,6 +205,24 @@ check(
   JSON.stringify(haEvents),
 );
 
+console.log("\n== writer requests take turns ==");
+// Each connection is its own codex_webui child and all writer requests share
+// one request file; without a lock, overlapping requests delete each other's
+// files and one waits out its whole 45 s. engine-emu answers this op at once
+// (422, unknown op), so every request should come back quickly.
+const turnsStart = Date.now();
+const turns = await Promise.all(
+  [1, 2, 3, 4].map(() =>
+    req(API, "/api/device-settings", jsonBody({ deviceId: "74521691", settings: { power: { type: "none" } } }))),
+);
+const turnsMs = Date.now() - turnsStart;
+check(
+  "four overlapping writer requests each get the writer's answer",
+  turns.every((t) => t.status === 422 && /unknown op/.test(t.json?.error ?? "")),
+  turns.map((t) => `${t.status} ${t.json?.error ?? t.text.slice(0, 60)}`).join(" | "),
+);
+check("and none waits out the 45 s limit", turnsMs < 15000, `${turnsMs} ms`);
+
 console.log("\n== full-graph save: writer daemon + revision semantics ==");
 const noop = await req(
   API,

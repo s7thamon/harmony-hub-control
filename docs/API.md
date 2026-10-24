@@ -222,7 +222,14 @@ Content-Type: application/json
 
 The body carries a numeric `deviceId` and a `settings` object (at most
 16 KiB). The settings go to the offline writer as a
-`CommitDeviceSettings` operation after a resource backup. Success is `200`
+`CommitDeviceSettings` operation after a resource backup.
+
+Writer requests from every route take turns. Each connection is served
+by its own `codex_webui` child, and all of them share one request file
+and one response file, so each request takes an exclusive lock on
+`/var/volatile/codex-activity.lock` first. A request that can't get the
+lock within 50 s gives `503` with "another change is still being saved
+on the hub". Success is `200`
 with `saved: true` and `localOnly: true`. An invalid body gives `400`; a
 writer refusal gives `422`; a writer that cannot be reached gives `503`.
 
