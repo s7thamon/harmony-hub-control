@@ -73,7 +73,7 @@ describe("codexactivity.lua validateGraph (LuaJIT)", () => {
 });
 
 describe("netservicestarter.lua Touch Sync guards (LuaJIT)", () => {
-  it("answers the time offline, leaves the firmware check to stock, and defers otherwise", (t) => {
+  it("answers the time offline, leaves the firmware check to stock, serves missing device content, and defers otherwise", (t) => {
     const probe = spawnSync("luajit", ["-v"], { encoding: "utf8" });
     if (probe.error || probe.status !== 0) {
       t.skip("luajit is not available");
@@ -83,6 +83,6 @@ describe("netservicestarter.lua Touch Sync guards (LuaJIT)", () => {
       cwd: new URL("../../../", import.meta.url).pathname,
       encoding: "utf8",
     });
-    assert.match(out, /5\/5 checks passed/);
+    assert.match(out, /12\/12 checks passed/);
   });
 });

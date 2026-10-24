@@ -47,6 +47,15 @@ it is saved.
   "myharmony.com" screen that needed a forced restart. A full menu
   Sync needs a local answer for the Touch's own firmware check first,
   proven on hardware, before the README lists it.
+- After the resources, every pull also fetches a content record,
+  `CD_<device>`, for some devices, and the Touch aborts the whole pull
+  (error 553) unless that answer is 200 or 304. It then retries on every
+  button press and never takes a new setup. Devices made on the hub have
+  no content record, so while the blocker is on the offline guard
+  answers a missing one with the record Logitech kept for a device with
+  no content services. A record the hub does have is served as it is.
+  The Touch's own sync log, `/data/loggly/SyncCounter.json` on the
+  Touch, lists each aborted pull with its error code.
 - The hub resolves a Touch press against its current maps. An on-screen
   press arrives as a menu index; the Touch draws labels from its own
   synced copy. Until the Touch syncs after a save, a slot whose action

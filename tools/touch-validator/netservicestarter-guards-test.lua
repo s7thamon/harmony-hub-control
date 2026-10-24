@@ -1,7 +1,9 @@
 -- LuaJIT tests for the offline guards in payload/scripts/netservicestarter.lua
--- that answer the Harmony Touch's own Sync: the time is answered locally, and
--- the hub firmware check is deliberately left to the stock handler (a
--- successful check strands the Touch on a "myharmony.com" screen offline).
+-- that answer the Harmony Touch's own Sync: the time is answered locally, the
+-- hub firmware check is deliberately left to the stock handler (a successful
+-- check strands the Touch on a "myharmony.com" screen offline), and a device
+-- content file the hub doesn't have is answered with an empty record (a 404
+-- aborts every Touch sync).
 --
 -- Loads the script with stubbed hub modules (mfgData.hasNetwork = false, so
 -- it only "loads" its transport tasks), captures what it registers with the
@@ -78,11 +80,22 @@ package.preload["tasks.connectserver.core.engine"] = function()
   return { registerMessage = function(mime, _, fn) handlers[mime] = fn end }
 end
 package.preload["tasks.mfg.core.mfgdata"] = function() return { hasNetwork = false } end
+-- Resources the stub resource manager has, by name.
+local stored = {}
+package.preload["tasks.harmonywebservices.core.resourcemanager"] = function()
+  return {
+    getResource = function(name)
+      local entry = stored[name]
+      if not entry then return nil, "indexInfo not available for the resource " .. name end
+      return "200", entry.etag, entry.resource
+    end,
+    getHubEtag = function(name) return stored[name] and stored[name].hetag end,
+  }
+end
 for _, name in ipairs({
   "tasks.harmonywebservices.apihandler.resource",
   "tasks.setup.apihandler.sync",
   "tasks.harmonywebservices.core.preferencemanager",
-  "tasks.harmonywebservices.core.resourcemanager",
   "tasks.harmonywebservices.core.session",
 }) do
   package.preload[name] = function() return anything() end
@@ -138,6 +151,43 @@ check("blocker on, clock unset: falls back to the stock answer", r.native ~= nil
 blocker, fakeNow, nativeCalls = "0", 1792850000, {}
 r = getTime("harmony.engine?getTime", nil, {})
 check("blocker off: the time is the stock answer", r.native ~= nil and #nativeCalls == 1)
+
+-- Device content files (CD_<device>), as the Touch asks for them mid-sync.
+local getResource = handlers["proxy.resource?get"]
+check("registers the resource guard", type(getResource) == "function")
+blocker = "1"
+local contentUri = "content://1.0/device/90000017-aBc="
+
+r = getResource("proxy.resource?get", nil, { uri = contentUri })
+local d = r.data or {}
+local res = type(d.resource) == "table" and d.resource or {}
+check("missing device content: answered 200, not 404",
+  r.code == "200" and d.code == "200" and d.uri == contentUri, encode(r))
+check("missing device content: an empty record for that device",
+  res.id == "00000000-0000-4000-8000-000090000017" and
+  res.device_profile_uri == "svcs.myharmony.com/res/device/90000017-melodious" and
+  type(res.services) == "table" and next(res.services) == nil, encode(res))
+local again = getResource("proxy.resource?get", nil, { uri = contentUri })
+check("missing device content: the same etag and id every sync",
+  type(d.etag) == "string" and d.etag ~= "" and again.data.etag == d.etag and
+  again.data.resource.id == res.id, encode(again))
+
+r = getResource("proxy.resource?get", nil, { uri = contentUri, encode = true })
+check("missing device content: encoded when the Touch asks for text",
+  type(r.data.resource) == "string" and r.data.resource:find('"services":[]', 1, true) ~= nil,
+  encode(r))
+
+stored.CD_80000002 = {
+  etag = '"etag-2"', hetag = "42",
+  resource = { id = "stored-2", device_profile_uri = "svcs.myharmony.com/res/device/80000002-x", services = {} },
+}
+r = getResource("proxy.resource?get", nil, { uri = "content://1.0/device/80000002-x" })
+check("stored device content: the hub's own file, untouched",
+  r.data.code == "200" and r.data.etag == '"etag-2"' and r.data.hetag == "42" and
+  r.data.resource.id == "stored-2", encode(r))
+
+r = getResource("proxy.resource?get", nil, { uri = "harmony://Account/1/InstallerInfo" })
+check("other missing resources: still 404", r.data.code == "404", encode(r))
 
 print(string.format("%d/%d checks passed", count - failures, count))
 os.exit(failures == 0 and 0 or 1)
