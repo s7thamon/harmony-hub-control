@@ -165,6 +165,10 @@ sent exactly as the hub returned them.
 - After a save it asks the owner to sync the Touch from its menu and
   says why: until then, a moved or changed button can run its new
   action under its old label.
+- When the hub reports a failed save, the editor reloads and compares:
+  if the hub has the edits, it says they were saved; if the screen is as
+  the editor found it, it says nothing changed and keeps the edits; if
+  the screen changed some other way, it shows what the hub has now.
 
 Tests: `tools/webui-sim/test/touch-model.test.mjs` covers each edit,
 byte-identical carry-through of every other map and button, key order,
@@ -223,3 +227,22 @@ with hub logging running:
 
 Stop and report if the Touch shows no screen or an error after any
 sync.
+
+## Saves while the engine is busy
+
+A save writes the resources, reloads the engine, then waits for the
+activity engine before it answers. An activity that is starting can
+hold the engine for a long time. `codex_webui` gives the whole save 45 s
+and, without an answer, reports a failure and asks the plugin to put
+the old resources back, though the reloaded engine already runs the new
+ones; when that request also goes unanswered, the save stays. So the
+plugin's wait ends by the clock after 25 s, leaving room for the writes
+and the reload, and then answers; a slow engine is reported, not
+treated as a failure. `tools/touch-validator/codexactivity-barrier-test.lua`
+checks the wait against a fake clock and against the limit in
+`codex_webui.c`.
+
+Owner check after deploying a change to this path: start an activity
+from the Touch, and while it is still starting, rename one on-screen
+button and save. The save succeeds; sync the Touch and confirm the
+label; rename it back, save and sync.

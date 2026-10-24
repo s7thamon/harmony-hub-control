@@ -203,6 +203,23 @@ function rowShape({ buttonId, slot, label, action }) {
   return { buttonId, slot, label, action };
 }
 
+/* New buttons get their ids on save, so compare what the screen shows. */
+function screenShape({ slot, label, action }) {
+  return { slot, label, action };
+}
+
+/**
+ * After a save the hub didn't confirm, what the hub has now:
+ * "saved" (the draft is on the hub), "unchanged" (the screen is as the
+ * draft found it) or "changed" (something else). A save can land even when
+ * the hub reports a failure, so the editor asks rather than assumes.
+ */
+export function saveOutcome(config, draft) {
+  if (JSON.stringify(touchMap(config, draft.activityId)) === draft.base) return "unchanged";
+  const now = readTouchScreen(config, draft.activityId).rows.map(screenShape);
+  return JSON.stringify(now) === JSON.stringify(draft.rows.map(screenShape)) ? "saved" : "changed";
+}
+
 /* -- Writing the MapList ------------------------------------------------------ */
 
 function harmonyDate(now) {

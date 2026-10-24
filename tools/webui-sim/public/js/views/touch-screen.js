@@ -14,6 +14,7 @@ import {
   neighbourOf,
   readTouchScreen,
   removeButton,
+  saveOutcome,
   setCommand,
   setLabel,
   touchSavePayload,
@@ -346,10 +347,25 @@ export function createTouchScreenView(section) {
       draft = readTouchScreen(hub.state.config, activityId);
       snackbar("Saved. Now sync the Touch from its menu.");
     } catch (error) {
-      // A refused save usually means the setup changed elsewhere: reload it,
-      // so trying again saves onto the latest copy.
+      // The hub can apply a save and still report a failure (a slow engine),
+      // so look at what it has now before saying what happened.
       await hub.reloadConfig();
-      snackbar(`Couldn't save — ${error.message || "hub error"}`, { error: true });
+      const outcome = hub.state.configError ? "unknown" : saveOutcome(hub.state.config, draft);
+      if (outcome === "saved") {
+        dirty = false;
+        saved = true;
+        draft = readTouchScreen(hub.state.config, activityId);
+        snackbar("Saved, though the hub was slow to confirm. Now sync the Touch from its menu.");
+      } else if (outcome === "unchanged") {
+        snackbar(`Not saved — ${error.message || "hub error"}. Nothing changed on the hub; your changes are still here, so you can try again.`, { error: true });
+      } else if (outcome === "changed") {
+        dirty = false;
+        saved = true;
+        draft = readTouchScreen(hub.state.config, activityId);
+        snackbar(`The hub didn't confirm the save, and its copy of this screen changed. This shows what the hub has now; sync the Touch from its menu.`, { error: true });
+      } else {
+        snackbar(`Couldn't save — ${error.message || "hub error"}. Reload to see what the hub has.`, { error: true });
+      }
     } finally {
       saving = false;
       if (!section.hidden) render();
