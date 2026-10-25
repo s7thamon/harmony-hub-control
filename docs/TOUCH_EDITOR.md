@@ -89,7 +89,8 @@ only. Editors work to these rules:
 | Map | Owned | Carried through |
 | --- | --- | --- |
 | `16417Activity<id>` | On-screen buttons, their sequences, gestures | Number pad, hard buttons, Touch-only actions |
-| `16417Device<id>` | On-screen buttons (device screens slice) | Everything else on the map |
+| `16417Device<id>` made on the hub | The whole map, rebuilt from the device's commands (`POST /api/device-screen`) | Map and button IDs |
+| `16417Device<id>` made by Logitech | Nothing | The whole map |
 | `16414*`, any root map | Nothing | The whole map |
 
 The activity wizard (web and Android) owns each activity's
@@ -141,8 +142,10 @@ fixed:
 Device screens follow the same reader, but real device maps exist with
 two soft buttons at one slot in different function groups, where one
 shadows the other on the hub. How the Touch numbers slots per group is
-unproven, so no slot rule is written for device maps until that is
-probed on hardware. The device screens slice starts with that probe.
+unproven, so no slot rule is written for editing such maps. The screens
+the hub builds (`POST /api/device-screen`, see API.md) don't need one:
+every on-screen button is in function group 0 with a slot of its own,
+like Logitech's own simplest device maps.
 
 ## Validation
 
@@ -232,8 +235,13 @@ starts.
 - (b) The web editor for activity on-screen buttons: label, action,
   explicit reorder, add and remove.
 - (c) Sequences in the editor, then gestures.
-- (d) Device screens, including creating a screen for a device that has
-  none, after the slot probe.
+- (d) Device screens. The hub builds a screen for a device that has none
+  from its commands, and keeps Home Assistant devices' screens with the
+  device set. Proven on 2026-10-24 with an IR device and a Home
+  Assistant light: a `16417Device<id>` map alone, with no
+  `DeviceFunctionMap` (the Touch never pulls FunctionList), opens the
+  device, and its on-screen buttons and hard keys both send. Editing a
+  device screen button by button is still to come.
 - (e) Android parity: the fixed-slot policy in its touch screen graph,
   tests for it, and the shared rules above.
 

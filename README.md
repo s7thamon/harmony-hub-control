@@ -62,6 +62,10 @@ Melodious has four parts:
 - **Harmony Touch screen**: rename, re-point, move, add and remove an
   activity's on-screen buttons. Buttons keep their places unless you move
   them, and the Touch shows the change after its next sync.
+- **Harmony Touch device screens**: on the Touch, Devices then a device
+  opens its own screen, with its commands on screen and on the hard keys.
+  The hub builds it from the device's commands (a device's ⋮ → Make Touch
+  screen); Home Assistant devices get one automatically.
 - **Devices**: add and edit devices, learn codes from your original remotes,
   import codes (IRDB, Flipper `.ir` files, `name|mode|code` lines, Pronto hex
   or RemoteCentral pages) or type them in, and set each device's power, inputs
@@ -87,6 +91,10 @@ Melodious has four parts:
   activity selector, sensors and a power-off button). It takes activity
   changes, IR commands and raw hub-engine commands on its topics, under
   `harmony/hub` by default. Set it up at install time or in Settings → MQTT.
+- **Home Assistant devices**: the [Melodious integration](https://github.com/schlambos/ha-melodious)
+  turns Home Assistant entities into ordinary hub devices that work in
+  activities, on the remote's buttons and on their own Touch screens. See
+  [docs/HOME_ASSISTANT.md](docs/HOME_ASSISTANT.md).
 - **A local HTTP API** for scripts: start activities, send IR, and read the
   hub's state and setup. See [docs/API.md](docs/API.md).
 
@@ -395,6 +403,8 @@ What the app adds:
   off, and for commands to send when the activity starts or ends.
 - **On-screen buttons**: an editor for an activity's on-screen buttons and
   sequences.
+- **Touch device screens**: a device page's ⋮ makes, rebuilds or removes
+  the device's Harmony Touch screen.
 - **Phone extras**: a Quick Settings tile ("Melodious: Turn off"), a
   home-screen widget that starts activities or turns everything off, and
   lock-screen controls (volume, play and pause, turn off) while something is
@@ -623,6 +633,7 @@ node tools/shipped_copy_hygiene.mjs               # no personal names or IDs in 
 python3 tools/installer_contract_smoke.py         # the installers' contract, with a fake hub
 python3 -m unittest discover -s tools/reconciliation -p 'test_*.py'   # provenance; 12 known failures
 luajit tools/touch-validator/codexactivity-ha-devices-test.lua         # the hub's Home Assistant device writer
+luajit tools/touch-validator/codexactivity-device-screens-test.lua     # the hub's Touch device screens
 (cd Android && ./gradlew :core-protocol:test)    # Android protocol and graph tests
 node --test desktop/test/                         # macOS app units
 (cd desktop && npm run test:e2e)                  # macOS app end-to-end, against the simulator

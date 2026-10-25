@@ -3000,6 +3000,55 @@ out:
     free(reply);
 }
 
+/* One device's Touch screen: {"deviceId":..,"remove":bool,"dryRun":bool}.
+   codexactivity builds the screen from the device's commands (or removes
+   it), saves MapList with a new etag, reloads the engine and publishes, so
+   the Touch pulls it. Its JSON reply is the response body. */
+static void render_device_screen_json(int fd, const struct request *req) {
+    char device_id[32], request_id[96], msg[768], reply[4096];
+    char request[256];
+    int written, rc, dry_run, remove;
+    FILE *f;
+    device_id[0] = 0;
+    if (req->body) json_string(req->body, "deviceId", device_id, sizeof(device_id));
+    if (!safe_device_id(device_id)) {
+        f = send_json_start(fd, "400 Bad Request");
+        if (f) {
+            fputs("{\"ok\":false,\"error\":\"body must contain a numeric deviceId\"}\n", f);
+            fclose(f);
+        }
+        return;
+    }
+    dry_run = json_bool(req->body, "dryRun", 0);
+    remove = json_bool(req->body, "remove", 0);
+    snprintf(request_id, sizeof(request_id), "%ld-%ld-%s",
+        (long)getpid(), (long)time(NULL), device_id);
+    written = snprintf(request, sizeof(request),
+        "{\"id\":\"%s\",\"op\":\"CommitDeviceScreen\",\"deviceId\":\"%s\",\"remove\":%s,\"dryRun\":%s}",
+        request_id, device_id, remove ? "true" : "false", dry_run ? "true" : "false");
+    if (!dry_run) backup_resources();
+    reply[0] = 0;
+    msg[0] = 0;
+    rc = offline_writer_request(request, (size_t)written, request_id,
+        reply, sizeof(reply), msg, sizeof(msg));
+    if (reply[0] == '{') {
+        f = send_json_start(fd, rc == 0 ? "200 OK" : "422 Unprocessable Entity");
+        if (f) {
+            fputs(reply, f);
+            fputc('\n', f);
+            fclose(f);
+        }
+    } else {
+        f = send_json_start(fd, "503 Service Unavailable");
+        if (f) {
+            fputs("{\"ok\":false,\"localOnly\":true,\"error\":", f);
+            json_write_string(f, msg[0] ? msg : "The Touch screen was not saved.");
+            fputs("}\n", f);
+            fclose(f);
+        }
+    }
+}
+
 static int safe_activity_id(const char *value) {
     char *end;
     long id;
@@ -10177,6 +10226,8 @@ static void handle_client(int client) {
         render_device_settings_json(client, &req);
     } else if (strcmp(req.method, "POST") == 0 && strcmp(req.path, "/api/ha-devices") == 0) {
         render_ha_devices_json(client, &req);
+    } else if (strcmp(req.method, "POST") == 0 && strcmp(req.path, "/api/device-screen") == 0) {
+        render_device_screen_json(client, &req);
     } else if (strcmp(req.method, "POST") == 0 && strcmp(req.path, "/api/activity-sync") == 0) {
         render_activity_sync_json(client);
     } else if (strcmp(req.method, "GET") == 0 && strcmp(req.path, "/api/inventory") == 0) {

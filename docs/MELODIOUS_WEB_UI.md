@@ -76,7 +76,7 @@ content centred.
 | FixItSheet | Fix-it sheet: per-device "It's off" / "Switch to HDMI 1" resend through `/api/ir-send` | 1 |
 | SleepTimerPill/Sheet | — | Android-only (see below) |
 | `devices/DevicesScreen` DevicesTab | Devices tab: search devices or commands; grouped list with icon, model, command count and IR/Bluetooth badge | 1 |
-| DeviceDetailScreen | Device page with Remote and Commands tabs (tap a command to send it; search) | 1 |
+| DeviceDetailScreen | Device page with Remote and Commands tabs (tap a command to send it; search); ⋮ Make, Rebuild or Remove Touch screen | 1 |
 | Learn and Import sheets | Learn a button, Import codes (Find codes, Paste, Type a code) | 3 |
 | `devices/DeviceSettingsScreen` | Device settings page: Power, Turning on, Inputs (web-only), Timing | 3 |
 | `activities/ActivitiesScreen` | Activities tab: running card, rows with Start and a ⋮ menu (Edit, Set up buttons, Try the buttons, Advanced editor, Move up / down, Delete) | 2 |

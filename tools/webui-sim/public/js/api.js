@@ -87,6 +87,15 @@ export function saveDeviceSettings({ deviceId, settings }) {
   });
 }
 
+// Make, rebuild or remove one device's Touch screen; the hub builds it from
+// the device's commands.
+export function saveDeviceScreen({ deviceId, remove = false }) {
+  return request("/api/device-screen", {
+    method: "POST",
+    body: { deviceId: String(deviceId), remove },
+  });
+}
+
 export function importCatalog({ deviceId, commands }) {
   return request("/api/catalog-import", {
     method: "POST",

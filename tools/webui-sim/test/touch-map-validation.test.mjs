@@ -70,6 +70,19 @@ describe("codexactivity.lua validateGraph (LuaJIT)", () => {
     });
     assert.match(out, /5\/5 checks passed/);
   });
+
+  it("builds, rebuilds and removes Touch device screens, and keeps Home Assistant devices' screens", (t) => {
+    const probe = spawnSync("luajit", ["-v"], { encoding: "utf8" });
+    if (probe.error || probe.status !== 0) {
+      t.skip("luajit is not available");
+      return;
+    }
+    const out = execFileSync("luajit", ["tools/touch-validator/codexactivity-device-screens-test.lua"], {
+      cwd: new URL("../../../", import.meta.url).pathname,
+      encoding: "utf8",
+    });
+    assert.match(out, /34\/34 checks passed/);
+  });
 });
 
 describe("netservicestarter.lua Touch Sync guards (LuaJIT)", () => {

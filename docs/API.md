@@ -284,11 +284,66 @@ after a resource backup unless `dryRun` is true.
   the engine and publishes a new revision, so a paired Touch pulls it. An
   unchanged set saves nothing.
 
+- On a hub with a Harmony Touch, each device also gets a Touch screen
+  built from its commands (see [Touch device screens](#touch-device-screens)),
+  rebuilt when its commands change and removed with the device. Its own
+  screen doesn't count as a use. MapList is saved after DeviceList and
+  reloaded with it.
+
 The writer's reply is the body: `200` with `ok`, `changed`, `dryRun`,
-the `added`, `updated`, `removed` and `unchanged` device names, and
-`devices` (`entity`, `deviceId`, `name`). A non-object body gives `400`;
+`screensChanged`, the `added`, `updated`, `removed` and `unchanged`
+device names, and `devices` (`entity`, `deviceId`, `name`). A non-object body gives `400`;
 a writer refusal gives `422` with `error`; a writer that cannot be
 reached gives `503`. See [HOME_ASSISTANT.md](HOME_ASSISTANT.md).
+
+## Touch device screens
+
+On the Harmony Touch, Devices then a device opens that device's screen.
+The Touch builds it from the device's `16417Device<id>` map in MapList
+alone: its sync never pulls FunctionList, so no `DeviceFunctionMap` is
+needed. A device without the map is listed but opens nothing.
+
+Make, rebuild or remove one device's screen (`render_device_screen_json()`):
+
+```text
+POST /api/device-screen
+Content-Type: application/json
+```
+
+```json
+{"deviceId": "40000001", "remove": false, "dryRun": false}
+```
+
+The request goes to the offline writer as a `CommitDeviceScreen`
+operation, after a resource backup unless `dryRun` is true. The writer
+builds the screen from the device's commands:
+
+- A hard key takes the first command named exactly as one of the
+  activity wizard's aliases for it (`VolumeUp`, `Mute`, `Return` for
+  Back, `Select`, the arrows, transport and colour keys, and so on). The
+  volume keys also take `BrightnessUp` and `BrightnessDown`.
+- Every other command is an on-screen button in the device's command
+  order, labelled with its name. Each takes its own slot (`IndexInMenu`
+  0, 1, 2…, `FunctionGroupType` 0, `MenuName` `Device.<id>`), so no two
+  buttons share a slot. Digits are on-screen buttons too, not a number
+  pad.
+- The map copies its surface and remote IDs from a Touch map the hub
+  already has; a hub with none is refused. New map and button IDs come
+  from above Logitech's floors, and a rebuild keeps the IDs of the
+  buttons it keeps.
+- A screen Logitech made (map ID at or below 52944089) is never rebuilt
+  or removed.
+
+Only MapList is saved, with a new etag, then the engine reloads it and
+the hub publishes a new revision, so the Touch pulls the screen by
+itself. An unchanged screen saves nothing. Home Assistant devices get
+their screens from `/api/ha-devices` instead.
+
+The writer's reply is the body: `200` with `ok`, `changed`, `dryRun`,
+`removed`, `deviceId`, `hardKeys` (the keys used) and `onScreen` (how
+many on-screen buttons). A missing or non-numeric `deviceId` gives
+`400`; a writer refusal gives `422` with `error`; a writer that cannot be
+reached gives `503`.
 
 ## Inventory
 
@@ -538,12 +593,13 @@ Harmony command. This avoids losing the first key while the native HAL is
 still connecting.
 
 Physical Harmony remotes require more configuration than direct WebGUI
-control. A Bluetooth device must have both a `DeviceFunctionMap` and a
-`DeviceButtonMap`; otherwise it can appear in the remote's Devices list
-but tapping it has no selectable menu. `tools/bluetooth_device_bridge.mjs`
-clones both maps from a known working Bluetooth template, allocates unique
-map and button identities, and rewrites the `Device.<id>` menu keys for
-the target.
+control. A device needs a `16417Device<id>` button map; otherwise it can
+appear in the remote's Devices list but tapping it has no selectable
+menu (see [Touch device screens](#touch-device-screens), which builds
+one). `tools/bluetooth_device_bridge.mjs`
+clones both device maps from a known working Bluetooth template,
+allocates unique map and button identities, and rewrites the
+`Device.<id>` menu keys for the target.
 
 Activity soft-button maps have the same constraint: every
 `MenuItem.MenuName` must be `Activity.<ActivityId->`. The activity editor
@@ -856,6 +912,7 @@ carries.
 | POST | `/api/activity-save` | `render_activity_save_json()` |
 | POST | `/api/device-settings` | `render_device_settings_json()` |
 | POST | `/api/ha-devices` | `render_ha_devices_json()` |
+| POST | `/api/device-screen` | `render_device_screen_json()` |
 | POST | `/api/activity-sync` | `render_activity_sync_json()` |
 | GET | `/api/inventory` | `render_inventory_json()` |
 | GET | `/api/state` | `render_state_json()` |
