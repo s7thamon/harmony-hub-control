@@ -89,7 +89,8 @@ only. Editors work to these rules:
 | Map | Owned | Carried through |
 | --- | --- | --- |
 | `16417Activity<id>` | On-screen buttons, their sequences, gestures | Number pad, hard buttons, Touch-only actions |
-| `16417Device<id>` | On-screen buttons (device screens slice) | Everything else on the map |
+| `16417Device<id>` made on the hub | The whole map, rebuilt from the device's commands (`POST /api/device-screen`) | Map and button IDs |
+| `16417Device<id>` made by Logitech | Nothing | The whole map |
 | `16414*`, any root map | Nothing | The whole map |
 
 The activity wizard (web and Android) owns each activity's

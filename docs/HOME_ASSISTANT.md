@@ -73,8 +73,8 @@ unchanged set saves nothing, so a Home Assistant restart that pushes the
 same set does not make the Touch sync.
 
 The 2026-10-24 spike wrote through `/import`, so it probably never put
-its device on the Touch. Whether the Touch accepts an IP device is still
-untested.
+its device on the Touch. The writer's gate later the same day showed the
+Touch accepts an IP device: it lists it and sends its commands.
 
 ## What the Touch shows
 
