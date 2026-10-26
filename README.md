@@ -45,70 +45,112 @@ Melodious has four parts:
 
 ### Works without Logitech's cloud
 
-- Logitech's cloud services don't start and the hub has no route to the
-  internet, while local control, discovery and MQTT keep working.
-- Your Harmony remote gets its setup from the hub when it syncs, so a cloud
-  copy can't overwrite your changes.
-- The hub keeps its clock right over NTP.
+- **100% local operation**: Logitech's cloud services don't start and the hub
+  has no route to the internet, while local control, SSDP/mDNS discovery,
+  Home Assistant webhooks and MQTT keep working.
+- **Automatic local remote sync**: your paired Harmony Touch or Ultimate gets
+  its setup straight from the hub whenever a change is published—no MyHarmony
+  account, no desktop sync cable, and no risk of a cloud copy overwriting
+  your local edits.
+- **Local clock & offline guards**: the hub keeps its clock over NTP, answers
+  the paired remote's time and connectivity checks locally, and synthesizes
+  missing device content records (`CD_<id>`) so remote syncs never stall.
 - System → Cloud egress turns the cloud blocker on; the web app has no control
   to turn it off.
 
-### Set up everything yourself
+### First-class Harmony Touch & physical remote control
 
-- **Activities**: a guided wizard for the devices, inputs and buttons, and an
-  advanced editor for roles, button maps and the activity's JSON. Each save is
-  checked and written on the hub as one transaction, and the paired remote
-  picks it up the next time it syncs.
-- **Harmony Touch screen**: rename, re-point, move, add and remove an
-  activity's on-screen buttons. Buttons keep their places unless you move
-  them, and the Touch shows the change after its next sync.
-- **Harmony Touch device screens**: on the Touch, Devices then a device
-  opens its own screen, with its commands on screen and on the hard keys.
-  The hub builds it from the device's commands (a device's ⋮ → Make Touch
-  screen); Home Assistant devices get one automatically.
-- **Devices**: add and edit devices, learn codes from your original remotes,
-  import codes (IRDB, Flipper `.ir` files, `name|mode|code` lines, Pronto hex
-  or RemoteCentral pages) or type them in, and set each device's power, inputs
-  and timing. The macOS app also imports a device's codes from Logitech's
-  catalog, through your Logitech account.
-- **Finding codes**: send every command a device has, in turn, to find the
-  ones it answers to, or try codes on the IR lab's scratch device.
+- **On-screen buttons editor (`#touch/<activityId>`)**: rename, re-point,
+  reorder, add and remove an activity's on-screen buttons on the Harmony
+  Touch. Buttons keep their fixed menu slots unless you explicitly swap them
+  (filling index gaps cleanly), and the Touch pulls the new layout by itself
+  within seconds of saving. See [docs/TOUCH_EDITOR.md](docs/TOUCH_EDITOR.md).
+- **Harmony Touch device screens (`POST /api/device-screen`)**: on the Touch,
+  tapping **Devices** then any device opens its own dedicated screen, with its
+  commands mapped to both the on-screen list and the physical hard keys. The
+  hub builds or rebuilds a screen from any device's commands (a device's ⋮ →
+  **Make Touch screen** in the web or Android app), and Home Assistant devices
+  get one automatically.
+- **Map any device to any button or gesture**: bind IR, Bluetooth HID, or
+  Home Assistant IP commands to physical **hard keys**, **on-screen rows**,
+  **number-pad digits**, or **Touch swipe/tap gestures** (`SwipeUp`,
+  `SwipeDown`, `SwipeLeft`, `SwipeRight`, `Tap`)—including **non-member Home
+  Assistant devices** (such as room lights or a Chromecast Audio) inside any
+  activity without the activity turning them on or off at start and end.
+- **Hold-to-ramp & one-shot toggle protection**: continuous commands
+  (`VolumeUp`/`Down`, `BrightnessUp`/`Down`, `SpeedUp`/`Down`) repeat every
+  300 ms while held on a key, row, or hold-swipe for smooth ramping, while
+  toggle and single-shot commands (`PowerToggle`, `PlayPause`, `Mute`,
+  `SkipForward`/`Back`) support **self-long press arming** so the hub fires
+  exactly once per press—never double-toggling on a slow tap or hold.
+
+### Two-way Home Assistant & LAN device control
+
+- **Home Assistant entities as native Harmony devices (`Transport 64`)**: the
+  [Melodious Home Assistant integration](https://github.com/schlambos/ha-melodious)
+  and `tools/ha_devices.mjs` turn Home Assistant entities (`light`,
+  `media_player`, `switch`, `input_boolean`, `fan`, `cover`, `script`,
+  `scene`, `button`) into first-class IP devices on the hub and the Harmony
+  Touch. Control smart lights, Chromecast Audio, LAN-connected TVs, and scenes
+  directly from physical remote buttons, Touch screens, and activities over
+  fast local HTTP webhooks. See [docs/HOME_ASSISTANT.md](docs/HOME_ASSISTANT.md).
+- **MQTT bridge with Home Assistant discovery**: publishes the hub's status,
+  the running activity and device counts, and Home Assistant discovery (an
+  activity selector, sensors and a power-off button). It accepts activity
+  changes, IR commands and raw hub-engine commands under `harmony/hub` by
+  default. Set it up at install time or in Settings → MQTT.
+- **A local HTTP API** for scripts and automation: start activities, send IR,
+  Bluetooth or IP device commands, manage Touch screens, and read or update
+  the hub's state and setup. See [docs/API.md](docs/API.md).
+
+### Set up every device and activity yourself
+
+- **Activities**: a guided 5-step wizard for the devices, power order, inputs
+  and buttons (36 keys, each with press and hold actions mirrored to both
+  standard and Harmony Touch button maps), plus an advanced editor for roles,
+  per-surface button maps, gestures and the activity's JSON. Each save is
+  validated and committed on the hub as one atomic transaction.
+- **Devices & code import**: add and edit devices, learn IR codes from your
+  original remotes, import codes (IRDB search, Flipper `.ir` files,
+  `name|mode|code` lines, Pronto hex or RemoteCentral pages) or type them in,
+  and configure each device's power, warm-up, inputs and timing.
+- **Logitech catalog lookup (macOS & Android)**: sign in to your own Logitech
+  account in the macOS or Android app, search Logitech's device catalog by
+  brand and model, preview every command (including any skipped protocol and
+  why), and import directly to your hub. Your Logitech credentials stay in
+  your macOS Keychain or Android Keystore and never touch the hub.
+- **Finding codes (IR sweep & lab)**: send every command a device has, in
+  turn, with configurable delay and dry-run mode to find the ones your
+  hardware responds to, or test candidate codes on the IR lab's scratch
+  device.
 
 ### Control it your way
 
-- **The web app** on any phone or computer, served by the hub.
-- **The Android app**, with a touchpad, a sleep timer, lock-screen
-  controls, a home-screen widget and a Quick Settings tile.
-- **The macOS app**, with Logitech catalog lookup.
-- **A Bluetooth keyboard**: the hub pairs with a TV, streaming box or computer
-  as a keyboard, so you can type searches and passwords from your phone, and
-  run saved keystroke scripts.
-
-### Connect it to your smart home
-
-- **MQTT and Home Assistant**: the bridge publishes the hub's status, the
-  current activity and device counts, and Home Assistant discovery (an
-  activity selector, sensors and a power-off button). It takes activity
-  changes, IR commands and raw hub-engine commands on its topics, under
-  `harmony/hub` by default. Set it up at install time or in Settings → MQTT.
-- **Home Assistant devices**: the [Melodious integration](https://github.com/schlambos/ha-melodious)
-  turns Home Assistant entities into ordinary hub devices that work in
-  activities, on the remote's buttons and on their own Touch screens. See
-  [docs/HOME_ASSISTANT.md](docs/HOME_ASSISTANT.md).
-- **A local HTTP API** for scripts: start activities, send IR, and read the
-  hub's state and setup. See [docs/API.md](docs/API.md).
+- **The web app** on any phone, tablet or computer, served directly by the hub
+  with zero external dependencies.
+- **The Android app**, with a swipe touchpad, a hub sleep timer, lock-screen
+  media controls, phone volume-button routing, a home-screen widget, a Quick
+  Settings tile, Logitech catalog import, and built-in SSH lockout/service
+  recovery.
+- **The macOS app**, running the Melodious interface in a native desktop
+  window with integrated Logitech catalog lookup.
+- **Bluetooth HID keyboard**: pair the hub with a TV, streaming box (such as
+  NVIDIA SHIELD / Google TV) or computer as a Bluetooth keyboard and remote,
+  type searches and passwords from your phone, and run saved keystroke
+  scripts.
 
 ### Keep it yours
 
 - **Backup and restore**: download ten single exports (devices, functions,
   protocols, activities, button maps, automation, MQTT, Wi-Fi, cloud blocker
-  and Bluetooth) or one owner bundle with all ten, and restore from a file. A
-  restore is checked before it runs and asks you to confirm. The hub also
-  keeps its own backups before each change.
+  and Bluetooth) or one complete owner bundle with all ten, and restore from a
+  file with pre-flight validation. The hub also keeps automatic rolling
+  backups before every write.
 - **Wi-Fi recovery**: if the hub can't join your Wi-Fi, hold its reset button.
   The hub starts an open recovery network, `Harmony-Recovery-xxxxxx`, with a
-  page at `http://192.168.76.1/` where you enter the Wi-Fi details again.
-- **Sign-in**: an optional username and password for the web app and its API.
+  setup portal at `http://192.168.76.1/`.
+- **Sign-in**: an optional HTTP Basic username and password for the web app
+  and its API.
 
 ## Quick start
 
@@ -492,6 +534,112 @@ Without the app, the same tab opens a package downloaded with
 
 <sub>The catalog screenshots use test data, not a real Logitech account.</sub>
 
+## Harmony Touch, button mapping & Home Assistant control
+
+Melodious gives a paired Harmony Touch (or Harmony Ultimate) full local control
+over IR, Bluetooth HID, and Home Assistant LAN devices, without ever connecting
+to MyHarmony.
+
+### 1. Home Assistant entities as native Hub & Touch devices
+
+With the [Melodious Home Assistant integration](https://github.com/schlambos/ha-melodious)
+(installed via HACS) or the command-line tool (`tools/ha_devices.mjs`), any
+Home Assistant entity you pick becomes an ordinary device on the hub using IP
+transport (`TransportType: 64`):
+
+| Home Assistant domain | Generated Hub & Touch commands | Power & inputs |
+| --- | --- | --- |
+| `light` | `PowerOn`, `PowerOff`, `PowerToggle`, plus `BrightnessUp` and `BrightnessDown` (±10 %) for dimmable lights | Discrete `PowerOn` / `PowerOff` |
+| `media_player` | `PowerOn`, `PowerOff`, `VolumeUp`, `VolumeDown`, `Mute`, `Play`, `Pause`, `PlayPause`, `Stop`, `SkipForward`, `SkipBack` (as supported), plus one `Input <source>` per source | Discrete `PowerOn` / `PowerOff` and selectable inputs |
+| `switch`, `input_boolean` | `PowerOn`, `PowerOff`, `PowerToggle` | Discrete `PowerOn` / `PowerOff` |
+| `fan` | `PowerOn`, `PowerOff`, `PowerToggle`, `SpeedUp`, `SpeedDown` | Discrete `PowerOn` / `PowerOff` |
+| `cover` | `Open`, `Close`, `Stop` | None |
+| `script`, `scene` | `Run` / `Activate` | None |
+| `button`, `input_button` | `Press` | None |
+
+- **Automatic Touch device screens (`16417Device<id>`)**: whenever the Home
+  Assistant device set changes, the hub automatically builds or updates each
+  entity's Touch device screen. On the Touch, tap **Devices** and select the
+  entity: `BrightnessUp`/`Down` or `VolumeUp`/`Down` map to the physical volume
+  rocker, media transport commands (`Play`, `Pause`, `Stop`, `SkipForward` →
+  `FastForward`, `SkipBack` → `Rewind`, `Mute`) map to the physical keys, and
+  power/input commands appear as on-screen rows.
+- **Dynamic feature merging**: if a media player (such as a Chromecast Audio or
+  network TV) reports `SkipForward` and `SkipBack` once media is queued, the
+  integration merges the new commands into the device without dropping earlier
+  ones, and binds them to the physical `FastForward` and `Rewind` keys so no
+  existing on-screen row slot shifts.
+- **Touch screens for IR and Bluetooth devices**: any device on the hub can get
+  a generated Touch screen at any time from its page in the web or Android app
+  (⋮ → **Make Touch screen**, **Rebuild Touch screen**, or **Remove Touch
+  screen**, via `POST /api/device-screen`).
+
+### 2. Mapping buttons, rows and gestures across activities
+
+The Harmony Touch reads its controls from `16417Activity<id>` and
+`16417Device<id>` maps in the hub's `MapList`:
+
+- **Physical hard keys (`HardRemoteButton`)**: the activity wizard (web and
+  Android) automatically mirrors hard-key bindings to both `16414Activity<id>`
+  (hub/companion surface) and `16417Activity<id>` (Harmony Touch surface).
+- **On-screen rows (`SoftRemoteButton`)**: open Activities → ⋮ → **Set up
+  buttons** / **On-screen buttons** (`#touch/<activityId>`) in the web or
+  Android app to add, rename, re-point, swap, or delete on-screen buttons. Each
+  row keeps its fixed `MenuItem.IndexInMenu` slot unless you explicitly move
+  it, and new rows fill the lowest free slot first.
+- **Non-member devices inside any activity**: the hub executes
+  `ButtonCommandAction` bindings for any device in `DeviceList`, even when that
+  device is **not** an activity member role. You can map room lamps onto unused
+  hard keys (such as the colour keys, channel rocker, or D-pad), add lamp or
+  scene rows onto the **Watch TV** Touch screen, or route a Chromecast Audio's
+  transport keys inside a **Music** activity without the activity powering
+  those devices on or off at start and end.
+- **Swipe and tap gestures (`GestureRemoteButton`)**: on the Touch's gesture
+  pad, `SwipeUp`, `SwipeDown`, `SwipeLeft`, `SwipeRight`, and `Tap` resolve
+  locally on the Touch against the target device's `16417Device<id>` screen and
+  send that device button's command to the hub. Any gesture that resolves to a
+  hard key on the target device screen (such as `VolumeUp`/`VolumeDown` for
+  lamp brightness or receiver volume) passes when that hard key is also mapped
+  in the activity.
+
+### 3. Hold-to-ramp vs. one-shot toggle protection
+
+Hardware testing on the Hub and a rooted Harmony Touch established the exact
+press and hold behavior across all three transports (IR `1`, Bluetooth HID
+`32`, and Home Assistant IP `64`):
+
+- **Hold-to-ramp (plain buttons & hold-swipes)**: while a button or a hold-swipe
+  is held on the Touch, it sends `control.button?hold` every **300 ms**. For IP
+  (`Transport 64`) commands, the hub sends one webhook `POST` on initial
+  `press` and one per `hold` (nothing on `release`), so holding a brightness or
+  volume key—or holding your finger at the end of a swipe—smoothly ramps the
+  level.
+- **One-shot toggle protection (self-long press arming)**: on a plain IP
+  button, holding a toggle (`PowerToggle`, `PlayPause`, `Mute`, `SkipForward`,
+  `SkipBack`) for 300 ms or more sends a second `POST` on the first `hold` and
+  flips the device back. Setting `ButtonLongPressAction` (`EventType: 2`) to
+  the same device and command as `ButtonAction` ("self-long") engages the hub's
+  long-press state machine on both physical hard keys (`HardRemoteButton`) and
+  on-screen rows (`SoftRemoteButton`):
+  - Nothing fires on initial `press`.
+  - Releasing before ~600 ms fires the command **once** at `release`.
+  - Holding past the 2nd `hold` (~600 ms) fires the command **once**, treats
+    all further `hold` messages as heartbeats, and does nothing on `release`.
+
+### 4. Hardware verification & Touch reverse engineering
+
+The Touch↔Hub transport, binary button packers, menu-slot indexing, local
+gesture resolution, long-press state machine, and offline pull sync were
+verified end-to-end against both a rooted Harmony Hub and a rooted Harmony
+Touch (inspecting live `logread` traces over SSH on the hub and over the
+Touch's USB RNDIS interface). Rooting the hub or the remote is outside the
+scope of this repository, and **Melodious requires no modifications to the
+Harmony Touch's firmware**—an unmodified stock Harmony Touch or Harmony
+Ultimate paired to a Melodious hub gets every feature above automatically. See
+[docs/TOUCH_EDITOR.md](docs/TOUCH_EDITOR.md) and
+[docs/HOME_ASSISTANT.md](docs/HOME_ASSISTANT.md) for the full technical
+reference.
+
 ## How it works
 
 ```text
@@ -662,13 +810,16 @@ When `codex_webui` changes, update its pins in the build script and
 | Document | What it covers |
 | --- | --- |
 | [DESIGN.md](DESIGN.md) | The Melodious design system, shared by the web app and the Android app |
+| [docs/MELODIOUS_WEB_UI.md](docs/MELODIOUS_WEB_UI.md) | The web app's interface architecture, screen map, tokens and components |
 | [docs/API.md](docs/API.md) | The hub's HTTP API and the activity rules the paired remote needs |
-| [docs/HOME_ASSISTANT.md](docs/HOME_ASSISTANT.md) | Home Assistant entities as Harmony devices, and their hardware gate |
-| [docs/BUILD.md](docs/BUILD.md) | Building the MIPS binaries with the pinned toolchain |
-| [docs/PROTOCOLS.md](docs/PROTOCOLS.md) | The hub's own protocols and ports |
-| [docs/DESKTOP_APP.md](docs/DESKTOP_APP.md) | The macOS app's design and security model |
+| [docs/HOME_ASSISTANT.md](docs/HOME_ASSISTANT.md) | Home Assistant entities as Harmony devices, press/hold/one-shot semantics, and Touch routing |
+| [docs/TOUCH_EDITOR.md](docs/TOUCH_EDITOR.md) | Harmony Touch screen editing, button/gesture resolution, slot rules and validation |
+| [docs/ANDROID_CATALOG.md](docs/ANDROID_CATALOG.md) | Logitech catalog lookup and sign-in architecture in the Android app |
+| [docs/DESKTOP_APP.md](docs/DESKTOP_APP.md) | The macOS app's design, Logitech catalog lookup and security model |
 | [desktop/README.md](desktop/README.md) | Building, testing and releasing the macOS app |
 | [tools/catalog/README.md](tools/catalog/README.md) | The Logitech catalog helper for the command line |
+| [docs/BUILD.md](docs/BUILD.md) | Building the MIPS binaries with the pinned toolchain |
+| [docs/PROTOCOLS.md](docs/PROTOCOLS.md) | The hub's own protocols and ports |
 | [docs/SECURITY.md](docs/SECURITY.md) | Security notes and what never to commit |
 | [UNRAID.md](UNRAID.md) | Docker and Unraid |
 | [tools/webui-sim/README.md](tools/webui-sim/README.md) | The simulator and the web app's packaging |

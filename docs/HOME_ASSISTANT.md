@@ -2,234 +2,251 @@
 
 Home Assistant already controls the Hub through HA's built-in Harmony
 integration (WebSocket on 8088). This page covers the other direction:
-Home Assistant entities as ordinary Harmony devices, which can sit in
-activities, go on buttons and run from the web and Android apps.
+Home Assistant entities as ordinary Harmony devices on the Hub and the
+Harmony Touch—usable on their own Touch device screens, as activity
+members, or bound directly to any activity's hard keys, on-screen rows,
+and swipe gestures.
 
 ## How a command reaches Home Assistant
 
-- Each entity is a device in DeviceList whose commands are IP commands
+- Each entity is a device in `DeviceList` whose commands are IP commands
   (`TransportType` 64). The stock engine sends those through
   `harmonyengine/core/ipmanager.lua`, not the IR blaster.
-- All Home Assistant devices share one protocol, "Melodious Home
-  Assistant", whose `ControlSection` holds the request:
-  - `Url`: the integration's webhook;
+- All Home Assistant devices share one protocol, `Melodious Home
+  Assistant`, whose `ControlSection` holds the request:
+  - `Url`: the integration's webhook (`http://<ha-ip>:8123/api/webhook/...`);
   - `Method`: `POST`;
-  - `Header`: a JSON string;
+  - `Header`: `{"Content-Type":"application/json"}`;
   - `Body`: `{"device":"{d}","command":"{c}"}`;
   - `Timeout`: `"2"`.
 - The engine fills the placeholders with `string.gsub`: `{d}` from the
   device's `Tokens.Parameters` (the entity ID), `{c}` from the command's
   `Parameters` (an action the integration maps to a service call).
-- A tap sends one request. A held key repeats it about every 250 ms
-  until release.
-- The request comes from LuaSocket 2.0.2: plain `http://` only (the Hub
-  lacks the Let's Encrypt root), and the `Host` header has no port.
+- The engine's HTTP client can do TLS with certificate checking, but the
+  Hub's certificate bundle lacks the Let's Encrypt root (ISRG Root X1),
+  so in practice the webhook must be plain `http://`. Using a numeric IP
+  literal with an explicit port avoids a DNS lookup on every button press.
 - No Home Assistant token lives on the Hub; the webhook ID is the only
   secret.
 
+## Press, hold-to-ramp, and one-shot toggle semantics
+
+Hardware validation against the Hub and a Harmony Touch established the
+exact wire behavior for IP (`Transport 64`) buttons:
+
+- **Plain buttons (tap and hold-to-ramp):**
+  - A quick tap (< 300 ms) sends `press` followed by `release`. The Hub
+    fires one HTTP `POST` on `press` and sends nothing on `release`.
+  - Holding a button on the Harmony Touch sends `hold` every **300 ms**
+    (including hold-swipes on the Touch gesture pad). For a plain IP
+    button, the Hub turns **each `hold` into another identical HTTP
+    `POST`**. (The web UI keeps a hub-side hold alive with a 200 ms
+    heartbeat.)
+  - This is ideal for **idempotent** commands (`PowerOn`, `PowerOff`,
+    `Play`, `Pause`, `Stop`) and **momentary step** commands
+    (`BrightnessUp`, `BrightnessDown`, `VolumeUp`, `VolumeDown`,
+    `SpeedUp`, `SpeedDown`), where holding a key or a swipe smoothly
+    ramps brightness or volume.
+- **One-shot buttons (preventing double-toggles):**
+  - On a plain button, pressing a toggle or single-shot command
+    (`PowerToggle`, `PlayPause`, `Mute`, `SkipForward`, `SkipBack`, or a
+    scene/script) for 300 ms or longer fires a second `POST` on the
+    first `hold`, flipping the state right back.
+  - Assigning a **self-long press action** (`ButtonLongPressAction` with
+    `EventType: 2` pointing to the same device and command as
+    `ButtonAction`) engages the Hub's native long-press state machine
+    (`activity.lua:1937-1963`):
+    - Nothing is sent on initial `press`.
+    - Releasing before ~600 ms fires the short action **once** at
+      `release` (`modifier: fire`).
+    - Holding past the 2nd `hold` (~600 ms) fires the long action
+      **once** (`modifier: fire`); later `hold` messages act only as
+      heartbeats, and `release` sends nothing.
+  - This works identically on both `HardRemoteButton` (physical keys)
+    and `SoftRemoteButton` (on-screen rows), guaranteeing **exactly one
+    webhook call per press** regardless of how long the button is held.
+
 ## Rules the device data must follow
 
-Each one was learned on hardware. `codexactivity`'s `CommitHaDevices`
-writes them; nothing else should create these devices.
+Each rule was verified on hardware. `codexactivity`'s `CommitHaDevices`
+writes them automatically; nothing else should create these devices.
 
 1. **`Device.AutoDetectedDevice.Id` is set** (`melodious-ha-<deviceId>`).
    After every answered IP command the engine runs
    `capodDeviceList[params.uid] = nil`. Without a uid that throws, which
    kills the unprotected `ipqueuehandler` task: every later IP command
    drops silently until the Hub reboots, while the Hub still answers
-   200. The made-up Id never matches a real SSDP device.
+   200. The synthetic Id never matches a real SSDP device.
 2. **The protocol looks like an IR protocol:** `__type: "IrProtocol"`,
    `IRSegments: []`, `CodeSegments: []`, `CarrierFrequency: 38000`,
    `KeyCode: null`. `model/protocol.lua` reads `ControlSection` only for
    that type.
 3. **Each command has** `TransportType: 64`, the protocol's
-   `ProtocolId`, `KeyCode: ""`, `Raw: null` written out (the engine
-   string-slices `Raw` unless it is null), and its `{c}` parameter.
-   The device's `Transport` is 64, not 65 (65 adds an IR fallback).
-4. **The webhook always answers 200.** A 404 or no answer makes the
-   engine run an SSDP rescan inside the IP task. Unknown commands get
+   `ProtocolId`, `Raw: null` written out (the engine string-slices `Raw`
+   unless it is null, so a missing `Raw` throws), and its `{c}`
+   parameter. `KeyCode` may be `""` or null; `""` only logs a harmless
+   "Invalid command" when the engine loads the device. The device's
+   `Transport` is 64, not 65 (65 adds an IR fallback).
+4. **The webhook always answers 200.** For a device with an
+   `AutoDetectedDevice.Id` (every device here, rule 1), a 404 or no
+   answer makes the engine run an SSDP rescan inside the IP task, at
+   most once per 24 h. The scan blocks the IP task for about 10–35 s, so
+   IP commands queued meanwhile expire (rule 5). Unknown commands get
    200 too and are logged on the Home Assistant side.
 5. **The webhook answers fast.** The engine discards an IP command that
    waited more than 500 ms in its queue. The integration answers first
-   and calls the service afterwards.
-6. Devices Melodious makes have no `CD_<id>` content record. The offline
-   guard answers that request with an empty record (PR #54), so a Touch
-   menu Sync still finishes.
+   and calls the Home Assistant service afterwards.
+6. **Missing content records (`CD_<id>`) are answered locally.** Devices
+   Melodious makes have no `CD_<id>` content record. The offline guard
+   answers that request with an empty record, so a Touch sync always
+   completes cleanly.
 
-## Saving: why only the writer reaches the Touch
+## Saving: how changes reach the Touch
 
-The Touch asks the Hub for each list with `proxy.resource?get`, sending
-the etag and hetag it holds. The Hub answers 304 when both match its
-in-memory `index.json` (`harmonywebservices/apihandler/resource.lua`,
-`isResourceMatch`). A file written straight to disk, as `/import` and
-the IR device forms do, keeps its old etag. The Touch therefore keeps
-its old copy, even though the reload and publish make it sync.
+The Touch syncs by itself when the Hub's state digest shows a new
+`stateVersion` together with a new `configVersion` (or
+`contentVersion`), which is what a publish (`publishLocalRevision` in
+`codexactivity`) does. It then asks the Hub for each list with
+`proxy.resource?get`, sending the etag and hetag it holds.
 
-`CommitHaDevices` saves through `resMgr.saveResource` with a new etag and
-hetag for each list it changes. It then reloads the engine with
-`config_new` and publishes a new revision. The protocol is saved before
-the devices, and a failed save or reload restores both lists. An
-unchanged set saves nothing, so a Home Assistant restart that pushes the
-same set does not make the Touch sync.
+With the cloud blocker on (the normal Melodious setting), the offline
+guard in `netservicestarter.lua` answers every such request with 200 and
+the file on disk. `CommitHaDevices` saves `ProtocolList`, `DeviceList`,
+and `MapList` through `resMgr.saveResource` with a new etag and hetag
+for each list it changes, reloads the engine with `config_new`, and
+publishes a new revision. The protocol is saved before the devices, and
+a failed save or reload restores the previous lists. An unchanged set
+saves nothing, so a Home Assistant restart that pushes the same set does
+not make the Touch sync.
 
-The 2026-10-24 spike wrote through `/import`, so it probably never put
-its device on the Touch. The writer's gate later the same day showed the
-Touch accepts an IP device: it lists it and sends its commands.
+Each request to the offline writer takes turns on a writer lock
+(`flock`), waiting up to 50 s if an activity save is already in
+progress.
 
-## What the Touch shows
+## Controlling Home Assistant devices from the Touch
 
-- **Devices list:** tapping the device opens its screen. The writer
-  builds that screen from the device's commands whenever the set
-  changes: `BrightnessUp` and `BrightnessDown` on the volume keys, a
-  command named like a hard key on that key, and every other command as
-  an on-screen button. Removing the device removes its screen. See
-  [Touch device screens](API.md#touch-device-screens).
-- **Activities:** the device's power and inputs run at activity start
-  and end, like any other device's.
-- **Activity on-screen buttons and sequences:** these can send its
-  commands; set them up in the web editor.
+Home Assistant devices work in three places on the Harmony Touch:
+
+1. **Dedicated Touch device screens (`16417Device<id>`):**
+   - Tapping **Devices** on the Touch and selecting a Home Assistant
+     device opens its own screen.
+   - `CommitHaDevices` builds and updates that screen automatically from
+     the device's commands: `BrightnessUp` and `BrightnessDown` map to
+     `VolumeUp` and `VolumeDown`, transport/volume commands (`Play`,
+     `Pause`, `Stop`, `VolumeUp`, `VolumeDown`, `Mute`, `SkipForward` →
+     `FastForward`, `SkipBack` → `Rewind`) map to their matching
+     physical hard keys, and remaining commands (`PowerOn`, `PowerOff`,
+     `PowerToggle`, `PlayPause`, inputs) become on-screen rows in
+     function group 0.
+   - Because hard keys and on-screen rows occupy separate namespaces,
+     when a media player dynamically gains `SkipForward` and `SkipBack`
+     they land on the physical `FastForward` and `Rewind` keys without
+     shifting any existing on-screen row index.
+2. **Activity members (automatic power and input routing):**
+   - Adding a Home Assistant device to an activity runs its `PowerOn` /
+     `PowerOff` and selected `Input <source>` at activity start and end,
+     and lets the activity wizard map its transport or volume keys.
+3. **Non-member action devices inside any activity:**
+   - The Hub and the Touch execute `ButtonCommandAction` bindings for
+     any device in `DeviceList`, even if that device is **not** a member
+     role of the running activity.
+   - This lets you bind room lights, fans, scripts, or a Chromecast
+     Audio onto an activity's **hard keys** (such as colour keys, D-pad,
+     channel rocker, or transport keys), **on-screen rows** (including
+     filling index gaps), or **swipe gestures** (`SwipeUp`/`Down` for
+     brightness or volume, `SwipeRight`/`Left` for discrete On/Off)
+     without the activity turning those devices on or off when the
+     activity starts or ends.
+   - Note: `ButtonHomeControlAction` is honored by the stock Hub engine
+     only on `Root` maps (`16414Root`); on activity and device maps it
+     logs `Device not found` and drops the press. Always use ordinary
+     `ButtonCommandAction` bindings to the Home Assistant device in
+     `DeviceList`.
+   - Note on the activity wizard: re-saving an activity through the
+     guided wizard reconciles its button maps against the activity's
+     member roles, which strips non-member hard keys and custom hard-key
+     long-press actions while keeping member soft rows. To keep
+     non-member bindings or custom hard-key self-longs intact, edit the
+     Touch screen (`#touch/<activityId>`), use the advanced editor
+     (`#editor`), or add the device as an activity member role.
 
 ## The Home Assistant integration
 
-The integration lives in its own repository,
-[schlambos/ha-melodious](https://github.com/schlambos/ha-melodious), with
-its own releases. HACS installs from a repository's latest release, and
-this repository's releases carry the hub, desktop and Android builds. It
-sets up the devices and answers their webhook calls. Install it through
-HACS: add `https://github.com/schlambos/ha-melodious` as a custom
-repository of type Integration.
-
-Verified on 2026-10-24 with four Hue lights, from the hub and from the
-Touch. Lights that were off (unavailable) when they were picked joined
-the hub by themselves once switched on.
+The integration lives in
+[schlambos/ha-melodious](https://github.com/schlambos/ha-melodious),
+with its own releases for HACS. Add
+`https://github.com/schlambos/ha-melodious` in HACS as a custom
+repository of type **Integration**.
 
 ### Setup
 
 Settings → Devices & services → Add integration → Melodious asks for:
-- the hub's address, its web port (8080), and its web UI login if the
+- the Hub's address, its web port (`8080`), and its web UI login if the
   web UI has a password;
-- the URL the hub uses to reach Home Assistant. It must be plain
-  `http://` and reachable from the hub, for example
+- the URL the Hub uses to reach Home Assistant. It must be plain
+  `http://` and reachable from the Hub, for example
   `http://<server-ip>:8123`; a Docker-internal address won't do.
 
-Setup sends the hub an empty dry run, which saves nothing, to check
-that the hub has the device writer. Then pick entities under the
-integration's **Configure**. Each one becomes a hub device. Removing one
-takes its device off the hub, unless an activity or button still uses
-it; the hub refuses then, and Home Assistant shows a notification.
+Setup sends the Hub an empty dry run, which saves nothing, to check that
+the Hub has the device writer. Then pick entities under the
+integration's **Configure**. Each one becomes a Hub device. Removing one
+takes its device off the Hub, unless an activity or button still uses
+it; the Hub refuses then, and Home Assistant shows a notification.
 
 ### What each entity gets
 
 | Domain | Commands | Power |
-|---|---|---|
-| `media_player` | PowerOn, PowerOff, VolumeUp, VolumeDown, Mute, Play, Pause, PlayPause, Stop, SkipForward, SkipBack (each when the player supports it); one `Input <source>` per source | on/off |
-| `light` | PowerOn, PowerOff, PowerToggle; BrightnessUp/Down (10 %) when dimmable | on/off |
-| `switch`, `input_boolean` | PowerOn, PowerOff, PowerToggle | on/off |
-| `fan` | as `switch`, plus SpeedUp, SpeedDown | on/off |
-| `cover` | Open, Close, Stop | none |
-| `script`, `scene` | Run / Activate | none |
-| `button`, `input_button` | Press | none |
+| --- | --- | --- |
+| `media_player` | `PowerOn`, `PowerOff`, `VolumeUp`, `VolumeDown`, `Mute`, `Play`, `Pause`, `PlayPause`, `Stop`, `SkipForward`, `SkipBack` (each when the player reports the feature); one `Input <source>` per source | on/off |
+| `light` | `PowerOn`, `PowerOff`, `PowerToggle`; `BrightnessUp` / `BrightnessDown` (±10 %) when dimmable | on/off |
+| `switch`, `input_boolean` | `PowerOn`, `PowerOff`, `PowerToggle` | on/off |
+| `fan` | as `switch`, plus `SpeedUp`, `SpeedDown` | on/off |
+| `cover` | `Open`, `Close`, `Stop` | none |
+| `script`, `scene` | `Run` / `Activate` | none |
+| `button`, `input_button` | `Press` | none |
 
-- The names match the activity wizard's key aliases, so its defaults
-  map Volume, Mute and the transport keys by themselves.
-- A media player's sources become device inputs. Activities select
-  them like any other input.
-- A source whose name the hub can't carry exactly (quotes, `%`, braces,
-  over 64 characters) is skipped.
+- Command names match the activity wizard's key aliases, so its defaults
+  map Volume, Mute, and the transport keys automatically.
+- A media player's sources become device inputs (`select_source:<src>`).
+  Activities select them like any other input.
+- A source whose name the Hub can't carry safely (quotes, `%`, braces,
+  or over 64 characters) is skipped.
 
 ### How it stays in step
 
 - **On every Home Assistant start,** and whenever an option changes, the
-  integration sends the whole set. An unchanged set saves nothing on
-  the hub, so the Touch doesn't sync.
-- **When an entity changes** in a way that changes its device (a new
-  source, for example), the set goes out again after 5 s.
-- **A device keeps every command and input it had.** A player that is off
-  or unavailable often drops its sources or features, and rebuilding
-  from that would rewrite the hub's DeviceList on every power cycle and
-  drop inputs that activities use.
-- **Names stay unique,** and a name another hub device already has gets
-  " (HA)".
+  integration sends the whole set. An unchanged set saves nothing on the
+  Hub, so the Touch doesn't sync.
+- **When an entity changes** in a way that expands its device (a new
+  source, or `SkipForward`/`SkipBack` appearing when media starts
+  playing), the updated set goes out after 5 s.
+- **A device keeps every command and input it has ever reported.** A
+  media player or smart bulb that is off or idle often drops its sources
+  or queue features; merging rather than replacing prevents `DeviceList`
+  rewrites on every power cycle and preserves commands bound to buttons.
+- **Names stay unique,** and a name another Hub device already has gets
+  ` (HA)`.
 - **A webhook call runs only a command the integration set up for that
-  entity.** It runs it without waiting, and always answers 200.
-- **Deleting the integration** asks the hub to remove its devices.
+  entity.** It answers `200` immediately and dispatches the service call
+  in the background.
+- **Deleting the integration** asks the Hub to remove its devices.
 
-## Hardware gate
+## Command-line tool (`tools/ha_devices.mjs`)
 
-The owner watches the Touch throughout. Steps run one at a time, and the
-gate stops at the first surprise. `HUB` is the Hub's address, `MAC` this
-computer's.
+`tools/ha_devices.mjs` inspects, tests, and manages Home Assistant
+devices directly against `POST /api/ha-devices`:
 
-1. **Baseline.**
-   - Start `node tools/ha_devices.mjs listen --port 8770`.
-   - Read the Touch's `/data/loggly/SyncCounter.json` over HOT (see
-     `touch-hot.md`): note `lastSyncSuccess` and `lastSyncAbort`.
-   - Note the Touch's Devices list.
-   - Check that `node tools/ha_devices.mjs status --hub http://HUB:8080`
-     shows no devices.
-2. **Deploy** with the installer: `--preflight-only` first, then the
-   install.
-   - The engine keeps the old `codexactivity.lua` loaded until the Hub
-     reboots: a request answers `422 unknown local operation`.
-   - After the reboot, the writer starts a minute or two after the web UI.
-     Until then a request answers `503`.
-   - `node tools/ha_devices.mjs plan --hub http://HUB:8080 --webhook
-     http://MAC:8770/api/webhook/melodious-gate` runs the real writer as
-     a dry run, with nothing saved.
-   - Expect `200`, `changed: true`, and `added: ["HA test"]`.
-3. **Add the test device** with `apply` and the same options.
-   - Expect the Touch to sync by itself within a minute. `logread` shows
-     its `proxy.resource?get` for DeviceList and ProtocolList.
-   - SyncCounter shows a new `lastSyncSuccess` and no new abort.
-   - The Touch's Devices list shows every earlier device plus "HA test",
-     and its activities are unchanged.
-4. **Send from the Hub:** `node tools/ha_devices.mjs send --hub
-   http://HUB:8080 --entity light.melodious_test --command PowerOn`.
-   - The listener shows
-     `{"device":"light.melodious_test","command":"turn_on"}`.
-5. **Activity.**
-   - In the web editor, make a test activity that uses "HA test" with
-     Input A, and add an on-screen button for its VolumeUp.
-   - Start the activity from the Touch: the listener shows `turn_on` and
-     `select_source:A`.
-   - Tap the button: `volume_up` arrives.
-   - End the activity: `turn_off` arrives.
-6. **Revert.**
-   - Delete the test activity in the editor.
-   - Run `node tools/ha_devices.mjs revert --hub http://HUB:8080`.
-   - The Touch syncs again, SyncCounter shows success, and "HA test" is
-     gone.
+```bash
+# List Home Assistant devices and commands currently on the Hub
+node tools/ha_devices.mjs status --hub http://<hub-ip>:8080
 
-Don't send a set while a web editor save is still running. Each request to
-the writer goes through one shared request file and one shared response
-file, with no lock. If two requests overlap, one waits the full 45 s and
-answers `503`; send it again.
+# Dry-run a device set (validates without writing or syncing)
+node tools/ha_devices.mjs plan --hub http://<hub-ip>:8080 --set devices.json
 
-### Results, 2026-10-24
+# Apply a device set, or send a single command through the Hub
+node tools/ha_devices.mjs apply --hub http://<hub-ip>:8080 --set devices.json
+node tools/ha_devices.mjs send --hub http://<hub-ip>:8080 --entity light.living_room --command PowerOn
 
-- The Touch synced the IP device by itself and listed it beside every
-  earlier device. Its activities were intact, and its sync log showed
-  success with no abort.
-- Tapping the device on the Touch does nothing (it has no device maps),
-  as expected.
-- Commands sent from the Hub reached the webhook. Repeated sends worked,
-  so the IP command task survives.
-- Starting and ending an activity from the Touch sent `turn_on` and
-  `turn_off`. Overlapping Off and Start presses run side by side in the
-  stock engine, so the earlier Off's power-off can land after the
-  Start's power-on. IR devices behave the same way.
-- The writer refused to remove the device while an activity and its
-  button map still used it. After the activity was deleted, revert
-  removed the device and the protocol, and the Touch synced back to the
-  earlier DeviceList.
-- Not tested:
-  - **Input selection:** the activity had no input set.
-  - **Touch buttons sending an HA command:** the web activity editor
-    writes hard buttons only to the `16414Activity<id>` map, never to the
-    Touch's `16417Activity<id>` map. This affects every activity made in
-    Melodious, not only Home Assistant devices.
-
-If step 3 goes wrong, revert at once; the device is not used yet, so the
-writer allows it. Then change one field at a time to find the cause:
-Transport, AutoDetectedDevice, Tokens, Parameters, and then the
-protocol's shape.
+# Run a local 200-OK webhook listener to inspect incoming Hub POSTs
+node tools/ha_devices.mjs listen --port 8770
+```
