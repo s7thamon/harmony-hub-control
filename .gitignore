@@ -52,8 +52,22 @@ __pycache__/
 *.ps1xml
 build/zig-cache/
 
-# Generated from docs/FULL_FEATURE_ANALYSIS.md; regenerate rather than track
-docs/FULL_FEATURE_ANALYSIS.pdf
+# Private notes, research, prompts, handoffs and audits (kept locally, not part of the project)
+Remote-Feature-Correction/
+Android/HANDOFF.md
+UI_Redesign_Gemini.md
+TO_DO.md
+docs/SESSION_HANDOFF.md
+docs/AI_HANDOFF.md
+docs/FRONTEND_REDESIGN_HANDOFF.md
+docs/FOOTPRINT_AUDIT.md
+docs/FULL_FEATURE_ANALYSIS.*
+docs/PRODUCTION_PUSH_READINESS.md
+docs/GITHUB_SETUP.md
+docs/reconciliation/
+docs/integration/
+provenance/
+tools/reconciliation/
 tools/hub-emu/build/
 tools/webui-sim/build/
 node_modules/

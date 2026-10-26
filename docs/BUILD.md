@@ -5,8 +5,7 @@ only when native source or embedded assets change. **Product truth is the live
 hub / box snapshot**, not a later integration rebuild. The live
 `box-snapshot-20260818` / `box-snapshot-20260819` webui identity is the current
 product; the 778408-byte Recovery rebuild is a discarded inversion, not the
-baseline. Reconciliation ledgers that recorded that snapshot live in
-[docs/reconciliation/box-snapshot-20260818.md](reconciliation/box-snapshot-20260818.md).
+baseline.
 
 ## Target
 
@@ -26,9 +25,7 @@ exact SHA-256 digests and sizes are:
 
 The remaining six binaries (`codex_bt_pair_agent`, `codex_bthid_keyboard`,
 `codex_dhcpd`, `codex_hal_ltcp`, `codex_portal`, `dropbearmulti`) are pinned by
-their MD5 digests in `payload/bin/MANIFEST.txt` and by SHA-256 in the
-integration artifact ledger
-(`provenance/integration/main-product-20260819/artifact-ledger.json`).
+their MD5 digests in `payload/bin/MANIFEST.txt`.
 
 ## Toolchain — official Zig 0.16.0
 
@@ -117,9 +114,8 @@ Result must be size 74660, SHA-256
 | `dropbearmulti` | **UNVERIFIED_THIRD_PARTY** (version/license verified, build unverified) |
 
 `dropbearmulti` is the **only** UNVERIFIED_THIRD_PARTY artifact. Its
-version/license closure is recorded in
-`docs/reconciliation/box-snapshot-20260818.md` (Dropbear 2025.89, tag-pinned
-LICENSE at `third_party/dropbear-2025.89/LICENSE`); no exact-source or
+version/license is Dropbear 2025.89, with the tag-pinned LICENSE at
+`third_party/dropbear-2025.89/LICENSE`; no exact-source or
 VERIFIED_THIRD_PARTY claim is made for it.
 
 ## Linux Build

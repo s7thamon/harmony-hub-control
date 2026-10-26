@@ -1,14 +1,7 @@
 # Melodious for Android: Logitech catalog lookup
 
-Status: approved 2026-10-22 (decisions 1–4 taken as the recommended
-options). Slice 1 (build + sign-in, PR #43) and slice 2 (catalog client,
-PR #44) are merged; slice 1's sign-in is owner-confirmed on the phone.
-Slice 3 (the Import-sheet tab, version 1.1.0/versionCode 2, docs) is in
-progress. Slice 4 (sim/hub-emu cross-checks) follows. The Phase 0 sign-in
-spike passed on the owner's phone.
-
-This brings the macOS app's catalog feature (`docs/DESKTOP_APP.md`, slices
-2 and 3) to the Android app, one to one:
+This brings the macOS app's catalog feature (`docs/DESKTOP_APP.md`) to the
+Android app, one to one:
 
 - **Sign in** to the user's own Logitech account, in Chrome, from the app.
 - **Devices → a device → Import codes → Logitech catalog:** Sign in, Brand
@@ -35,38 +28,6 @@ Limits:
   deep link stays as it is.
 - Out of scope, as on the Mac: IRDB ("Find codes"), RemoteCentral, Type a
   code and Flipper files. Android's Paste path is unchanged.
-
-## Sign-in: Phase 0 result (2026-10-22)
-
-A throwaway spike app (outside the repo, never committed) ran the full
-sign-in on the owner's phone with Google login. Its log held only presence
-flags, never a token, code or AccountId.
-
-| Step | Result |
-| --- | --- |
-| Browsers | The default browser is Firefox 158: `CustomTabsClient.isAuthTabSupported(org.mozilla.firefox)` is false. Chrome is installed and returns true. The spike launched Chrome explicitly (`setPackage`). |
-| Auth Tab (`androidx.browser:browser:1.9.0`, Chrome 137+) | `AuthTabIntent.registerActivityResultLauncher(activity, callback)`, then `AuthTabIntent.Builder().build().launch(launcher, authorizeUrl, "com.logitech.harmony")` |
-| Google sign-in | Worked end to end (owner-confirmed). No "This browser or app may not be secure" block. |
-| Redirect | `AuthTabIntent.RESULT_OK`; `resultUri` scheme `com.logitech.harmony`, host `lidsoauth`, query keys `[code, state]`; state matched. No intent filter declared. |
-| Code exchange (PKCE, form-encoded) | HTTP 200: access, id and refresh tokens |
-| Harmony `signin` | HTTP 200 with an AccountId |
-| Refresh grant | HTTP 200, new access token |
-
-What it showed:
-- Support must not depend on the default browser. The app looks for a
-  browser with Auth Tab support itself (see "Sign-in").
-- The redirect comes back through the activity-result callback. No
-  manifest entry claims Logitech's scheme.
-
-Not verified:
-- **Logitech email and password login**, as on the Mac: no such account
-  was at hand. It uses the same page, redirect and token endpoint.
-- **The official Harmony app installed** (`com.logitech.harmonyhub`, which
-  may register the same scheme). It wasn't on the phone. Auth Tab returns
-  the redirect to the calling app, so no clash is expected, but it hasn't
-  been run.
-- **Other Auth Tab browsers** (for example Edge or Samsung Internet). Only
-  Chrome was run.
 
 ## Architecture
 
@@ -119,9 +80,8 @@ the Android framework.
    - Chrome (`com.android.chrome`), if `isAuthTabSupported` says yes. It's
      the one browser that has been run.
    - Otherwise the default Custom Tabs browser, if it supports Auth Tab
-     (not verified; see above).
-   - Otherwise nothing is launched, and the app says sign-in needs Chrome
-     (decision 2). "Open a catalog package…" still works.
+     (not verified).
+   - Otherwise nothing is launched, and the app says sign-in needs Chrome. "Open a catalog package…" still works.
 
    A plain Custom Tab is never used as a fallback. Without an intent
    filter, its redirect would go nowhere, or to Logitech's own app if that
@@ -234,9 +194,8 @@ Etiquette, unchanged from the Mac and the helper:
 - Tokens never reach logs, the hub, packages or the UI. The app has no
   HTTP logging interceptor and adds none.
 
-The hub's Basic auth header is still stored in plain `HubPrefs`, as it is
-today. Moving it under the same Keystore key is a small follow-up, not part
-of this plan unless the owner adds it.
+The hub's Basic auth header is still stored in plain `HubPrefs`, as it
+is today.
 
 ### Talking to the hub
 
@@ -324,7 +283,7 @@ The Mac's Settings page, section by section, and where it is on Android:
 | Enter address | Settings → Hub page (exists) |
 | Hub sign-in | Settings → Hub page, "My hub needs a sign-in" (exists) |
 | Logitech account | **New:** a "Logitech account" row on the Settings tab, under Hub: "Signed in to Logitech" (Sign out) or "Not signed in · used only to search and download device codes from Logitech's catalog" (Sign in) |
-| Advanced: OAuth client_id | **New**, per decision 4: a "Logitech catalog" section at the bottom of Settings → Advanced, with a field and Save. "Leave empty to use Logitech's public desktop client_id (9d88df5e-…)." |
+| Advanced: OAuth client_id | A "Logitech catalog" section at the bottom of Settings → Advanced, with a field and Save. "Leave empty to use Logitech's public desktop client_id (9d88df5e-…)." |
 
 The client_id override:
 - It's stored in `HubPrefs` (it isn't a secret). Empty means the built-in
@@ -349,60 +308,6 @@ The client_id override:
 The Kotlin names follow the JS ones (`catalogSignIn`, `catalogSearch`,
 `catalogDownload`, `checkCatalogModel`, `catalogImport`), so the two ports
 can be read side by side.
-
-## Exact changes
-
-By slice (see "Slices"). No file outside `Android/` and the docs changes.
-
-**Slice 1: build and sign-in**
-- `Android/gradle/libs.versions.toml`: `agp` 8.7.2 → 8.9.1; add
-  `androidx-browser` 1.9.0.
-- `Android/gradle/wrapper/gradle-wrapper.properties`: Gradle 8.9 →
-  8.11.1 (the minimum for AGP 8.9.1).
-- `Android/app/build.gradle.kts`: `compileSdk` 35 → 36 (`minSdk` 26 and
-  `targetSdk` 35 stay); the browser dependency; one packaging exclude,
-  `/META-INF/versions/9/OSGI-INF/MANIFEST.MF`. Without it the build fails:
-  the browser library brings `org.jspecify:jspecify`, whose copy of that
-  file clashes with JSch's.
-- `Android/deploy_to_phone.sh`: check for and install
-  `platforms;android-36` instead of 35.
-- `Android/app/src/main/AndroidManifest.xml`: **only** a `<queries>` block
-  with the `android.support.customtabs.action.CustomTabsService` intent.
-  Since Android 11, the app can't see which browsers support Auth Tab
-  without it. It grants no permission, exports nothing and claims no
-  scheme. If Chrome isn't detected with that alone, the slice adds
-  `<package android:name="com.android.chrome"/>` to the same block, and
-  nothing else.
-- `core-protocol`: `catalog/CatalogOAuth.kt`, `CatalogHttp.kt`,
-  `CatalogService.kt` (status, sign-in, sign-out, `ensureSession`, Harmony
-  signin), `TokenStore.kt`, `SignInLauncher.kt`, and their tests.
-- `app`: `system/AuthTabSignIn.kt`, `system/LogitechTokenStore.kt`, the
-  launcher registration in `MainActivity.kt`, the account state and
-  handlers in `MelodiousViewModel.kt`, the Settings row in
-  `SettingsScreen.kt`, the client_id section in `AdvancedScreens.kt`, and
-  `logitechClientId` in `HubPrefs.kt`.
-
-**Slice 2: catalog client (no UI)**
-- `core-protocol`: `catalog/CatalogClient.kt` (discovery, operations,
-  model check, search, download), `CatalogPackage.kt`, `CatalogImport.kt`,
-  the rest of `CatalogService.kt` (check, search, download, retry), and
-  their tests.
-- `rest/CodexHubRestClient.kt`: `getHubProtocolNames` and
-  `importCatalogCommands`, with tests.
-
-**Slice 3: the tab**
-- `app/ui/devices/CatalogImportTab.kt` (new), the tab row in
-  `ImportSheet` (`DevicesScreen.kt`), the Paste content moved into its own
-  composable unchanged, the catalog tab state and handlers in
-  `MelodiousViewModel.kt`, and the file picker.
-- The app version, per decision 3.
-- `Android/README.md` (it says the app needs no internet; the catalog is
-  the optional, user-started exception), the README's Android section,
-  and this file's status. Screenshots with personal data masked.
-
-**Slice 4: cross-checks**
-- Opt-in JVM integration tests in `core-protocol`, run against the
-  webui-sim and hub-emu (see "Test plan"). Any fixes they turn up.
 
 ## Security model
 
@@ -437,188 +342,3 @@ or codes.
 **No background traffic:** no telemetry, no update check, no request on a
 timer. The only network calls are the ones listed above, each started by
 a tap or, for the model check, by typing.
-
-## Build upgrade (decision 1)
-
-`androidx.browser` 1.9.0's AAR metadata says `minCompileSdk=36` and
-`minAndroidGradlePluginVersion=8.9.1`. Its manifest declares no
-permission, no component and no scheme. Its runtime dependencies
-(`activity` 1.9.0, `core` 1.10.0) are older than what Melodious already
-uses (1.9.3, 1.15.0), so nothing else is upgraded.
-
-**Verified on the Mac (2026-10-22), in a scratch copy of `Android/`
-outside the repo:**
-- with AGP 8.9.1, Gradle 8.11.1, compileSdk 36, the browser dependency
-  and the packaging exclude, `./gradlew --offline :core-protocol:test
-  :app:assembleDebug` passes: 13/13 tests, debug APK built;
-- without the exclude, `:app:mergeDebugJavaResource` fails (the JSpecify
-  and JSch clash above);
-- the merged manifest is identical to `main`'s APK apart from resource-ID
-  numbering (no new permission, component, intent filter or query), and
-  the APK reports `compileSdkVersion 36`, `targetSdkVersion 35`;
-- the debug APK grows from 17,815,871 to 17,871,738 bytes (+55,867).
-
-The options for `androidx.browser`:
-- **1.9.0-alpha01** is the only release with Auth Tab that compiles at SDK
-  35 (`minCompileSdk=34`). It lacks `CustomTabsClient.isAuthTabSupported`,
-  so the app couldn't check for support before launching.
-- **alpha02 through 1.9.0** all need SDK 36 and AGP 8.9.1.
-- **1.10.0** also exists. It needs the same, and also pulls
-  `kotlin-stdlib` 2.1.20, newer than the project's Kotlin 2.0.21. The
-  plan stays on 1.9.0, the version the spike ran.
-
-## Test plan
-
-On the Mac (automated, `./gradlew --offline :core-protocol:test
-:app:assembleDebug`):
-- **OAuth:**
-  - PKCE lengths, alphabet and S256;
-  - authorize URL fields;
-  - `parseCallback`: valid; wrong, missing or repeated state; repeated or
-    missing code; `error=`; a bare string; a logi.com page; the wrong
-    scheme or host; a path, fragment or user info;
-  - the exchange and refresh form bodies;
-  - `parseTokens`, including a refresh that keeps the old refresh token.
-- **Session:**
-  - `ensureSession` order with fakes: saved, then refresh, then one
-    prompt, never a loop;
-  - a cancelled sign-in leaves the user signed out with no error;
-  - "Access is denied": exactly one refresh and retry, then the tokens
-    are cleared;
-  - calls never overlap (a fake transport counts concurrent requests).
-- **Catalog**, against the shared fixtures: operation parsing, the host
-  swaps, the `GetCommands` fallback, search formatting (`Id-`,
-  `DeviceModel`, `DisplayText`, device-type labels), download, the
-  package (schema, source, redaction), and `redact` alone.
-- **Transport:**
-  - the allowlist refuses other URLs, `http:` and user info;
-  - redirects are not followed;
-  - no cookies on GET, and the cookie domain rules hold.
-- **`catalogRows` and friends:** the cases of
-  `tools/webui-sim/test/logitech-catalog.test.mjs`, with the same inputs,
-  expected rows and reason strings.
-- **Hub client:**
-  - `importCatalogCommands` sends `Content-Length` and no
-    `Transfer-Encoding: chunked`, checked with a plain `ServerSocket` in
-    the test (no new test dependency);
-  - a 404 maps to the older-hub message;
-  - `getHubProtocolNames` parsing.
-- **Token store logic** with a fake cipher: nothing is stored when
-  encryption fails, an undecryptable blob is deleted, and sign-out clears
-  it. The real Keystore runs only on a device (owner check).
-- **Repo baselines unchanged** (no web, desktop or hub code changes): sim
-  443, shell smoke all passed, reconciliation 12 failures (the same list
-  as `main`), installer smoke 43 OK, desktop units 38, hygiene ok.
-
-Against the webui-sim and hub-emu (slice 4, opt-in, like
-`desktop/test/hub-emu.mjs`):
-- The Kotlin hub client reads `/export/protocols` and posts
-  `/api/catalog-import` with fixture rows. The sim and hub-emu (the real
-  `codex_webui` under qemu) both store the 4 KeyCodes byte-identical with
-  ProtocolId 17/18, and refuse the missing protocol (400). hub-emu is the
-  check that counts for request framing; the Node sim accepts chunked
-  bodies and would hide a problem.
-- These check the import gate, not IR playback.
-
-On the phone (the owner runs these):
-- **Sign-in:**
-  - Google login from the catalog tab and from Settings;
-  - close and reopen the app: still signed in;
-  - Sign out;
-  - back out of the Auth Tab: signed out, no error loop;
-  - with Firefox as the default browser, Chrome is used;
-  - optionally, with Chrome disabled: the "needs Chrome" message, and the
-    file picker still works;
-  - email and password login, when an account is at hand (until then:
-    not verified).
-- **Model check:** typing changes the hint after a pause. The pre-filled
-  values never trigger it.
-- **Catalog:** Sony / STR-DG7, pick STR-DG720: 55 commands, Sony 15 Bit ×44
-  and Sony 20 Bit ×11. Import into the IR lab device (`Temporary IR Test`),
-  then the read-only read-back used for the Mac: KeyCodes byte-identical,
-  ProtocolId 17/18, no Raw. No IR sent unless the owner chooses to test.
-- **File:** open a helper package through "Open a catalog package…"; the
-  same preview appears.
-
-Reporting says, for each item, whether it was verified on the Mac,
-verified on hub-emu, verified on the hub, or only observed by the owner.
-
-## Slices (one PR each, from `main`, never stacked)
-
-1. **Build and sign-in:**
-   - the build upgrade and `<queries>`;
-   - OAuth, PKCE, callback, exchange, refresh and Harmony signin in
-     `core-protocol`;
-   - the Keystore store and the Auth Tab launcher;
-   - the Settings account row and the client_id field.
-
-   The owner checks the sign-in on the phone. This is where "the Auth Tab
-   flow looks right in the app" gets confirmed, so it carries the OAuth
-   core the brief listed under slice 2. Without it, nothing can be signed
-   in.
-2. **Catalog client:** discovery, the model check, search, download, the
-   package and `catalogRows` in `core-protocol`, plus the two hub calls.
-   No UI. Unit tests against the shared fixtures.
-3. **The tab:** the Import sheet tabs, the catalog tab, the file picker,
-   Import, the version (decision 3) and the docs. The owner checks
-   Sony STR-DG720 → 55 commands and imports into the lab device.
-4. **Cross-checks:** the webui-sim and hub-emu integration tests, and any
-   fixes.
-
-Each slice carries its own unit tests. Each PR has its test output and
-the APK size change; where screens change, it has screenshots with
-personal data masked. The brief also listed new web/desktop sim tests in
-slice 4. No web or desktop code changes in this plan, so instead their
-baselines must stay identical.
-
-## Open decisions for the owner
-
-1. **Build upgrade.**
-   - (a) **Recommended:** AGP 8.9.1, Gradle 8.11.1, compileSdk 36,
-     `androidx.browser` 1.9.0 and the one packaging exclude. minSdk and
-     targetSdk stay. Verified building on the Mac (above).
-   - (b) Stay at compileSdk 35 with `browser` 1.9.0-alpha01, the only Auth
-     Tab release that compiles there. It's an early alpha without
-     `isAuthTabSupported`, so the app couldn't check for support first.
-     Not recommended.
-   - (c) No library: build Chrome's Auth Tab intent by hand. That is
-     undocumented wire format, with no support check, and it returns
-     `RESULT_CANCELED` on browsers without Auth Tab. Not recommended.
-2. **No browser with Auth Tab** (Chrome older than 137, or not installed,
-   and no other Auth Tab browser).
-   - (a) **Recommended:** say "Logitech sign-in needs Chrome 137 or later.
-     Install or update Chrome, or open a catalog package made on a
-     computer", and keep "Open a catalog package…" working. This matches
-     the Mac app needing its own browser engine. On the owner's phone,
-     Chrome is installed.
-   - (b) Fall back to a plain Custom Tab. That needs an intent filter for
-     `com.logitech.harmony`, which can clash with Logitech's Harmony app if
-     it is installed, and is the kind of system handler the owner
-     declined before. Only with explicit approval.
-3. **Android app version.** The app is `1.0.0` (versionCode 1), published
-   with the hub as Melodious 1.0.0. The macOS app with this feature is
-   1.1.0.
-   - (a) **Recommended:** `1.1.0`, versionCode 2, set in slice 3 (the one
-     that ships the feature), signed with the same release key so it
-     installs over 1.0.0.
-   - (b) Stay at 1.0.0 / 1.
-4. **Where the client_id override goes.**
-   - (a) **Recommended:** a "Logitech catalog" section at the bottom of
-     Settings → Advanced, like the Mac's Advanced section.
-   - (b) On the catalog tab.
-   - (c) Not at all.
-
-## Risks
-
-- Google could start blocking sign-in in Chrome's Auth Tab. That's
-  unlikely, because it is Chrome itself. Logitech could retire the catalog
-  services or the desktop client_id; the client_id setting covers the
-  second, and Paste and the file picker remain.
-- Auth Tab needs Chrome 137 or later. Phones without it get the
-  "needs Chrome" message (decision 2).
-- The protocol limit: catalog codes import only if the hub's ProtocolList
-  already has their protocol. The tab shows every skipped code and why.
-  It doesn't fix the limit (a separate item, for later).
-- The build upgrade touches every Android build. Slice 1 runs the full
-  test and assemble, and the owner installs the result before anything
-  else lands on top.

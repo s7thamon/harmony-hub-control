@@ -52,7 +52,7 @@ class HubSshProvisioner {
     )
 
     /**
-     * Emergency Auth Lockout Recovery (`TO_DO.md` A2):
+     * Emergency Auth Lockout Recovery:
      * Disables HTTP Basic Auth in `/data/codex/webui_auth.conf` and restarts `codex_webui`
      * so the user is never permanently locked out of their hub.
      */
@@ -72,7 +72,7 @@ class HubSshProvisioner {
     )
 
     /**
-     * Restarts the `codex_bthid_keyboard` FIFO daemon and `codex_bt_pair_agent` (`TO_DO.md` B7).
+     * Restarts the `codex_bthid_keyboard` FIFO daemon and `codex_bt_pair_agent`.
      */
     suspend fun restartBluetoothHelpers(
         host: String,

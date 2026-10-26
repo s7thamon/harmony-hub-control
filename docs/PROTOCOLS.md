@@ -149,8 +149,8 @@ By design the stock hub trusts the local network. Specifically:
 
 This is why this project treats the hub as trusted-LAN equipment (see
 `SECURITY.md`) and why the web UI this project adds offers an optional global
-HTTP authentication check. Hardening the stock LAN channels (binding them more
-tightly, or placing an authenticated proxy in front) is tracked in `TO_DO.md`.
+HTTP authentication check. The stock LAN channels themselves are not hardened
+(not bound more tightly, and no authenticated proxy in front).
 
 ---
 
@@ -163,5 +163,4 @@ tightly, or placing an authenticated proxy in front) is tracked in `TO_DO.md`.
 - The cloud blocker keeps the engine's cloud transports from reaching out so that
   all of the above stays local.
 
-See `API.md` for the REST surface, `BUILD.md` for how the components are built,
-and `FULL_FEATURE_ANALYSIS.md` for the evidence-graded feature list.
+See `API.md` for the REST surface and `BUILD.md` for how the components are built.

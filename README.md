@@ -631,7 +631,6 @@ node --test tools/webui-sim/test/                 # web app models and hub contr
 node tools/harmony_shell_smoke.mjs                # rebuilds the embedded web app and checks it (needs bun)
 node tools/shipped_copy_hygiene.mjs               # no personal names or IDs in shipped files
 python3 tools/installer_contract_smoke.py         # the installers' contract, with a fake hub
-python3 -m unittest discover -s tools/reconciliation -p 'test_*.py'   # provenance; 12 known failures
 luajit tools/touch-validator/codexactivity-ha-devices-test.lua         # the hub's Home Assistant device writer
 luajit tools/touch-validator/codexactivity-device-screens-test.lua     # the hub's Touch device screens
 (cd Android && ./gradlew :core-protocol:test)    # Android protocol and graph tests
@@ -655,8 +654,8 @@ binary against pinned SHA-256 values.
 sh tools/package_harmony_shell.sh   # writes payload/source/harmony_shell_assets.h
 ```
 
-When `codex_webui` changes, update its pins in the build script,
-`payload/bin/MANIFEST.txt` and `tools/reconciliation/test_webui_source_build.py`.
+When `codex_webui` changes, update its pins in the build script and
+`payload/bin/MANIFEST.txt`.
 
 ## Documentation
 

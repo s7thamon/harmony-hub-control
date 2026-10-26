@@ -182,8 +182,8 @@ the real MIPS binary.
 Real (compiled from `payload/source`, unmodified): `codex_webui.c`,
 `codex_hbus.c` — every HTTP contract the front-end can observe.
 
-Emulated (engine-emu.py + stubs, shapes from `docs/SESSION_HANDOFF.md` §5 and
-the decompiled firmware): `harmony.engine?getCurrentActivity` (genuine nested
+Emulated (engine-emu.py + stubs, shapes from the live hub and the decompiled
+firmware): `harmony.engine?getCurrentActivity` (genuine nested
 `{"data":{"result":...}}` envelope), `startactivity` (validates the activity
 exists, tracks current), `holdaction` (logs device/command — this is where IR/BT
 photons would leave the box), `ir.cap` (empty capture), the offline activity
@@ -204,7 +204,7 @@ observable but never restarts anything.
   8787 too. If it is running, dev-proxy dies with EADDRINUSE and the browser
   talks to the MOCK — which accepts JSON bodies and fakes `/api/control-button`,
   poisoning any fidelity conclusion. Check `lsof -iTCP:8787 -sTCP:LISTEN`.
-- Browser cache lies during QA (see FRONTEND_REDESIGN_HANDOFF §7): always
+- Browser cache lies during QA: always
   navigate with a cache-buster (`/?fresh=N#route`).
 - The emulator enforces the box's real limits: request bodies over 1 MiB get
   413; the fixture (~408 KB) fits comfortably.

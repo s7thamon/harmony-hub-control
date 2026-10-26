@@ -1,6 +1,6 @@
 #!/bin/sh
 # package_harmony_shell.sh — deterministic production packaging for the
-# flash-safe harmony shell embed (docs/FOOTPRINT_AUDIT.md, DEDUP_MIN class).
+# flash-safe harmony shell embed (DEDUP_MIN class).
 #
 # Inputs   tools/webui-sim/public/  (validated sim UI — single source of truth)
 # Outputs  payload/source/harmony_shell_assets.h   (embedded C arrays)

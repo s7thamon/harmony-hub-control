@@ -1,9 +1,5 @@
 # Melodious for macOS: the desktop app with Logitech catalog lookup
 
-Status: plan approved by the owner, 2026-10-22 (decisions at the end).
-Slices 1 (app shell, PR #36) and 2 (catalog, PR #37) are merged; slice 3
-(packaging and docs) follows.
-
 Melodious for macOS is the hub's web UI in a desktop window, plus the one
 thing a page served by the hub can't do: sign in to the user's own Logitech
 account and pull a device's codes from Logitech's catalog.
@@ -19,50 +15,13 @@ account and pull a device's codes from Logitech's catalog.
 Limits:
 - Reuse, don't rewrite: the UI is the existing bundle, built by
   `tools/package_harmony_shell.sh`. It isn't ported to Swift or React.
-- The hub doesn't change: no new routes, no C changes. The shared web code
-  changes a little (see "Shared-code changes"), and that rebuilds
-  `codex_webui`, as every shell change does.
+- The hub doesn't change: no new routes, no C changes. Changes to the shared web
+  code rebuild `codex_webui`, as every shell change does.
 - No new system components: no URL scheme registration
   (`setAsDefaultProtocolClient`, `CFBundleURLTypes`), no helper apps, no
   login items, no auto-updater.
 - The web UI keeps IRDB search, Learn, Paste and "Open a catalog package…"
   as offline fallbacks.
-- Android gets the catalog feature after this app. Other platforms later.
-
-## Sign-in: Phase 0 result (2026-10-22)
-
-A throwaway Electron 45.0.0 spike (outside the repo) ran the sign-in twice
-with a real account using Google login, both times end to end:
-
-| Step | Result |
-| --- | --- |
-| Authorize URL in a sandboxed `BrowserWindow`, unmodified user agent | Logi ID page loads |
-| "Sign in with Google" | Logi ID opens Google in a `window.open` popup; password, phone prompt and consent all work. No "This browser or app may not be secure" block. |
-| `launch.html` → `authorize/redirect/<nonce>` | HTTP 302 to `com.logitech.harmony://lidsoauth?code&state` |
-| Catching the callback | `webContents` `will-redirect` sees it first; `preventDefault()` stops it. `webRequest.onBeforeRedirect` sees the same 302. |
-| Code exchange (form-encoded, PKCE) | HTTP 200: access, id and refresh tokens, `expires_in` 3600 |
-| Harmony `signin` | HTTP 200 with an AccountId |
-| Refresh grant | HTTP 200, new access token |
-
-What it showed:
-- The callback can be caught inside the app. No system URL handler is
-  needed.
-- The sign-in window must allow Logi ID's popup to `accounts.google.com`,
-  in the same session; blocking popups breaks Google login.
-- About 2.5 s after the first callback, Logi ID fires the redirect again
-  with a fresh nonce. The app takes the first callback and closes the
-  window at once; any later one is ignored.
-
-Not verified:
-- **Logitech email and password login** hasn't been run: no such account
-  was at hand. It is the same page, the same `launch.html` → 302 path and
-  the same token endpoint, so it is expected to work. Slice 2's test plan
-  asks for one run.
-- **Google may tighten its embedded-browser checks later.** It passed today
-  with no workaround. Spoofing the user agent is not an option. If Google
-  blocks it one day, the fallback keeps Electron for the UI and hands only
-  the sign-in to a small native `ASWebAuthenticationSession` module, which
-  also needs no system-wide handler.
 
 ## Architecture
 
@@ -256,57 +215,6 @@ The catalog tab in the app, top to bottom:
 | Look of the connect page | `css/tokens.css`, `css/app.css` |
 | Icon | the existing Melodious icon PNGs (an `.icns` is made from them at build time) |
 
-## Shared-code changes (these also rebuild `codex_webui`)
-
-Only `tools/webui-sim/public/js/views/device-import.js` and
-`js/logitech-catalog.js` change, plus their tests and the smoke checks.
-
-1. **`logitech-catalog.js`:** add `isCatalogPackage(pkg)`, the schema check
-   that `previewCatalogFile` does inline today, so the file path and the
-   bridge path share it. It's pure and tested.
-2. **`device-import.js`, catalog tab:**
-   - Split `previewCatalogFile(file, text)` into the file reader and
-     `previewCatalogPackage(pkg, label)`, which both paths call. The file
-     path behaves exactly as before.
-   - `const desktop = window.melodiousDesktop?.catalog` at mount. With no
-     bridge (on the hub and in the simulator), the tab is unchanged.
-   - With the bridge: the account line, Brand and Model fields, the model
-     check, Search, the results list and Download, then
-     `previewCatalogPackage(pkg, "Logitech catalog")`. The explainer text
-     that names the Python helper moves under "Open a catalog package…".
-   - The handlers are named functions (`doCatalogSignIn`,
-     `doCatalogSignOut`, `doCatalogSearch`, `doCatalogDownload`,
-     `checkCatalogModel`), so the smoke test can pin them, as it does for
-     IRDB.
-3. **A small fix (in slice 2).** In
-   `renderCatalogPreview`, "missing on hub" lists the skip *reasons* rather
-   than the protocol names. The same function in `describeCatalogRows`
-   already does it right.
-4. **Tests:**
-   - `tools/webui-sim/test/`: `isCatalogPackage`; the tab with no bridge
-     (unchanged); the tab with a fake bridge (sign in, search, pick,
-     download, preview, import, skipped reasons, errors shown).
-   - `tools/harmony_shell_smoke.mjs`, deliberately and narrowly:
-     - the bridge is referenced only in `device-import.js`;
-     - `signIn`, `search` and `download` are called only from their named
-       click handlers, never from `mount` or the opening path of
-       `openImportSheet`;
-     - `checkModel` is called only from the model field's input handler,
-       behind its debounce;
-     - no `melodiousDesktop` call runs while the sheet opens;
-     - the existing egress and network-primitive checks don't change.
-5. **Hub rebuild,** as for any shell change:
-   - check the packager first reproduces the committed header;
-   - `tools/package_harmony_shell.sh`;
-   - Zig 0.16.0 twice, byte-identical;
-   - the pins in `build/build_harmony_tools_kali.sh` and
-     `payload/bin/MANIFEST.txt`, and the reconciliation pins via
-     `update_pins.py`.
-
-   Expected cost: about 3–5 KB of minified JS; reported in the PR. The hub
-   behaves the same, because the new UI only appears when the bridge
-   exists.
-
 ## New code (`desktop/`, next to `Android/`)
 
 ```
@@ -407,8 +315,8 @@ bundle copy, catalog package or token is ever committed.
   - Separate per-architecture builds, not a universal one, which would
     double the download.
   - Expected size: about 100 MB per download and over 250 MB installed,
-    almost all of it Electron's Chromium. Measured in slice 3 (Electron
-    45.0.0): dmg 123 MB (arm64) and 130 MB (x64), zip 121 MB and 128 MB,
+    almost all of it Electron's Chromium. Measured with Electron
+    45.0.0: dmg 123 MB (arm64) and 130 MB (x64), zip 121 MB and 128 MB,
     installed 254 MB and 261 MB.
 - Ad-hoc signed (`codesign --force --deep -s -`; electron-builder
   `identity: "-"`), with the hardened runtime off. No Developer ID, no
@@ -424,7 +332,7 @@ bundle copy, catalog package or token is ever committed.
   - a GitHub release "Melodious for macOS <version>", tagged
     `desktop-v<version>`, on the same commit as a hub build;
   - the zips and dmgs attached, with their SHA-256 in the notes;
-  - the owner publishes it.
+  - published by hand.
 - Opening an unsigned app (README and release notes):
   - Finder: Control-click → Open. On recent macOS, where that no longer
     offers Open: System Settings → Privacy & Security → Open Anyway.
@@ -435,114 +343,3 @@ bundle copy, catalog package or token is ever committed.
   than this app; update the hub", instead of a bare error.
 - **Electron updates** come only with new app releases. Each release pins
   the current Electron stable and says which version it ships.
-
-## Test plan
-
-On the Mac (automated):
-- **Units (`node --test desktop/test/`):**
-  - PKCE shape and S256;
-  - authorize URL fields;
-  - `parseCallback`: wrong state, missing state, no
-    code, bare string, logi.com page, error=);
-  - the form bodies for exchange and refresh;
-  - `ensure_session` order (saved, refresh, then prompt, never a loop);
-  - operation-table parsing and the `lb-svcs` host swap;
-  - search, download and package building against recorded fixtures,
-    which carry no personal data and no tokens (redacted on recording);
-  - `redact`;
-  - forwarder path rules (refuse absolute URLs, `//`, CR/LF), header
-    allowlist, Authorization precedence, 401 and 502 handling;
-  - IPC argument checks and sender check;
-  - SSDP reply parsing.
-- **Shared web code:**
-  - sim tests (438 at `1fecee0`, plus the new ones);
-  - `harmony_shell_smoke.mjs` all passing, with the new pinned checks;
-  - reconciliation at its 12 known failures;
-  - installer smoke 43 OK;
-  - `shipped_copy_hygiene` ok.
-- **End to end (Playwright `_electron`):** the app against the webui-sim
-  as its "hub".
-  - Connect by address, then every tab and sub-page opens, matching the
-    production-preview screens at 1280 px.
-  - A download link opens the Save dialog.
-  - A 401 from the sim (auth on) opens the hub sign-in.
-  - With a stubbed catalog client: search, pick, preview and import into a
-    sim device; skipped codes listed with reasons.
-  - Navigation to another origin is cancelled; `https:` links go to the
-    browser.
-
-On the Mac (manual, with a real account):
-- **Sign-in:**
-  - Google login;
-  - email and password login, if an account is at hand (until then: not
-    verified);
-  - quit and relaunch: still signed in (refresh);
-  - Sign out;
-  - a cancelled sign-in window leaves the app signed out with no error
-    loop.
-- **Catalog:** search "Sony" / "STR-DG7", pick STR-DG720, and expect 55
-  commands (Sony 15 Bit ×44, Sony 20 Bit ×11), the same as the helper's
-  package.
-- **Discovery:** SSDP finds the hub, and manual entry works.
-
-On the hub (the owner runs anything that changes the hub or sends IR):
-- **Import a catalog download into a scratch or lab device.** Then a
-  read-only check: the stored KeyCodes are byte-identical to the download,
-  with ProtocolId 17/18.
-- **One button press** from the app's remote. `ir-events.log` shows the
-  `api` send.
-- **A hold:** volume held from the app, `api-hold` press/release pairs in
-  the log, and only `lock` left in `/var/volatile/codex-hold/`.
-
-Reporting says, for each item, whether it was verified on the Mac,
-verified on the hub, or only observed by the owner.
-
-## Slices (one PR each, never stacked)
-
-1. **App shell:** `desktop/` scaffold, the scheme and forwarder, the
-   connect screen with discovery and hub sign-in, settings, CSP and locks,
-   Save dialogs, units and the end-to-end run against the sim. It matches
-   the web UI screen for screen. No shared-code change, so the hub isn't
-   rebuilt.
-2. **Catalog:** the Node catalog client, the sign-in window, IPC and
-   bridge, and the shared catalog-tab change. The hub is rebuilt and the
-   pins updated. Includes the real-account sign-in checks and the owner's
-   hub import test.
-3. **Packaging and docs:** electron-builder config, the bundle script,
-   ad-hoc signing, a README section (in the README's structure: what and
-   why first, screens after install, technical at the bottom) and release
-   notes. The owner publishes the release.
-
-Each PR has its test output, sizes (bundle delta for slice 2, app size
-for slice 3) and, where screens change, screenshots with personal data
-masked.
-
-## Owner decisions (2026-10-22)
-
-1. **Model check while typing:** call Logitech's anonymous `SearchDevice`
-   after a 600 ms pause in typing, never for the pre-filled values.
-2. **The "missing on hub" summary fix** in `renderCatalogPreview` (shared
-   code): fix it in slice 2.
-3. **Subnet sweep:** keep SSDP plus manual entry only (do not port the /24
-   subnet sweep).
-4. **Settings placement:** macOS menu (⌘,) only, with no shared-code change
-   in slice 1.
-5. **Sign-in persistence:** in-memory sign-in cookies are OK; the refresh
-   token stored in Keychain keeps the session alive until it expires.
-6. **Downloads:** build both `.dmg` and `.zip` for arm64 and x64 in slice 3.
-7. **The helper's stricter callback check:** include it in
-   `tools/catalog/harmony_catalog.py` in slice 2 (leaving the local stash
-   untouched).
-8. **The plan is approved; slice 1 starts once PR #35 merges.**
-
-## Risks
-
-- Google could start blocking embedded sign-in. The fallback is above.
-- Logitech could retire the catalog services or the desktop client_id
-  (the override covers a client_id change). The web UI's fallbacks stay.
-- The protocol limit: catalog codes import only if the hub's ProtocolList
-  already has their protocol. The app shows the skipped codes and why. It
-  doesn't fix the limit (HANDOFF item 4, for later).
-- Size: Electron makes a large app (about 100 MB download). The Swift
-  shell with `WKWebView` would be much smaller. It's noted as an option if
-  size matters more than the faster reuse.
