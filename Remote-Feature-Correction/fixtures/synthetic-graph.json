@@ -1,0 +1,293 @@
+{
+  "_comment": "Synthetic, internally consistent example graph for Remote-Feature-Correction. No household data. IDs respect Melodious floors (map IDs > 52944089, button IDs > 1878029713).",
+  "ProtocolList": {
+    "Protocols": [
+      {
+        "Id-": 90000001,
+        "Name": "Melodious Home Assistant",
+        "__type": "IrProtocol",
+        "CarrierFrequency": 38000,
+        "IRSegments": [],
+        "CodeSegments": [],
+        "KeyCode": null,
+        "HoldMinimumRepeats": null,
+        "ControlSection": {
+          "Url": "http://ha.example:8123/api/webhook/EXAMPLE",
+          "Method": "POST",
+          "Header": "{\"Content-Type\":\"application/json\"}",
+          "Body": "{\"device\":\"{d}\",\"command\":\"{c}\"}",
+          "Timeout": "2"
+        }
+      },
+      {
+        "Id-": 90000002,
+        "Name": "Example NEC",
+        "__type": "IrProtocol",
+        "CarrierFrequency": 38000,
+        "IRSegments": [],
+        "CodeSegments": [],
+        "KeyCode": null
+      }
+    ]
+  },
+  "DeviceList": {
+    "DevicesWithFeatures": [
+      {
+        "Device": {
+          "Id-": 90000010,
+          "Name": "Example TV",
+          "Manufacturer": "Example",
+          "Model": "TV-1",
+          "Transport": 1,
+          "DeviceType": 1,
+          "ControlPort": 1
+        },
+        "Commands": [
+          {"Id-": 90000011, "Name": "PowerOn", "TransportType": 1, "ProtocolId": 90000002, "KeyCode": "0x01", "Raw": null, "Parameters": null, "FunctionId": null},
+          {"Id-": 90000012, "Name": "PowerOff", "TransportType": 1, "ProtocolId": 90000002, "KeyCode": "0x02", "Raw": null, "Parameters": null, "FunctionId": null},
+          {"Id-": 90000013, "Name": "VolumeUp", "TransportType": 1, "ProtocolId": 90000002, "KeyCode": "0x03", "Raw": null, "Parameters": null, "FunctionId": null},
+          {"Id-": 90000014, "Name": "InputHdmi1", "TransportType": 1, "ProtocolId": 90000002, "KeyCode": "0x04", "Raw": null, "Parameters": null, "FunctionId": null},
+          {"Id-": 90000015, "Name": "1", "TransportType": 1, "ProtocolId": 90000002, "KeyCode": "0x05", "Raw": null, "Parameters": null, "FunctionId": null}
+        ],
+        "DeviceFeatures": [
+          {
+            "__type": "PowerFeature",
+            "PowerTypeId": 1,
+            "PowerOnActions": [{"__type": "IRPressAction", "IRCommandName": "PowerOn", "Order": 0, "Duration": null, "ActionId": 0}],
+            "PowerOffActions": [{"__type": "IRPressAction", "IRCommandName": "PowerOff", "Order": 0, "Duration": null, "ActionId": 0}],
+            "PowerToggleActions": []
+          },
+          {
+            "__type": "InputFeature",
+            "InputType": 1,
+            "Inputs": [
+              {"InputName": "HDMI 1", "InputOrder": 0, "Actions": [{"__type": "IRPressAction", "IRCommandName": "InputHdmi1", "Order": 0, "Duration": null, "ActionId": 0}]}
+            ]
+          }
+        ]
+      },
+      {
+        "Device": {
+          "Id-": 90000020,
+          "Name": "Example Lamp",
+          "Manufacturer": "Home Assistant",
+          "ParentDeviceManufacturer": "Home Assistant",
+          "Model": "Home Assistant entity",
+          "Transport": 64,
+          "DeviceType": 44,
+          "Icon": 44,
+          "ControlPort": 7,
+          "AutoDetectedDevice": {"Id": "melodious-ha-90000020"},
+          "Tokens": {"Parameters": [{"Key": "{d}", "Value": "light.example_lamp"}]}
+        },
+        "Commands": [
+          {"Id-": 90000021, "Name": "PowerOn", "TransportType": 64, "ProtocolId": 90000001, "KeyCode": "", "Raw": null, "FunctionId": null, "Parameters": [{"Key": "{c}", "Value": "turn_on"}]},
+          {"Id-": 90000022, "Name": "PowerOff", "TransportType": 64, "ProtocolId": 90000001, "KeyCode": "", "Raw": null, "FunctionId": null, "Parameters": [{"Key": "{c}", "Value": "turn_off"}]},
+          {"Id-": 90000023, "Name": "PowerToggle", "TransportType": 64, "ProtocolId": 90000001, "KeyCode": "", "Raw": null, "FunctionId": null, "Parameters": [{"Key": "{c}", "Value": "toggle"}]},
+          {"Id-": 90000024, "Name": "BrightnessUp", "TransportType": 64, "ProtocolId": 90000001, "KeyCode": "", "Raw": null, "FunctionId": null, "Parameters": [{"Key": "{c}", "Value": "brightness_up"}]}
+        ],
+        "DeviceFeatures": [
+          {
+            "__type": "PowerFeature",
+            "PowerTypeId": 1,
+            "PowerOnActions": [{"__type": "IRPressAction", "IRCommandName": "PowerOn", "Order": 0, "Duration": null, "ActionId": 0}],
+            "PowerOffActions": [{"__type": "IRPressAction", "IRCommandName": "PowerOff", "Order": 0, "Duration": null, "ActionId": 0}],
+            "PowerToggleActions": []
+          }
+        ]
+      },
+      {
+        "Device": {
+          "Id-": 90000030,
+          "Name": "Example Movie Script",
+          "Manufacturer": "Home Assistant",
+          "ParentDeviceManufacturer": "Home Assistant",
+          "Model": "Home Assistant entity",
+          "Transport": 64,
+          "DeviceType": 44,
+          "Icon": 44,
+          "ControlPort": 7,
+          "AutoDetectedDevice": {"Id": "melodious-ha-90000030"},
+          "Tokens": {"Parameters": [{"Key": "{d}", "Value": "script.example_movie"}]}
+        },
+        "Commands": [
+          {"Id-": 90000031, "Name": "Run", "TransportType": 64, "ProtocolId": 90000001, "KeyCode": "", "Raw": null, "FunctionId": null, "Parameters": [{"Key": "{c}", "Value": "turn_on"}]}
+        ],
+        "DeviceFeatures": [
+          {"__type": "PowerFeature", "PowerTypeId": 0, "PowerOnActions": [], "PowerOffActions": [], "PowerToggleActions": []}
+        ]
+      }
+    ]
+  },
+  "ActivityList": {
+    "Activities": [
+      {
+        "Id-": 1900000100,
+        "Name": "Example Activity",
+        "ActivityOrder": 0,
+        "EnterActions": [],
+        "LeaveActions": [],
+        "Roles": [
+          {"__type": "DisplayActivityRole", "Id-": 1900000101, "DeviceId-": 90000010, "SelectedInput": {"Name": "HDMI 1"}, "PowerOnOrder": 0, "PowerOffOrder": 0},
+          {"__type": "VolumeActivityRole", "Id-": 1900000102, "DeviceId-": 90000010}
+        ]
+      }
+    ]
+  },
+  "MapList": {
+    "ButtonMaps": [
+      {
+        "ButtonMapIdentifier": "16414Activity1900000100",
+        "__type": "ActivityButtonMap",
+        "ButtonMapId-": 60000001,
+        "ActivityId-": 1900000100,
+        "SurfaceId-": 60000900,
+        "RemoteId-": 60000901,
+        "ButtonMapSurfaceId-": 60000900,
+        "Sequences": null,
+        "Buttons": [
+          {"__type": "HardRemoteButton", "ButtonId": 1900000201, "ButtonKey": "VolumeUp", "FunctionGroupType": 0, "ButtonState": 1,
+           "ButtonAction": {"__type": "ButtonCommandAction", "DeviceId-": 90000010, "CommandName": "VolumeUp", "FunctionId-": 0, "EventType": 1, "Order": 0, "Id": 0},
+           "ButtonLongPressAction": null, "ButtonDoublePressAction": null},
+          {"__type": "HardRemoteButton", "ButtonId": 1900000202, "ButtonKey": "Number1", "FunctionGroupType": 2, "ButtonState": 1,
+           "ButtonAction": {"__type": "ButtonCommandAction", "DeviceId-": 90000010, "CommandName": "1", "FunctionId-": 0, "EventType": 1, "Order": 0, "Id": 0},
+           "ButtonLongPressAction": null, "ButtonDoublePressAction": null}
+        ]
+      },
+      {
+        "ButtonMapIdentifier": "16417Activity1900000100",
+        "__type": "ActivityButtonMap",
+        "ButtonMapId-": 60000002,
+        "ActivityId-": 1900000100,
+        "SurfaceId-": 60000910,
+        "RemoteId-": 60000911,
+        "ButtonMapSurfaceId-": 60000910,
+        "Sequences": [
+          {
+            "SequenceId": 1900000300,
+            "Name": "Movie mode",
+            "Actions": [
+              {"__type": "ButtonCommandAction", "DeviceId-": 90000030, "CommandName": "Run", "FunctionId-": 0, "Order": 0},
+              {"__type": "ButtonDelayAction", "Duration": 1, "Order": 1},
+              {"__type": "ButtonCommandAction", "DeviceId-": 90000010, "CommandName": "InputHdmi1", "FunctionId-": 0, "Order": 2}
+            ]
+          }
+        ],
+        "Buttons": [
+          {"__type": "HardRemoteButton", "ButtonId": 1900000211, "ButtonKey": "VolumeUp", "FunctionGroupType": 0, "ButtonState": 1,
+           "ButtonAction": {"__type": "ButtonCommandAction", "DeviceId-": 90000010, "CommandName": "VolumeUp", "FunctionId-": 0, "EventType": 1, "Order": 0, "Id": 0},
+           "ButtonLongPressAction": null, "ButtonDoublePressAction": null},
+          {"__type": "SoftRemoteButton", "ButtonId": 1900000212, "FunctionGroupType": 0, "ButtonState": 1, "TextOnRemote": "Lamp",
+           "MenuItem": {"IndexInMenu": 0, "MenuName": "Activity.1900000100"}, "ButtonImagePath": null, "ButtonImageKey": null, "ImageId-": 0,
+           "ButtonAction": {"__type": "ButtonCommandAction", "DeviceId-": 90000020, "CommandName": "PowerToggle", "FunctionId-": 0, "EventType": 0, "Order": 0, "Id": 0},
+           "ButtonLongPressAction": null, "ButtonDoublePressAction": null},
+          {"__type": "SoftRemoteButton", "ButtonId": 1900000213, "FunctionGroupType": 0, "ButtonState": 1, "TextOnRemote": "Movie mode",
+           "MenuItem": {"IndexInMenu": 1, "MenuName": "Activity.1900000100"}, "ButtonImagePath": null, "ButtonImageKey": null, "ImageId-": 0,
+           "ButtonAction": {"__type": "ButtonSequenceAction", "SequenceId": 1900000300, "EventType": 0, "Order": 0, "Id": 0},
+           "ButtonLongPressAction": null, "ButtonDoublePressAction": null},
+          {"__type": "SoftRemoteButton", "ButtonId": 1900000214, "FunctionGroupType": 2, "ButtonState": 1, "TextOnRemote": "1",
+           "MenuItem": {"IndexInMenu": 0, "MenuName": "Activity.1900000100"}, "ButtonImagePath": null, "ButtonImageKey": null, "ImageId-": 0,
+           "ButtonAction": {"__type": "ButtonCommandAction", "DeviceId-": 90000010, "CommandName": "1", "FunctionId-": 0, "EventType": 0, "Order": 0, "Id": 0},
+           "ButtonLongPressAction": null, "ButtonDoublePressAction": null},
+          {"__type": "SoftRemoteButton", "ButtonId": 1900000216, "FunctionGroupType": 36, "ButtonState": 1, "TextOnRemote": "123",
+           "MenuItem": {"IndexInMenu": 2, "MenuName": "Activity.1900000100"}, "ButtonImagePath": null, "ButtonImageKey": null, "ImageId-": 0,
+           "ButtonAction": {"__type": "ButtonClientAction", "ActionName": "Numpad", "EventType": 0, "Order": 0, "Id": 1900000217},
+           "ButtonLongPressAction": null, "ButtonDoublePressAction": null},
+          {"__type": "GestureRemoteButton", "ButtonId": 1900000215, "ButtonKey": "SwipeUp", "FunctionGroupType": 0, "ButtonState": 1, "ButtonImageKey": null,
+           "ButtonAction": {"__type": "ButtonCommandAction", "DeviceId-": 90000010, "CommandName": "VolumeUp", "FunctionId-": 0, "EventType": 1, "Order": 0, "Id": 0},
+           "ButtonLongPressAction": null, "ButtonDoublePressAction": null}
+        ]
+      },
+      {
+        "ButtonMapIdentifier": "16417Device90000010",
+        "__type": "DeviceButtonMap",
+        "ButtonMapId-": 60000003,
+        "DeviceId-": 90000010,
+        "SurfaceId-": 60000910,
+        "RemoteId-": 60000911,
+        "ButtonMapSurfaceId-": 60000910,
+        "Sequences": null,
+        "Buttons": [
+          {"__type": "HardRemoteButton", "ButtonId": 1900000231, "ButtonKey": "VolumeUp", "FunctionGroupType": 0, "ButtonState": 1,
+           "ButtonAction": {"__type": "ButtonCommandAction", "DeviceId-": 90000010, "CommandName": "VolumeUp", "FunctionId-": 0, "EventType": 1, "Order": 0, "Id": 0},
+           "ButtonLongPressAction": null, "ButtonDoublePressAction": null},
+          {"__type": "SoftRemoteButton", "ButtonId": 1900000232, "FunctionGroupType": 0, "ButtonState": 1, "TextOnRemote": "InputHdmi1",
+           "MenuItem": {"IndexInMenu": 0, "MenuName": "Device.90000010"}, "ButtonImagePath": null, "ButtonImageKey": null, "ImageId-": 0,
+           "ButtonAction": {"__type": "ButtonCommandAction", "DeviceId-": 90000010, "CommandName": "InputHdmi1", "FunctionId-": 0, "EventType": 0, "Order": 0, "Id": 0},
+           "ButtonLongPressAction": null, "ButtonDoublePressAction": null}
+        ]
+      },
+      {
+        "ButtonMapIdentifier": "16417Device90000020",
+        "__type": "DeviceButtonMap",
+        "ButtonMapId-": 60000004,
+        "DeviceId-": 90000020,
+        "SurfaceId-": 60000910,
+        "RemoteId-": 60000911,
+        "ButtonMapSurfaceId-": 60000910,
+        "Sequences": null,
+        "Buttons": [
+          {"__type": "HardRemoteButton", "ButtonId": 1900000221, "ButtonKey": "VolumeUp", "FunctionGroupType": 0, "ButtonState": 1,
+           "ButtonAction": {"__type": "ButtonCommandAction", "DeviceId-": 90000020, "CommandName": "BrightnessUp", "FunctionId-": 0, "EventType": 1, "Order": 0, "Id": 0},
+           "ButtonLongPressAction": null, "ButtonDoublePressAction": null},
+          {"__type": "SoftRemoteButton", "ButtonId": 1900000222, "FunctionGroupType": 0, "ButtonState": 1, "TextOnRemote": "PowerOn",
+           "MenuItem": {"IndexInMenu": 0, "MenuName": "Device.90000020"}, "ButtonImagePath": null, "ButtonImageKey": null, "ImageId-": 0,
+           "ButtonAction": {"__type": "ButtonCommandAction", "DeviceId-": 90000020, "CommandName": "PowerOn", "FunctionId-": 0, "EventType": 0, "Order": 0, "Id": 0},
+           "ButtonLongPressAction": null, "ButtonDoublePressAction": null},
+          {"__type": "SoftRemoteButton", "ButtonId": 1900000223, "FunctionGroupType": 0, "ButtonState": 1, "TextOnRemote": "PowerOff",
+           "MenuItem": {"IndexInMenu": 1, "MenuName": "Device.90000020"}, "ButtonImagePath": null, "ButtonImageKey": null, "ImageId-": 0,
+           "ButtonAction": {"__type": "ButtonCommandAction", "DeviceId-": 90000020, "CommandName": "PowerOff", "FunctionId-": 0, "EventType": 0, "Order": 0, "Id": 0},
+           "ButtonLongPressAction": null, "ButtonDoublePressAction": null},
+          {"__type": "SoftRemoteButton", "ButtonId": 1900000224, "FunctionGroupType": 0, "ButtonState": 1, "TextOnRemote": "PowerToggle",
+           "MenuItem": {"IndexInMenu": 2, "MenuName": "Device.90000020"}, "ButtonImagePath": null, "ButtonImageKey": null, "ImageId-": 0,
+           "ButtonAction": {"__type": "ButtonCommandAction", "DeviceId-": 90000020, "CommandName": "PowerToggle", "FunctionId-": 0, "EventType": 0, "Order": 0, "Id": 0},
+           "ButtonLongPressAction": null, "ButtonDoublePressAction": null}
+        ]
+      },
+      {
+        "ButtonMapIdentifier": "16417Device90000030",
+        "__type": "DeviceButtonMap",
+        "ButtonMapId-": 60000005,
+        "DeviceId-": 90000030,
+        "SurfaceId-": 60000910,
+        "RemoteId-": 60000911,
+        "ButtonMapSurfaceId-": 60000910,
+        "Sequences": null,
+        "Buttons": [
+          {"__type": "SoftRemoteButton", "ButtonId": 1900000241, "FunctionGroupType": 0, "ButtonState": 1, "TextOnRemote": "Run",
+           "MenuItem": {"IndexInMenu": 0, "MenuName": "Device.90000030"}, "ButtonImagePath": null, "ButtonImageKey": null, "ImageId-": 0,
+           "ButtonAction": {"__type": "ButtonCommandAction", "DeviceId-": 90000030, "CommandName": "Run", "FunctionId-": 0, "EventType": 0, "Order": 0, "Id": 0},
+           "ButtonLongPressAction": null, "ButtonDoublePressAction": null}
+        ]
+      }
+    ]
+  },
+  "FunctionList": {
+    "FunctionMaps": [
+      {
+        "__type": "ActivityFunctionMap",
+        "ActivityId-": 1900000100,
+        "UIModeName": "Default",
+        "FunctionGroups": [
+          {"Name": "Volume", "Functions": [
+            {"__type": "FunctionAction", "DeviceId-": 90000010, "Name": "VolumeUp", "Label": "Volume Up", "CommandName": "VolumeUp", "FunctionId-": 0, "TransportType": 0}
+          ]},
+          {"Name": "NumericBasic", "Functions": [
+            {"__type": "FunctionAction", "DeviceId-": 90000010, "Name": "Number1", "Label": "1", "CommandName": "1", "FunctionId-": 0, "TransportType": 0}
+          ]}
+        ]
+      }
+    ]
+  },
+  "_expectations": {
+    "VolumeUp hard key (activity)": "sends buttonKey VolumeUp; hub runs TV VolumeUp (IR)",
+    "Tap 'Lamp' (activity soft, index 0)": "sends indexInMenu 0; hub runs HA toggle; a hold >= 300 ms repeats it (P11)",
+    "Tap 'Movie mode' (index 1)": "sends indexInMenu 1; hub runs sequence: HA script, 1 s, TV InputHdmi1; Touch blocks keys until sequenceFinished",
+    "Tap '123' (index 2, FGT 36)": "Touch-local: opens the number pad; nothing sent; not stored on the hub",
+    "Number pad '1' (FGT 2, index 0)": "sends fire, indexInMenu 0, functionGroupType 2; hub runs TV '1'; no clash with 'Lamp' (separate index space)",
+    "SwipeUp": "Touch looks up VolumeUp in 16417Device90000010 (hard button) and sends buttonKey VolumeUp + deviceId 90000010; passes the activity hard-key gate because the activity maps VolumeUp",
+    "Lamp device screen VolumeUp": "sends buttonKey VolumeUp + deviceId 90000020; hub runs HA brightness_up",
+    "Activity start": "TV PowerOn, TV InputHdmi1; HA lamp NOT powered (not a member); HA script not powered (PowerTypeId 0 and not a member)",
+    "Validator": "passes the hub validateGraph rules; 16414 Number1 is FGT 2 (16414-only, as Logitech data)"
+  }
+}
