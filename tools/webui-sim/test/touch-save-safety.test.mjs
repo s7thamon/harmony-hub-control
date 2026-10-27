@@ -1,14 +1,11 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import {
-  buildTouchControlsMapList,
-  controlsSaveOutcome,
-  readGestures,
-  readHardKeys,
-  readTouchScreen,
-  setLabel,
-} from "../public/js/views/touch-model.js";
+/* A namespace import, so these cases also run (and fail) against a model
+   that predates controlsSaveOutcome instead of failing at import. */
+import * as model from "../public/js/views/touch-model.js";
+
+const { buildTouchControlsMapList, readGestures, readHardKeys, readTouchScreen, setLabel } = model;
 
 const load = () => {
   const raw = JSON.parse(readFileSync(new URL("../fixtures/activity-config.json", import.meta.url), "utf8"));
@@ -118,20 +115,20 @@ describe("controlsSaveOutcome", () => {
 
   it("is unchanged when the hub still has the map the editor read", () => {
     const { base, mapList } = sent();
-    assert.equal(controlsSaveOutcome(fixture, ACTIVITY, base, mapList), "unchanged");
+    assert.equal(model.controlsSaveOutcome(fixture, ACTIVITY, base, mapList), "unchanged");
   });
 
   it("is saved when the hub has what was sent, whatever its date", () => {
     const { base, mapList } = sent();
     const now = { ...fixture, mapList: JSON.parse(JSON.stringify(mapList)) };
     touchMapOf(now.mapList, ACTIVITY).DateModified = "/Date(1+0000)/";
-    assert.equal(controlsSaveOutcome(now, ACTIVITY, base, mapList), "saved");
+    assert.equal(model.controlsSaveOutcome(now, ACTIVITY, base, mapList), "saved");
   });
 
   it("is changed when the hub has something else", () => {
     const { base, mapList } = sent();
     const now = load();
     touchMapOf(now.mapList, ACTIVITY).Buttons.find(isSoft).TextOnRemote = "Someone else";
-    assert.equal(controlsSaveOutcome(now, ACTIVITY, base, mapList), "changed");
+    assert.equal(model.controlsSaveOutcome(now, ACTIVITY, base, mapList), "changed");
   });
 });
