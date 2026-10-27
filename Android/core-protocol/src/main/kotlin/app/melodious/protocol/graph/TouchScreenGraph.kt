@@ -164,21 +164,22 @@ object TouchScreenGraph {
             )
         })
 
-        // P06 #5: slots are fixed. Existing buttons keep their IndexInMenu;
-        // new buttons take the lowest free slot (filling gaps first). Nothing renumbers.
+        // P06 #5: slots are fixed. Existing buttons keep the slots they had, as
+        // a set: they're handed out in the draft's order, so a Move swaps two
+        // buttons' slots and nothing else changes. New buttons take the lowest
+        // free slot (filling gaps first). Nothing renumbers.
         // Keep everything the editor doesn't own, and remember which menu slots are taken.
         val kept = (existing?.get("Buttons") as? JsonArray).orEmpty().mapNotNull { it as? JsonObject }.filterNot(::isEditable)
         val usedSlots = mutableSetOf<Int>()
         for (b in kept) {
             if (b.str("__type") == "SoftRemoteButton" && (b["FunctionGroupType"] as? JsonPrimitive)?.intOrNull != NUMPAD_GROUP) {
-                (b["MenuItem"] as? JsonObject)?.get("IndexInMenu")?.jsonPrimitive?.intOrNull?.let { usedSlots.add(it) }
+                slotOf(b)?.let { usedSlots.add(it) }
             }
         }
-        // Existing editable buttons keep their slots.
-        for (button in draft.buttons) {
-            val origSlot = (button.original?.get("MenuItem") as? JsonObject)?.get("IndexInMenu")?.jsonPrimitive?.intOrNull
-            if (button.buttonId != null && origSlot != null) usedSlots.add(origSlot)
-        }
+        val existingSlots = ArrayDeque(
+            draft.buttons.filter { it.buttonId != null }.mapNotNull { slotOf(it.original) }.sorted()
+        )
+        usedSlots.addAll(existingSlots)
         fun freeSlot(): Int {
             var s = 0
             while (s in usedSlots) s += 1
@@ -195,29 +196,20 @@ object TouchScreenGraph {
                 }
             }
             val base = button.original ?: blankSoftButton()
-            // Preserve the original slot; new buttons fill the lowest gap.
-            val slot = if (button.buttonId != null) {
-                (button.original?.get("MenuItem") as? JsonObject)?.get("IndexInMenu")?.jsonPrimitive?.intOrNull ?: freeSlot()
+            val slot = if (button.buttonId != null && slotOf(button.original) != null) {
+                existingSlots.removeFirst()
             } else {
                 freeSlot()
             }
-            val longForNew = if (button.original == null && button.action is SoftButtonAction.Command) {
-                val cmd = (button.action as SoftButtonAction.Command).step.command
-                if (ActivityGraphBuilder.isOneShotCommand(cmd)) actionJson else null
-            } else null
+            val long = longPressFor(button.original, actionJson)
             JsonObject(
                 base.toMutableMap().apply {
                     put("ButtonId", JsonPrimitive(button.buttonId ?: alloc.allocateId()))
                     put("TextOnRemote", JsonPrimitive(button.label.trim().ifBlank { "Button" }))
                     put("ButtonAction", actionJson)
                     put("MenuItem", JsonObject(mapOf("IndexInMenu" to JsonPrimitive(slot), "MenuName" to JsonPrimitive("Activity.${draft.activityId}"))))
-                    // P11: new one-shot soft rows default to self-long (exactly once).
-                    if (longForNew != null) {
-                        put("ButtonLongPressAction", JsonObject(longForNew.toMutableMap().apply {
-                            put("EventType", JsonPrimitive(2))
-                        }))
-                    }
-                    // Existing buttons keep their ButtonLongPressAction/DoublePress via base.
+                    if (long != null) put("ButtonLongPressAction", long)
+                    // Double press, and a long press the row keeps, ride along via base.
                 }
             )
         }
@@ -242,6 +234,38 @@ object TouchScreenGraph {
             mapList = JsonObject(snapshot.mapList.toMutableMap().apply { put("ButtonMaps", JsonArray(merged)) }),
             functionList = snapshot.functionList,
         )
+    }
+
+    private fun slotOf(button: JsonObject?): Int? =
+        (button?.get("MenuItem") as? JsonObject)?.get("IndexInMenu")?.jsonPrimitive?.intOrNull
+
+    private fun sameCommand(a: JsonObject, b: JsonObject): Boolean =
+        a.str("__type") == "ButtonCommandAction" && b.str("__type") == "ButtonCommandAction" &&
+            a.str("DeviceId-") == b.str("DeviceId-") &&
+            a.str("CommandName") == b.str("CommandName") &&
+            ((a["FunctionId-"] as? JsonPrimitive)?.intOrNull ?: 0) == ((b["FunctionId-"] as? JsonPrimitive)?.intOrNull ?: 0)
+
+    /**
+     * P11 press modes, as the web editor sets them. A row whose command is
+     * unchanged keeps its long press (null: leave it). A new row, or one whose
+     * command changed and whose long press was none or a self-long, gets the
+     * recommended mode for the new command: a self-long for one-shot commands,
+     * else none. A separate long command the owner chose stays.
+     */
+    private fun longPressFor(original: JsonObject?, action: JsonObject): JsonElement? {
+        val oldAction = original?.get("ButtonAction") as? JsonObject
+        val oldLong = original?.get("ButtonLongPressAction") as? JsonObject
+        val sameSequence = oldAction?.str("__type") == "ButtonSequenceAction" &&
+            action.str("__type") == "ButtonSequenceAction" && oldAction.str("SequenceId") == action.str("SequenceId")
+        if (original != null && oldAction != null && (oldAction == action || sameCommand(oldAction, action) || sameSequence)) return null
+        if (oldLong != null && !(oldAction != null && sameCommand(oldLong, oldAction))) return null
+        val oneShot = action.str("__type") == "ButtonCommandAction" &&
+            ActivityGraphBuilder.isOneShotCommand(action.str("CommandName"))
+        return when {
+            oneShot -> JsonObject(action.toMutableMap().apply { put("EventType", JsonPrimitive(2)) })
+            original == null -> null
+            else -> JsonNull
+        }
     }
 
     private fun stepJson(step: SequenceStep, order: Int): JsonObject = when (step) {
