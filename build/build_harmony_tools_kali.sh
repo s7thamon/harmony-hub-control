@@ -49,13 +49,17 @@ STRIP=mips-buildroot-linux-uclibc-strip
 # .comment compiler stamp differs, so compare such builds after
 # `llvm-objcopy --remove-section=.comment`.
 #
+# codex_webui 974fe544... (8231751) was built with Homebrew Zig 0.17.0
+# (clang/LLD 22.1.8). Its code and data differ, so it was replaced with the
+# official 0.16.0 build.
+#
 # No absolute private defaults are baked in: both are supplied via
 # environment variables (or the caller's PATH for WEBUI_ZIG).
 # ---------------------------------------------------------------------------
 
 #: expected output digests (fail closed on any mismatch)
-WEBUI_EXPECT_SHA256=0c3a60059267c8dc8fb41fd7bed4c9ed2d3588589688a297b4d1474e0e932996
-WEBUI_EXPECT_SIZE=1144548
+WEBUI_EXPECT_SHA256=e058f7abc1ce2892c741f5451126c91d5f7d5a9b8db834a4829c7159d0dba956
+WEBUI_EXPECT_SIZE=1180692
 PAIR_EXPECT_SHA256=563c6c58a3629edfebd7ec30ebcf14e6384a2d84e89669b1d7c3d79c75b619c8
 PAIR_EXPECT_SIZE=111796
 BTHID_EXPECT_SHA256=099b8a1428c2f34fe0b3428d280f65402cc6a5fd1e8e5723c56b462cc8ec2a86
