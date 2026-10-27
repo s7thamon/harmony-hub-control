@@ -33,7 +33,7 @@ backups.
 <p align="center">
   <img src="docs/screenshots/web/remote.png" alt="The web app's remote on a phone" height="480">
   <img src="docs/screenshots/android/remote.png" alt="The Android app's remote" height="480">
-  <br><sub>The web app (left) and the Android app (right), on a real hub. Network addresses and the Wi-Fi name are masked in every screenshot.</sub>
+  <br><sub>The web app (left) and the Android app (right)</sub>
 </p>
 
 ## At a glance
@@ -563,8 +563,6 @@ package made with `tools/catalog/harmony_catalog.py` (see
 <table>
 <tr><td align="center"><img src="docs/screenshots/desktop/catalog-search-1280.png" alt="Searching Logitech's catalog" width="420"><br><sub>Search and download</sub></td><td align="center"><img src="docs/screenshots/desktop/catalog-preview-1280.png" alt="The catalog preview with a skipped command" width="420"><br><sub>Preview, with skipped commands</sub></td></tr>
 </table>
-
-<sub>The catalog screenshots use test data, not a real Logitech account.</sub>
 
 ## More on the hub
 
