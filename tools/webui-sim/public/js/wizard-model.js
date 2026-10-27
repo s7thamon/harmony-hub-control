@@ -184,23 +184,38 @@ function mappingPointsAtRoleDevice(mapping, roleDeviceIds) {
 
 /**
  * Reconcile draft.buttons after role/device changes or when entering step 3.
- * - Drops mappings whose device is no longer in the role list.
+ * Hardware rules (P06 #7 / P13, proven S2/S3/S4/S5/S6/S8):
+ * - Non-member "Extra controls" are kept (any device in DeviceList works on
+ *   hard keys, even when not a role member). They are flagged `extra: true`
+ *   so the UI can badge them ("Extra control · not powered by activity").
+ * - Mappings whose device vanished from the hub are dropped.
  * - Never overwrites source=user or source=existing.
- * - Fills empty keys (and refreshes source=default) from deriveDefaultButtons.
+ * - Fills empty keys (and refreshes source=default) from deriveDefaultButtons
+ *   only when `fillDefaults` is true. The wizard passes false when opening an
+ *   existing activity, so unmapped keys stay unmapped until the owner picks
+ *   Reset or a per-key default (P06 #7).
  */
-export function reconcileWizardButtons(buttons, roles, devices) {
+export function reconcileWizardButtons(buttons, roles, devices, options) {
+  const fillDefaults = options?.fillDefaults ?? true;
   const roleDeviceIds = new Set(
     (roles ?? []).map((r) => String(r?.deviceId ?? "")).filter(Boolean),
   );
-  const defaults = deriveDefaultButtons(roles, devices);
+  const deviceIds = new Set(
+    (devices ?? []).map((d) => String(d?.id ?? "")).filter(Boolean),
+  );
+  const defaults = fillDefaults ? deriveDefaultButtons(roles, devices) : {};
   const next = {};
 
   for (const [key, mapping] of Object.entries(buttons ?? {})) {
     if (!mapping?.command?.name) continue;
-    if (!mappingPointsAtRoleDevice(mapping, roleDeviceIds)) continue;
+    // Drop mappings whose device is gone from the hub entirely.
+    if (deviceIds.size && !deviceIds.has(String(mapping.deviceId))) continue;
+    // Drop default entries so they refresh from defaults; keep user/existing
+    // even when the device is not a role member (extra controls, P13).
     const source = mapping.source || BUTTON_SOURCE.user;
     if (source === BUTTON_SOURCE.user || source === BUTTON_SOURCE.existing) {
-      next[key] = { ...mapping, source };
+      const extra = !mappingPointsAtRoleDevice(mapping, roleDeviceIds);
+      next[key] = { ...mapping, source, extra };
     }
     /* source=default entries are dropped so they refresh from defaults. */
   }
@@ -220,7 +235,7 @@ export function resetWizardButtonsToDefaults(buttons, roles, devices) {
       kept[key] = mapping;
     }
   }
-  return reconcileWizardButtons(kept, roles, devices);
+  return reconcileWizardButtons(kept, roles, devices, { fillDefaults: true });
 }
 
 /** Revert one key to a fresh default (or remove it if none resolves). */
@@ -311,25 +326,47 @@ function commandAction(deviceId, command, eventType) {
   };
 }
 
-function composeRoles(draft, alloc) {
+function composeRoles(draft, alloc, existingRoles) {
   const orderByDevice = new Map();
   let nextOrder = 1;
+  // Reuse role and SelectedInput IDs by (device, type, input) so an unchanged
+  // save is byte-identical apart from intended fields (P06 #8).
+  const existingByKey = new Map();
+  for (const r of existingRoles ?? []) {
+    const key = `${String(r?.["DeviceId-"])}|${String(r?.__type)}`;
+    if (!existingByKey.has(key)) existingByKey.set(key, []);
+    existingByKey.get(key).push(r);
+  }
   return draft.roles.map((role) => {
     if (!orderByDevice.has(role.deviceId)) {
       orderByDevice.set(role.deviceId, nextOrder);
       nextOrder += 1;
     }
     const order = orderByDevice.get(role.deviceId);
+    const key = `${String(role.deviceId)}|${String(role.roleType)}`;
+    const candidates = existingByKey.get(key) ?? [];
+    // Prefer a candidate with the same input name, else the first unused.
+    let reuse = candidates.find((c) => String(c?.SelectedInput?.Name ?? "") === String(role.input ?? ""))
+      ?? candidates.shift();
+    if (reuse && candidates.includes(reuse)) {
+      // Remove the reused entry so a duplicated role gets a fresh ID.
+      existingByKey.set(key, candidates.filter((c) => c !== reuse));
+    }
+    const inputId = role.input
+      ? (reuse?.SelectedInput?.["Id-"] && String(reuse.SelectedInput.Name) === String(role.input)
+          ? reuse.SelectedInput["Id-"]
+          : alloc.id())
+      : null;
     return {
       "DeviceId-": Number(role.deviceId),
       SelectedInput: role.input
-        ? { ChannelNumber: null, "Id-": alloc.id(), Name: role.input }
+        ? { ChannelNumber: null, "Id-": inputId, Name: role.input }
         : null,
       PowerOffOrder: order,
       __type: role.roleType,
       PowerOnOrder: order,
       NextDevicePowerOnDelay: role.powerDelay ? Number(role.powerDelay) : null,
-      "Id-": alloc.id(),
+      "Id-": reuse?.["Id-"] ?? alloc.id(),
     };
   });
 }
@@ -462,14 +499,19 @@ export function composeKeyboardHidMap({ activityId, deviceId, config, sourceMap,
 }
 
 function composeButtonMap(draft, activityId, config, alloc, existing) {
+  // Reuse ButtonIds by ButtonKey so an unchanged save keeps identities (P06 #8).
+  const existingByKey = new Map();
+  for (const b of existing?.Buttons ?? []) {
+    if (b?.ButtonKey && !existingByKey.has(b.ButtonKey)) existingByKey.set(b.ButtonKey, b);
+  }
   const buttons = [];
   for (const [buttonKey, mapping] of Object.entries(draft.buttons ?? {})) {
     if (!mapping?.command) continue;
     buttons.push({
-      ButtonId: alloc.id(),
+      ButtonId: existingByKey.get(buttonKey)?.ButtonId ?? alloc.id(),
       __type: "HardRemoteButton",
       ButtonAction: commandAction(mapping.deviceId, mapping.command, 1),
-      ButtonDoublePressAction: mapping.doublePress ?? null,
+      ButtonDoublePressAction: mapping.doublePress ?? existingByKey.get(buttonKey)?.ButtonDoublePressAction ?? null,
       FunctionGroupType: /^Number\d$/.test(buttonKey) ? 2 : 0,
       ButtonState: 1,
       ButtonKey: buttonKey,
@@ -788,7 +830,8 @@ export function buildActivityGraph({ config, draft, editId }) {
   activity.ActivityDisplayName = activity.Name;
   activity.Type = Number(draft.type);
   activity.DateModified = harmonyDate();
-  activity.Roles = composeRoles(draft, alloc);
+  const existingRoles = Array.isArray(activity.Roles) ? activity.Roles : [];
+  activity.Roles = composeRoles(draft, alloc, existingRoles);
 
   const activityId = activity["Id-"];
   const existingWizardMap = buttonMaps.find((m) => isWizardOwnedActivityMap(m, activityId));

@@ -322,8 +322,10 @@ export function devices() {
       model: device.Model ?? "",
       type: device.DeviceType ?? "",
       typeLabel: device.DeviceTypeDisplayName || device.DeviceType || "",
-      // Transport 32 is Bluetooth HID; everything else here is sent as IR.
+      transport,
+      // Transport 32 is Bluetooth HID; 64 is Home Assistant IP; else IR.
       isBluetooth: transport === 32,
+      isHa: transport === 64 || String(device.Manufacturer ?? "").toLowerCase().includes("home assistant"),
       entry,
       inputs: inputNames(entry),
       commands: (entry.Commands ?? []).map((c) => ({

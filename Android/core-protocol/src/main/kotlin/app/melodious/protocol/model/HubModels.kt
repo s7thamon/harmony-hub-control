@@ -106,6 +106,10 @@ data class ResolvedButtonAction(
     val holdDeviceName: String? = null,
     val holdCommand: String? = null,
     val holdFunctionId: Int = 0,
+    val doublePressDeviceId: String? = null,
+    val doublePressDeviceName: String? = null,
+    val doublePressCommand: String? = null,
+    val doublePressFunctionId: Int = 0,
 ) {
     val hasHold: Boolean get() = !holdCommand.isNullOrBlank() && !holdDeviceId.isNullOrBlank()
     val summaryText: String get() = "$pressDeviceName · $pressCommand"
@@ -147,7 +151,11 @@ data class WizardButtonMapping(
     val holdDeviceId: String? = null,
     val holdCommandName: String? = null,
     val holdFunctionId: Int = 0,
+    val doublePressDeviceId: String? = null,
+    val doublePressCommandName: String? = null,
+    val doublePressFunctionId: Int = 0,
     val source: ButtonMappingSource = ButtonMappingSource.DEFAULT,
+    val extra: Boolean = false,
 )
 
 @Serializable

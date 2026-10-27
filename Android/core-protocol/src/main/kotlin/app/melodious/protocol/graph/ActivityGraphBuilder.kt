@@ -236,6 +236,9 @@ object ActivityGraphBuilder {
 
     /**
      * Resolve all mapped remote buttons for a given Activity from `MapList.json`.
+     * P06 #4: draft only from the 16414 map, falling back to 16417 hard keys
+     * (mapped DVR→Dvr) only when 16414 is missing. Touch-only and keyboard
+     * keys never leak into 16414. Double-press is carried through (P06 #3).
      */
     fun resolveActivityButtons(
         snapshot: HubConfigSnapshot,
@@ -247,16 +250,31 @@ object ActivityGraphBuilder {
             it["ActivityId-"]?.jsonPrimitive?.content == activityId &&
                 it["__type"]?.jsonPrimitive?.content == "ActivityButtonMap"
         }
-        // Prefer the primary 16414 surface map first, then fall back to other maps
-        val sortedMaps = activityMaps.sortedBy {
-            if (isWizardOwnedActivityMap(it, activityId)) 0 else 1
+        val wizardMap = activityMaps.firstOrNull { isWizardOwnedActivityMap(it, activityId) }
+        // Draft source: 16414 when present, else 16417 hard keys mapped back.
+        val sourceMaps: List<JsonObject> = if (wizardMap != null) {
+            listOf(wizardMap)
+        } else {
+            activityMaps.filter {
+                it["ButtonMapIdentifier"]?.jsonPrimitive?.content == TouchScreenGraph.identifier(activityId)
+            }
+        }
+        fun canonicalKeyFor(map: JsonObject, rawKey: String): String {
+            val id = map["ButtonMapIdentifier"]?.jsonPrimitive?.content.orEmpty()
+            // Touch spells Dvr as DVR; file under the wizard's Dvr name.
+            if (id.startsWith("16417Activity") && rawKey == "DVR") return "Dvr"
+            return rawKey
         }
         val out = LinkedHashMap<String, ResolvedButtonAction>()
-        for (map in sortedMaps) {
+        for (map in sourceMaps) {
             val buttons = (map["Buttons"] as? JsonArray) ?: continue
             for (btnEl in buttons) {
                 val btn = btnEl as? JsonObject ?: continue
-                val key = btn["ButtonKey"]?.jsonPrimitive?.content ?: continue
+                if (btn["__type"]?.jsonPrimitive?.content != "HardRemoteButton") continue
+                val rawKey = btn["ButtonKey"]?.jsonPrimitive?.content ?: continue
+                // Touch has no number keys; never draft them into 16414.
+                if (map !== wizardMap && rawKey !in TOUCH_HARD_KEYS) continue
+                val key = canonicalKeyFor(map, rawKey)
                 if (key in out) continue
                 val pressAction = btn["ButtonAction"] as? JsonObject ?: continue
                 val pressDevId = pressAction["DeviceId-"]?.jsonPrimitive?.content ?: continue
@@ -267,6 +285,11 @@ object ActivityGraphBuilder {
                 val holdDevId = holdAction?.get("DeviceId-")?.jsonPrimitive?.content
                 val holdCmd = holdAction?.get("CommandName")?.jsonPrimitive?.content
                 val holdFnId = holdAction?.get("FunctionId-")?.jsonPrimitive?.intOrNull ?: 0
+
+                val doubleAction = btn["ButtonDoublePressAction"] as? JsonObject
+                val doubleDevId = doubleAction?.get("DeviceId-")?.jsonPrimitive?.content
+                val doubleCmd = doubleAction?.get("CommandName")?.jsonPrimitive?.content
+                val doubleFnId = doubleAction?.get("FunctionId-")?.jsonPrimitive?.intOrNull ?: 0
 
                 out[key] = ResolvedButtonAction(
                     buttonKey = key,
@@ -279,6 +302,10 @@ object ActivityGraphBuilder {
                     holdDeviceName = holdDevId?.let { devicesById[it]?.name ?: "Device $it" },
                     holdCommand = holdCmd,
                     holdFunctionId = holdFnId,
+                    doublePressDeviceId = doubleDevId,
+                    doublePressDeviceName = doubleDevId?.let { devicesById[it]?.name ?: "Device $it" },
+                    doublePressCommand = doubleCmd,
+                    doublePressFunctionId = doubleFnId,
                 )
             }
         }
@@ -393,25 +420,49 @@ object ActivityGraphBuilder {
     }
 
     /**
-     * Reconcile `draft.buttons` after role/device changes:
-     * - Drops mappings whose device is no longer in the role list.
+     * Hardware-proven one-shot commands (P11): toggles double-fire when held
+     * >=300ms, so they need self-long (long == short, EventType 2).
+     */
+    private val ONE_SHOT_COMMANDS = setOf(
+        "powertoggle", "playpause", "mute", "skipforward", "skipback", "run", "activate", "press",
+    )
+
+    fun isOneShotCommand(commandName: String?): Boolean {
+        if (commandName.isNullOrBlank()) return false
+        val key = commandName.lowercase().replace(Regex("[^a-z0-9]"), "")
+        return key in ONE_SHOT_COMMANDS
+    }
+
+    fun recommendedPressMode(commandName: String?): String =
+        if (isOneShotCommand(commandName)) "oneShot" else "standard"
+
+    /**
+     * Reconcile `draft.buttons` after role/device changes (P06 #7 / P13):
+     * - Keeps non-member "Extra controls" (any device in DeviceList works on
+     *   hard keys), flagged `extra=true` for the UI badge.
+     * - Drops only mappings whose device vanished from the hub.
      * - Never overwrites `USER` or `EXISTING` mappings.
-     * - Fills empty keys (and refreshes `DEFAULT` keys) from `deriveDefaultButtons`.
+     * - Fills empty keys from `deriveDefaultButtons` only when `fillDefaults`
+     *   is true. The wizard passes false when opening an existing activity,
+     *   so unmapped keys stay unmapped until Reset.
      */
     fun reconcileWizardButtons(
         buttons: Map<String, WizardButtonMapping>,
         roles: List<WizardRoleDraft>,
         devices: List<HubDevice>,
+        fillDefaults: Boolean = true,
     ): Map<String, WizardButtonMapping> {
         val roleDeviceIds = roles.map { it.deviceId }.filter { it.isNotBlank() }.toSet()
-        val defaults = deriveDefaultButtons(roles, devices)
+        val deviceIds = devices.map { it.id }.filter { it.isNotBlank() }.toSet()
+        val defaults = if (fillDefaults) deriveDefaultButtons(roles, devices) else emptyMap()
         val next = LinkedHashMap<String, WizardButtonMapping>()
 
         for ((key, mapping) in buttons) {
             if (mapping.commandName.isBlank()) continue
-            if (mapping.deviceId !in roleDeviceIds) continue
+            if (deviceIds.isNotEmpty() && mapping.deviceId !in deviceIds) continue
             if (mapping.source == ButtonMappingSource.USER || mapping.source == ButtonMappingSource.EXISTING) {
-                next[key] = mapping
+                val extra = mapping.deviceId !in roleDeviceIds
+                next[key] = mapping.copy(extra = extra)
             }
         }
         for ((key, def) in defaults) {
@@ -595,7 +646,8 @@ object ActivityGraphBuilder {
         }
 
         val cleanName = draft.name.trim().ifEmpty { "New Activity" }
-        val rolesJson = composeRolesJson(draft.roles, alloc, draft.powerOnOrder, draft.powerOffOrder)
+        val existingRolesForReuse = (baseActivityObj["Roles"] as? JsonArray).orEmpty().mapNotNull { it as? JsonObject }
+        val rolesJson = composeRolesJson(draft.roles, alloc, draft.powerOnOrder, draft.powerOffOrder, existingRolesForReuse)
         val updatedActivity = JsonObject(
             baseActivityObj.toMutableMap().apply {
                 put("Name", JsonPrimitive(cleanName))
@@ -788,16 +840,33 @@ object ActivityGraphBuilder {
         alloc: IdAllocator,
         powerOnOrder: List<String> = emptyList(),
         powerOffOrder: List<String> = emptyList(),
+        existingRoles: List<JsonObject> = emptyList(),
     ): JsonArray {
         val onOrders = devicePowerOrders(roles, powerOnOrder)
         val offOrders = devicePowerOrders(roles, powerOffOrder.ifEmpty { powerOnOrder })
+        // P06 #8: reuse role and SelectedInput IDs by (device, type, input).
+        val byKey = existingRoles.groupBy {
+            "${it["DeviceId-"]?.jsonPrimitive?.content}|${it["__type"]?.jsonPrimitive?.content}"
+        }
+        val used = mutableSetOf<JsonObject>()
         val items = roles.map { role ->
             val order = onOrders[role.deviceId] ?: 1
+            val key = "${role.deviceId}|${role.roleType}"
+            val candidates = (byKey[key] ?: emptyList()).filter { it !in used }
+            val reuse = candidates.firstOrNull {
+                (it["SelectedInput"] as? JsonObject)?.get("Name")?.jsonPrimitive?.contentOrNull == role.input
+            } ?: candidates.firstOrNull()
+            if (reuse != null) used.add(reuse)
+            val inputId = if (!role.input.isNullOrBlank()) {
+                val reusedInputId = (reuse?.get("SelectedInput") as? JsonObject)?.get("Id-")?.jsonPrimitive?.intOrNull
+                val reusedName = (reuse?.get("SelectedInput") as? JsonObject)?.get("Name")?.jsonPrimitive?.contentOrNull
+                if (reusedInputId != null && reusedName == role.input) reusedInputId else alloc.allocateId()
+            } else null
             val selectedInput = if (!role.input.isNullOrBlank()) {
                 JsonObject(
                     mapOf(
                         "ChannelNumber" to JsonNull,
-                        "Id-" to JsonPrimitive(alloc.allocateId()),
+                        "Id-" to JsonPrimitive(inputId ?: alloc.allocateId()),
                         "Name" to JsonPrimitive(role.input),
                     )
                 )
@@ -812,7 +881,7 @@ object ActivityGraphBuilder {
                     "__type" to JsonPrimitive(role.roleType),
                     "PowerOnOrder" to JsonPrimitive(order),
                     "NextDevicePowerOnDelay" to (role.powerDelay?.let { JsonPrimitive(it) } ?: JsonNull),
-                    "Id-" to JsonPrimitive(alloc.allocateId()),
+                    "Id-" to JsonPrimitive(reuse?.get("Id-")?.jsonPrimitive?.intOrNull ?: alloc.allocateId()),
                 )
             )
         }
@@ -844,6 +913,10 @@ object ActivityGraphBuilder {
         existingWizardMap: JsonObject?,
         now: String,
     ): JsonObject {
+        // P06 #8: reuse ButtonIds by ButtonKey so an unchanged save keeps identities.
+        val existingByKey = (existingWizardMap?.get("Buttons") as? JsonArray).orEmpty()
+            .mapNotNull { it as? JsonObject }
+            .associateBy { it["ButtonKey"]?.jsonPrimitive?.content.orEmpty() }
         // Strict rule: never emit action-less buttons into an ActivityButtonMap!
         val buttons = draft.buttons.entries.mapNotNull { (buttonKey, mapping) ->
             if (mapping.commandName.isBlank() || mapping.deviceId.isBlank()) return@mapNotNull null
@@ -863,12 +936,23 @@ object ActivityGraphBuilder {
             } else {
                 JsonNull
             }
+            // P06 #3: preserve double-press (Touch and hub both honor it).
+            val doubleAction = if (!mapping.doublePressCommandName.isNullOrBlank() && !mapping.doublePressDeviceId.isNullOrBlank()) {
+                commandActionJson(
+                    deviceId = mapping.doublePressDeviceId.toInt(),
+                    commandName = mapping.doublePressCommandName,
+                    functionId = mapping.doublePressFunctionId,
+                    eventType = 3,
+                )
+            } else {
+                (existingByKey[buttonKey]?.get("ButtonDoublePressAction") as? JsonObject)?.let { it } ?: JsonNull
+            }
             JsonObject(
                 mapOf(
-                    "ButtonId" to JsonPrimitive(alloc.allocateId()),
+                    "ButtonId" to JsonPrimitive(existingByKey[buttonKey]?.get("ButtonId")?.jsonPrimitive?.intOrNull ?: alloc.allocateId()),
                     "__type" to JsonPrimitive("HardRemoteButton"),
                     "ButtonAction" to pressAction,
-                    "ButtonDoublePressAction" to JsonNull,
+                    "ButtonDoublePressAction" to doubleAction,
                     "FunctionGroupType" to JsonPrimitive(if (buttonKey.matches(Regex("^Number\\d$"))) 2 else 0),
                     "ButtonState" to JsonPrimitive(1),
                     "ButtonKey" to JsonPrimitive(buttonKey),

@@ -6,6 +6,210 @@
 import { BUTTON_KEY_BY_LABEL, REMOTE_BUTTONS, commandKey, matchCommand } from "../remote-layout.js";
 import { readDeviceSettings } from "./device-settings-model.js";
 
+/* Hardware-proven press semantics (P11, proven G3/G4/S1/S3/S5/S6):
+   - Standard (hold repeats): plain button, hold ramps (Brightness/Volume/Speed).
+   - One-shot toggles (PowerToggle, PlayPause, Mute, SkipForward/Back, Run,
+     Activate, Press) double-fire when held >=300ms, so they need a self-long
+     (ButtonLongPressAction == ButtonAction, EventType 2) which fires exactly
+     once at release (<600ms) or once at the 2nd hold (>=600ms). */
+export const ONE_SHOT_COMMANDS = Object.freeze([
+  "PowerToggle",
+  "PlayPause",
+  "Mute",
+  "SkipForward",
+  "SkipBack",
+  "Run",
+  "Activate",
+  "Press",
+]);
+
+const ONE_SHOT_KEYS = new Set(ONE_SHOT_COMMANDS.map((c) => commandKey(c)));
+
+/** True when the command needs one-shot (self-long) protection. Case-insensitive, like the engine. */
+export function isOneShotCommand(commandName) {
+  const key = commandKey(commandName);
+  if (!key) return false;
+  if (ONE_SHOT_KEYS.has(key)) return true;
+  // HA preset/step grammar (P15): presets are one-shot, *_step/increment/decrement ramp.
+  if (/^(brightness|position|tilt|temperature|percentage|setvalue|volume|soundmode|hvacmode|presetmode|selectoption|effect|colortemp)/.test(key)) {
+    if (/(step|increment|decrement|next|previous)$/.test(key)) return false;
+    // Discrete presets (Brightness 40, Position 75, discrete selects) are one-shot.
+    if (/^(brightnesspct|position|tilt|temperature|percentage|setvalue|volumeset|soundmode|hvacmode|presetmode|selectoption|effect|colortemp)/.test(key)) return true;
+    return false;
+  }
+  return false;
+}
+
+/** Recommended press mode for a freshly picked command. */
+export function recommendedPressMode(commandName) {
+  return isOneShotCommand(commandName) ? "oneShot" : "standard";
+}
+
+/** Momentary step commands that want plain hold-to-ramp (never one-shot). */
+export function isStepCommand(commandName) {
+  return /^(brightnessup|brightnessdown|volumeup|volumedown|speedup|speeddown)$/i.test(
+    String(commandName ?? "").replace(/[^a-z]/gi, ""),
+  );
+}
+
+/* Gesture keys the Touch resolves locally (P18, proven G1d & S4).
+   The Touch never sends these to the hub; it resolves each against the
+   target device's 16417Device<id> screen and sends an ordinary device-map press. */
+export const GESTURE_KEYS = Object.freeze(["SwipeUp", "SwipeDown", "SwipeLeft", "SwipeRight", "Tap"]);
+export const GESTURE_HOLD_SUFFIX = "Hold";
+export const GESTURE_DOUBLE_KEY = "DoubleTap";
+
+function normCmd(name) {
+  return String(name ?? "").toLowerCase();
+}
+
+/** Device grouping for pickers: members first, HA entities, other IR/BT.
+ *  HA detection: Transport 64, or Home Assistant manufacturer/protocol. */
+export function isHaDevice(device) {
+  if (!device) return false;
+  if (device.isHa === true) return true;
+  const transport = Number(device.transport ?? device.Transport ?? device.entry?.Device?.Transport ?? 1);
+  if (transport === 64) return true;
+  const manu = String(device.manufacturer ?? device.entry?.Device?.Manufacturer ?? "").toLowerCase();
+  if (manu.includes("home assistant")) return true;
+  return false;
+}
+
+export function deviceDomainLabel(device) {
+  const name = String(device?.name ?? "").toLowerCase();
+  const commands = (device?.commands ?? []).map((c) => String(c?.name ?? c).toLowerCase());
+  const has = (...names) => names.some((n) => commands.includes(n));
+  if (has("brightnessup", "brightnessdown") || name.includes("light")) return "Light";
+  if (has("play", "pause", "playpause") || has("volumeup")) {
+    if (commands.includes("run") || commands.includes("activate")) return "Scene / Script";
+    return "Media Player";
+  }
+  if (has("run") || has("activate") || has("press")) return "Scene / Script";
+  if (has("speedup", "speeddown") || has("open", "close")) return "Switch / Fan / Cover";
+  if (isHaDevice(device)) return "Home Assistant";
+  return "Other";
+}
+
+/** Sort devices for pickers: members first, then HA grouped, then others. */
+export function sortPickerDevices(devices, roleIds) {
+  const roles = new Set((roleIds ?? []).map(String));
+  const rank = (d) => {
+    if (roles.has(String(d.id))) return 0;
+    if (isHaDevice(d)) return 1;
+    return 2;
+  };
+  return [...devices].sort((a, b) => rank(a) - rank(b) || String(a.name).localeCompare(String(b.name)));
+}
+
+/** Group devices for pickers with section labels. */
+export function groupPickerDevices(devices, roleIds) {
+  const sorted = sortPickerDevices(devices, roleIds);
+  const members = [];
+  const ha = [];
+  const other = [];
+  for (const d of sorted) {
+    if ((roleIds ?? []).map(String).includes(String(d.id))) members.push(d);
+    else if (isHaDevice(d)) ha.push(d);
+    else other.push(d);
+  }
+  return { members, ha, other };
+}
+
+/* Touch Gesture Lookup Simulator (P18): replicate juniper/gesturepad.lua +
+   harmony.lua key-gate over a MapList.
+   Returns { ok, reason, deviceId, command, resolved: 'soft'|'hard'|null,
+              hardGateOk, warnings[] }. */
+export function simulateGestureLookup(mapList, activityId, gestureKey) {
+  const id = String(activityId);
+  const maps = mapList?.ButtonMaps ?? [];
+  const activityMap = maps.find((m) => String(m?.ButtonMapIdentifier) === `16417Activity${id}`);
+  if (!activityMap) return { ok: false, reason: "no-activity-map", warnings: ["No Touch screen for this activity yet."] };
+  const gesture = (activityMap.Buttons ?? []).find(
+    (b) => String(b?.__type ?? "").includes("GestureRemoteButton") && String(b?.ButtonKey) === String(gestureKey),
+  );
+  if (!gesture) return { ok: false, reason: "no-gesture", warnings: [`No ${gestureKey} gesture on this activity yet.`] };
+  const action = gesture.ButtonAction;
+  if (!action || !String(action?.CommandName ?? "")) {
+    return { ok: false, reason: "no-action", warnings: [`${gestureKey} has no command assigned.`] };
+  }
+  const deviceId = String(action["DeviceId-"] ?? "");
+  const command = String(action.CommandName ?? "");
+  const functionId = Number(action["FunctionId-"] ?? 0);
+  const deviceMap = maps.find((m) => String(m?.ButtonMapIdentifier) === `16417Device${deviceId}`);
+  if (!deviceMap) {
+    return {
+      ok: false, reason: "no-device-screen", deviceId, command, functionId,
+      warnings: [`Device ${deviceId} has no Touch screen, so ${gestureKey} → ${command} does nothing.`],
+    };
+  }
+  const buttons = deviceMap.Buttons ?? [];
+  // Match FunctionId- > 0 first, else CommandName/ButtonKey (Touch behaviour).
+  let target = null;
+  if (Number.isFinite(functionId) && functionId > 0) {
+    target = buttons.find((b) => Number(b?.ButtonAction?.["FunctionId-"] ?? 0) === functionId) ?? null;
+  }
+  if (!target) {
+    const want = normCmd(command);
+    target = buttons.find((b) => {
+      const a = b?.ButtonAction;
+      if (!a || String(a?.__type ?? "").includes("ButtonClientAction")) return false;
+      if (normCmd(a?.CommandName) === want) return true;
+      if (String(b?.ButtonKey ?? "").toLowerCase() === want) return true;
+      return false;
+    }) ?? null;
+  }
+  if (!target) {
+    return {
+      ok: false, reason: "no-command-on-screen", deviceId, command, functionId,
+      warnings: [`Device ${deviceId} has no ${command} on its Touch screen.`],
+    };
+  }
+  const isHard = String(target?.__type ?? "").includes("HardRemoteButton");
+  const warnings = [];
+  if (isOneShotCommand(command)) {
+    warnings.push(`Raw toggles (${command}) on gestures can double-fire: gestures cannot use hub one-shot protection. Prefer discrete On/Off or Up/Down, or enable HA-side debounce.`);
+  }
+  if (isHard) {
+    const key = String(target.ButtonKey ?? "");
+    const activityHard = new Set(
+      (activityMap.Buttons ?? [])
+        .filter((b) => String(b?.__type ?? "").includes("HardRemoteButton"))
+        .map((b) => String(b?.ButtonKey ?? "")),
+    );
+    if (!activityHard.has(key)) {
+      return {
+        ok: false, reason: "hard-gate-blocked", deviceId, command, functionId,
+        resolved: "hard", hardKey: key, hardGateOk: false,
+        warnings: [`${gestureKey} → ${command} resolves to hard key ${key}, which is not mapped in this activity (Touch key gate drops it).`],
+      };
+    }
+    return { ok: true, reason: "hard", deviceId, command, functionId, resolved: "hard", hardKey: key, hardGateOk: true, warnings };
+  }
+  return { ok: true, reason: "soft", deviceId, command, functionId, resolved: "soft", hardGateOk: true, warnings };
+}
+
+export function gestureWarningsForActivity(mapList, activityId) {
+  const out = [];
+  const maps = mapList?.ButtonMaps ?? [];
+  const activityMap = maps.find((m) => String(m?.ButtonMapIdentifier) === `16417Activity${String(activityId)}`);
+  if (!activityMap) return out;
+  for (const b of activityMap.Buttons ?? []) {
+    if (!String(b?.__type ?? "").includes("GestureRemoteButton")) continue;
+    const key = String(b?.ButtonKey ?? "");
+    if (!GESTURE_KEYS.includes(key)) {
+      out.push({ key, level: "warn", message: `Unknown gesture key ${key}; the Touch only resolves SwipeUp/Down/Left/Right and Tap.` });
+      continue;
+    }
+    const sim = simulateGestureLookup(mapList, activityId, key);
+    for (const w of sim.warnings ?? []) out.push({ key, level: sim.ok ? "warn" : "error", message: w, sim });
+    // Long/double on gestures: hub never runs them, Touch resolves locally.
+    if (b?.ButtonLongPressAction && !isOneShotCommand(b?.ButtonAction?.CommandName)) {
+      // Hold-swipes ramp; informational only.
+    }
+  }
+  return out;
+}
+
 /* Firmware ButtonKey for every key on the keypad, with the label people see.
    The physical remote's Back key is stored as PrevChannel in real MapLists. */
 export const KEY_LABELS = Object.freeze({

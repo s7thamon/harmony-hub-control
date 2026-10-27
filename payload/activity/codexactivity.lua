@@ -1314,6 +1314,36 @@ local TOUCH_SCREEN_KEYS = {
   {"PrevChannel", "back|return|previous"}
 }
 
+-- One-shot HA / toggle commands (P11, proven G3/G4/S1/S3/S5/S6): a plain
+-- button double-fires when held >=300ms. Giving the generated device screen
+-- a self-long (ButtonLongPressAction == ButtonAction, EventType 2) makes the
+-- hub fire exactly once per press (short at release <600ms, long at 2nd hold).
+local ONE_SHOT_COMMANDS = {
+  powertoggle = true,
+  playpause = true,
+  mute = true,
+  skipforward = true,
+  skipback = true,
+  run = true,
+  activate = true,
+  press = true,
+}
+
+local function isOneShotCommand(name)
+  if type(name) ~= "string" or name == "" then return false end
+  local key = string.lower(name):gsub("[^%w]", "")
+  return ONE_SHOT_COMMANDS[key] == true
+end
+
+-- Gesture keys the Touch resolves locally (P18, proven G1d & S4).
+local GESTURE_KEYS = {
+  SwipeUp = true,
+  SwipeDown = true,
+  SwipeLeft = true,
+  SwipeRight = true,
+  Tap = true,
+}
+
 -- Every map and button ID in use, and the next free one above the floors.
 local function identityAllocator(...)
   local seen, nextMap, nextButton = {}, MAP_ID_FLOOR + 1, BUTTON_ID_FLOOR + 1
@@ -1470,6 +1500,12 @@ local function touchScreenMap(entry, old, template, alloc)
     local command = screenCommandFor(commands, key[2])
     if command then
       onKey[command] = true
+      -- P11 Option B: one-shot commands get a self-long so the hub fires
+      -- exactly once per press (proven S1/S6 on hard and soft rows).
+      local longPress = json.null
+      if isOneShotCommand(command.Name) then
+        longPress = commandAction(command, 2)
+      end
       hard[#hard + 1] = {
         ButtonId = buttonId("hard:" .. key[1]),
         __type = "HardRemoteButton",
@@ -1478,13 +1514,17 @@ local function touchScreenMap(entry, old, template, alloc)
         FunctionGroupType = 0,
         ButtonState = 1,
         ButtonKey = key[1],
-        ButtonLongPressAction = json.null
+        ButtonLongPressAction = longPress
       }
     end
   end
   local buttons = {}
   for _, command in ipairs(commands) do
     if not onKey[command] then
+      local longPress = json.null
+      if isOneShotCommand(command.Name) then
+        longPress = commandAction(command, 2)
+      end
       buttons[#buttons + 1] = {
         FunctionGroupType = 0,
         ButtonImageKey = json.null,
@@ -1497,7 +1537,7 @@ local function touchScreenMap(entry, old, template, alloc)
         __type = "SoftRemoteButton",
         ButtonImagePath = json.null,
         ButtonDoublePressAction = json.null,
-        ButtonLongPressAction = json.null
+        ButtonLongPressAction = longPress
       }
     end
   end
@@ -1564,6 +1604,138 @@ local function touchScreenSummary(map)
     end
   end
   return summary
+end
+
+-- Touch Gesture Lookup Simulator (P18): replicate juniper/gesturepad.lua +
+-- harmony.lua key-gate over a MapList. Returns {ok, reason, deviceId, command,
+-- functionId, resolved, hardKey, hardGateOk, warnings[]}.
+local function simulateGestureLookup(mapList, activityId, gestureKey)
+  local id = tostring(activityId or "")
+  local maps = type(mapList) == "table" and mapList.ButtonMaps or {}
+  local activityMap
+  for _, m in ipairs(type(maps) == "table" and maps or {}) do
+    if type(m) == "table" and m.ButtonMapIdentifier == "16417Activity" .. id then
+      activityMap = m
+      break
+    end
+  end
+  if not activityMap then
+    return {ok = false, reason = "no-activity-map", warnings = {"No Touch screen for this activity yet."}}
+  end
+  local gesture
+  for _, b in ipairs(type(activityMap.Buttons) == "table" and activityMap.Buttons or {}) do
+    if type(b) == "table" and tostring(b.__type or ""):find("GestureRemoteButton", 1, true)
+        and tostring(b.ButtonKey or "") == tostring(gestureKey) then
+      gesture = b
+      break
+    end
+  end
+  if not gesture then
+    return {ok = false, reason = "no-gesture", warnings = {"No " .. tostring(gestureKey) .. " gesture on this activity yet."}}
+  end
+  local action = type(gesture) == "table" and gesture.ButtonAction or nil
+  if type(action) ~= "table" or type(action.CommandName) ~= "string" or action.CommandName == "" then
+    return {ok = false, reason = "no-action", warnings = {tostring(gestureKey) .. " has no command assigned."}}
+  end
+  local deviceId = tostring(action["DeviceId-"] or "")
+  local command = tostring(action.CommandName or "")
+  local functionId = tonumber(action["FunctionId-"]) or 0
+  local deviceMap
+  for _, m in ipairs(type(maps) == "table" and maps or {}) do
+    if type(m) == "table" and m.ButtonMapIdentifier == "16417Device" .. deviceId then
+      deviceMap = m
+      break
+    end
+  end
+  if not deviceMap then
+    return {ok = false, reason = "no-device-screen", deviceId = deviceId, command = command,
+      functionId = functionId, warnings = {"Device " .. deviceId .. " has no Touch screen, so " .. tostring(gestureKey) .. " does nothing."}}
+  end
+  local buttons = type(deviceMap.Buttons) == "table" and deviceMap.Buttons or {}
+  local target
+  if functionId > 0 then
+    for _, b in ipairs(buttons) do
+      local a = type(b) == "table" and b.ButtonAction or nil
+      if type(a) == "table" and tonumber(a["FunctionId-"]) == functionId then
+        target = b
+        break
+      end
+    end
+  end
+  if not target then
+    local want = string.lower(command)
+    for _, b in ipairs(buttons) do
+      if type(b) == "table" then
+        local a = b.ButtonAction
+        if type(a) == "table" and type(a.__type) == "string" and not a.__type:find("ButtonClientAction", 1, true) then
+          if type(a.CommandName) == "string" and string.lower(a.CommandName) == want then
+            target = b
+            break
+          end
+          if type(b.ButtonKey) == "string" and string.lower(b.ButtonKey) == want then
+            target = b
+            break
+          end
+        end
+      end
+    end
+  end
+  if not target then
+    return {ok = false, reason = "no-command-on-screen", deviceId = deviceId, command = command,
+      functionId = functionId, warnings = {"Device " .. deviceId .. " has no " .. command .. " on its Touch screen."}}
+  end
+  local warnings = {}
+  if isOneShotCommand(command) then
+    warnings[#warnings + 1] = "Raw toggles (" .. command .. ") on gestures can double-fire: gestures cannot use hub one-shot protection. Prefer discrete On/Off or Up/Down."
+  end
+  local isHard = type(target.__type) == "string" and target.__type:find("HardRemoteButton", 1, true) ~= nil
+  if isHard then
+    local key = tostring(target.ButtonKey or "")
+    local activityHard = {}
+    for _, b in ipairs(type(activityMap.Buttons) == "table" and activityMap.Buttons or {}) do
+      if type(b) == "table" and tostring(b.__type or ""):find("HardRemoteButton", 1, true) then
+        activityHard[tostring(b.ButtonKey or "")] = true
+      end
+    end
+    if not activityHard[key] then
+      return {ok = false, reason = "hard-gate-blocked", deviceId = deviceId, command = command,
+        functionId = functionId, resolved = "hard", hardKey = key, hardGateOk = false,
+        warnings = {tostring(gestureKey) .. " resolves to hard key " .. key .. ", which is not mapped in this activity (Touch key gate drops it)."}}
+    end
+    return {ok = true, reason = "hard", deviceId = deviceId, command = command,
+      functionId = functionId, resolved = "hard", hardKey = key, hardGateOk = true, warnings = warnings}
+  end
+  return {ok = true, reason = "soft", deviceId = deviceId, command = command,
+    functionId = functionId, resolved = "soft", hardGateOk = true, warnings = warnings}
+end
+
+-- Warnings for every gesture in an activity map (P07 warning, P18).
+local function gestureWarningsForActivity(mapList, activityId)
+  local out = {}
+  local id = tostring(activityId or "")
+  local maps = type(mapList) == "table" and mapList.ButtonMaps or {}
+  local activityMap
+  for _, m in ipairs(type(maps) == "table" and maps or {}) do
+    if type(m) == "table" and m.ButtonMapIdentifier == "16417Activity" .. id then
+      activityMap = m
+      break
+    end
+  end
+  if not activityMap then return out end
+  for _, b in ipairs(type(activityMap.Buttons) == "table" and activityMap.Buttons or {}) do
+    if type(b) == "table" and tostring(b.__type or ""):find("GestureRemoteButton", 1, true) then
+      local key = tostring(b.ButtonKey or "")
+      if not GESTURE_KEYS[key] then
+        out[#out + 1] = {key = key, level = "warn", message = "Unknown gesture key " .. key .. "; the Touch only resolves SwipeUp/Down/Left/Right and Tap."}
+      else
+        local sim = simulateGestureLookup(mapList, id, key)
+        for _, w in ipairs(sim.warnings or {}) do
+          out[#out + 1] = {key = key, level = sim.ok and "warn" or "error", message = w}
+        end
+      end
+    end
+  end
+  return out
 end
 
 -- Make, rebuild or remove one device's Touch screen. Only MapList changes,
@@ -2340,6 +2512,13 @@ local function processRequest(raw)
     response = commitDeviceScreen(request)
   elseif request.op == "Status" then
     response = statusResponse()
+  elseif request.op == "SimulateGesture" then
+    -- Read-only P18 helper for editors and tests (no writes, no publish).
+    local sim = simulateGestureLookup(request.mapList or {ButtonMaps = {}}, request.activityId, request.gestureKey)
+    response = {ok = true, localOnly = true, simulation = sim}
+  elseif request.op == "GestureWarnings" then
+    local warnings = gestureWarningsForActivity(request.mapList or {ButtonMaps = {}}, request.activityId)
+    response = {ok = true, localOnly = true, warnings = warnings}
   else
     response = {ok = false, localOnly = true, error = "unknown local operation"}
   end

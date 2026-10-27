@@ -29,7 +29,15 @@ import {
   spinner,
 } from "../ui/shell.js";
 import { REMOTE_BUTTONS, commandKey } from "../remote-layout.js";
-import { KEY_LABELS, canonicalKey, deviceIconName, roleLabel } from "./remote-model.js";
+import {
+  KEY_LABELS,
+  canonicalKey,
+  deviceIconName,
+  isHaDevice,
+  isOneShotCommand,
+  roleLabel,
+  sortPickerDevices,
+} from "./remote-model.js";
 
 const STEPS = [
   { label: "Name", next: "Next: devices" },
@@ -162,11 +170,16 @@ export function createWizardView(section) {
       .sort((a, b) => (JOB_RANK.get(a.role.roleType) ?? 99) - (JOB_RANK.get(b.role.roleType) ?? 99) || a.index - b.index);
   }
 
-  /* Keys whose device left the activity drop out; empty keys take the
-     suggestion, except keys the user cleared. What people set, or the
-     activity already had, stays. */
+  /* Keys whose device left the hub drop out. Empty keys take the suggestion
+     only for new activities; existing activities keep unmapped keys unmapped
+     until the owner picks Reset or a per-key default (P06 #7). What people
+     set, or the activity already had (including non-member extra controls,
+     P13), stays. */
   function syncButtonDefaults() {
-    draft.buttons = reconcileWizardButtons(draft.buttons, draft.roles, hub.devices());
+    const isNew = !editId;
+    draft.buttons = reconcileWizardButtons(draft.buttons, draft.roles, hub.devices(), {
+      fillDefaults: isNew,
+    });
     for (const key of cleared) delete draft.buttons[key];
     const back = draft.buttons.PrevChannel;
     if (back?.source === BUTTON_SOURCE.default && !BACK_NAMES.has(commandKey(back.command.name))) delete draft.buttons.PrevChannel;
@@ -233,13 +246,25 @@ export function createWizardView(section) {
   function setPress(key, device, command) {
     const prev = draft.buttons[key];
     cleared.delete(key);
+    const oneShot = isOneShotCommand(command.name);
+    // Auto-default HA toggles to self-long (P11): hold == press prevents
+    // double-fire when held >=300ms. Non-toggles keep prior hold unless it
+    // was a self-long for a previous one-shot (then clear to standard).
+    let hold = prev?.hold ?? null;
+    if (oneShot) {
+      hold = { deviceId: device.id, command: { name: command.name, functionId: command.functionId } };
+    } else if (prev?.hold && prev?.command && prev.hold.deviceId === prev.deviceId
+        && prev.hold.command?.name === prev.command?.name) {
+      hold = null;
+    }
     draft.buttons[key] = {
       deviceId: device.id,
       command: { name: command.name, functionId: command.functionId },
-      hold: prev?.hold ?? null,
+      hold,
       // A double-press action has no control here; it rides along untouched.
       doublePress: prev?.doublePress ?? null,
       source: BUTTON_SOURCE.user,
+      extra: !draft.roles.some((r) => String(r.deviceId) === String(device.id)),
     };
   }
 
@@ -251,6 +276,37 @@ export function createWizardView(section) {
       hold: command ? { deviceId: device.id, command: { name: command.name, functionId: command.functionId } } : null,
       source: BUTTON_SOURCE.user,
     };
+  }
+
+  function setPressMode(key, mode) {
+    const prev = draft.buttons[key];
+    if (!prev?.command) return;
+    if (mode === "standard") {
+      draft.buttons[key] = { ...prev, hold: null, source: BUTTON_SOURCE.user };
+    } else if (mode === "oneShot") {
+      draft.buttons[key] = {
+        ...prev,
+        hold: { deviceId: prev.deviceId, command: { ...prev.command } },
+        source: BUTTON_SOURCE.user,
+      };
+    }
+    // Custom mode is set by picking a distinct Hold command in the Hold tab.
+  }
+
+  function isExtraKey(key) {
+    const m = draft.buttons[key];
+    if (!m?.deviceId) return false;
+    return !draft.roles.some((r) => String(r.deviceId) === String(m.deviceId));
+  }
+
+  function pressModeLabel(key) {
+    const m = draft.buttons[key];
+    if (!m?.command?.name) return "";
+    if (!m.hold?.command?.name) return "Standard";
+    if (String(m.hold.deviceId) === String(m.deviceId) && String(m.hold.command?.name) === String(m.command?.name)) {
+      return "One-shot";
+    }
+    return `Hold: ${m.hold.command.name}`;
   }
 
   function draftFrom(activity) {
@@ -393,20 +449,33 @@ export function createWizardView(section) {
 
   function buttonsStep() {
     const byId = devicesById();
+    const roleIds = draft.roles.map((r) => String(r.deviceId));
     const mapped = ALL_KEYS.filter((k) => draft.buttons[k]?.command?.name).length;
-    return `${intro("Check the buttons", `We filled these in from the devices you picked. Tap any button to change what it does. ${mapped} of ${ALL_KEYS.length} set.`)}
+    const extraCount = ALL_KEYS.filter((k) => {
+      const m = draft.buttons[k];
+      return m?.command?.name && !roleIds.includes(String(m.deviceId));
+    }).length;
+    const hint = extraCount
+      ? `We filled these in from the devices you picked. Extra controls (${extraCount}) stay powered as they are — the activity never turns them on or off. Tap any button to change what it does. ${mapped} of ${ALL_KEYS.length} set.`
+      : `We filled these in from the devices you picked. Tap any button to change what it does. ${mapped} of ${ALL_KEYS.length} set.`;
+    return `${intro("Check the buttons", hint)}
       <button type="button" class="btn btn-text wiz-reset" data-act="undo-buttons"${changedKeys().length ? "" : " disabled"}>Undo my changes</button>
       ${BUTTON_GROUPS.map(([group, keys]) => `${sectionLabel(group)}
         <div class="m-list">${keys.map((key) => {
           const m = draft.buttons[key];
           const set = Boolean(m?.command?.name);
+          const extra = set && !roleIds.includes(String(m.deviceId));
+          const oneShot = set && m.hold?.command?.name
+            && String(m.hold.deviceId) === String(m.deviceId)
+            && String(m.hold.command?.name) === String(m.command?.name);
           return `<button type="button" class="m-row wiz-key" data-key="${key}" aria-haspopup="dialog">
-              <span class="wiz-key-name">${escapeHtml(KEY_LABELS[key])}</span>
+              <span class="wiz-key-name">${escapeHtml(KEY_LABELS[key])}${extra ? ` <span class="chip" title="Not a member: the activity never turns this device on or off">Extra</span>` : ""}</span>
               <span class="wiz-key-value${set ? "" : " is-unset"}">
                 ${set
-                  ? `<span class="wiz-key-line"><span class="wiz-key-device">${escapeHtml(deviceLabel(byId, m.deviceId))}</span><span class="wiz-key-cmd">&nbsp;· ${escapeHtml(m.command.name)}</span></span>`
+                  ? `<span class="wiz-key-line"><span class="wiz-key-device">${escapeHtml(deviceLabel(byId, m.deviceId))}${extra ? " · extra control" : ""}</span><span class="wiz-key-cmd">&nbsp;· ${escapeHtml(m.command.name)}</span></span>`
                   : "<span>Not set</span>"}
-                ${set && m.hold?.command?.name ? `<span class="wiz-key-hold">Hold: ${escapeHtml(m.hold.command.name)}</span>` : ""}
+                ${set && oneShot ? `<span class="wiz-key-hold">One-shot (no hold repeat)</span>` : ""}
+                ${set && !oneShot && m.hold?.command?.name ? `<span class="wiz-key-hold">Hold: ${escapeHtml(m.hold.command.name)}</span>` : ""}
               </span>
             </button>`;
         }).join("")}</div>`).join("")}`;
@@ -631,11 +700,14 @@ export function createWizardView(section) {
     });
   }
 
-  /* One key: Press and Hold tabs, the activity's devices as chips, then that
-     device's commands. Picking a command sets it and closes the sheet. */
+  /* One key: Press and Hold tabs, any device (members first, HA grouped),
+     then that device's commands. Toggles default to one-shot self-long (P11).
+     Picking a command sets it and closes the sheet. */
   function openKeySheet(key) {
     closeSheet();
-    const devices = roleDevices();
+    const roleIds = draft.roles.map((r) => String(r.deviceId));
+    const allDevices = sortPickerDevices(hub.devices(), roleIds);
+    const devices = allDevices.length ? allDevices : [];
     const label = KEY_LABELS[key];
     const mapping = () => draft.buttons[key] ?? null;
     let tab = "press";
@@ -645,7 +717,9 @@ export function createWizardView(section) {
       const want = tab === "hold"
         ? m?.hold?.deviceId || m?.deviceId
         : m?.deviceId || preferredDeviceForButtonKey(key, draft.roles);
-      return devices.some((d) => d.id === want) ? want : devices[0]?.id ?? "";
+      if (devices.some((d) => d.id === want)) return want;
+      // Prefer a member device, else the first HA, else the first device.
+      return devices[0]?.id ?? "";
     };
     let deviceId = startDevice();
 
@@ -659,6 +733,8 @@ export function createWizardView(section) {
               <span data-pick-clear></span>
             </div>
             <p class="pick-now" data-pick-now></p>
+            <div class="m-chips" role="group" aria-label="Press behaviour" data-pick-mode></div>
+            <p class="wiz-hint" data-pick-hint></p>
             <div class="seg-tabs" role="tablist" aria-label="When the key is">
               <button type="button" role="tab" class="seg-tab" data-pick-tab="press">Press</button>
               <button type="button" role="tab" class="seg-tab" data-pick-tab="hold">Hold</button>
@@ -670,18 +746,51 @@ export function createWizardView(section) {
           <div class="pick-foot" data-pick-foot></div>`;
         const $ = (selector) => content.querySelector(selector);
 
+        function pressMode() {
+          const m = mapping();
+          if (!m?.command?.name) return "unset";
+          if (!m.hold?.command?.name) return "standard";
+          if (String(m.hold.deviceId) === String(m.deviceId) && String(m.hold.command?.name) === String(m.command?.name)) return "oneShot";
+          return "custom";
+        }
+
         function drawTop() {
           const m = mapping();
           const byId = devicesById();
           $("[data-pick-clear]").innerHTML = m ? `<button type="button" class="btn btn-text is-destructive" data-pick="clear">Clear</button>` : "";
+          const extra = m && !roleIds.includes(String(m.deviceId)) ? " · Extra control (not powered by activity)" : "";
           $("[data-pick-now]").textContent = m?.command?.name
-            ? `Now: ${deviceLabel(byId, m.deviceId)} · ${m.command.name}${m.hold?.command?.name ? ` · hold: ${m.hold.command.name}` : ""} (${mappingSourceLabel(m.source)})`
+            ? `Now: ${deviceLabel(byId, m.deviceId)} · ${m.command.name}${m.hold?.command?.name ? ` · hold: ${m.hold.command.name}` : ""} (${mappingSourceLabel(m.source)}${extra ? ", extra" : ""})`
             : "Not set yet.";
+          const mode = pressMode();
+          $("[data-pick-mode]").innerHTML = m?.command?.name ? [
+            ["standard", "Standard (hold repeats)"],
+            ["oneShot", "One-shot (no double-toggle)"],
+            ["custom", "Hold is different"],
+          ].map(([v, t]) => `<button type="button" class="chip" data-pick-modebtn="${v}" aria-pressed="${mode === v}">${t}</button>`).join("") : "";
+          const hintEl = $("[data-pick-hint]");
+          if (hintEl) {
+            if (!m?.command?.name) hintEl.textContent = "";
+            else if (isOneShotCommand(m.command.name)) {
+              hintEl.textContent = mode === "oneShot"
+                ? "One-shot: fires exactly once even when held (self-long). Recommended for toggles."
+                : "Warning: this toggle double-fires when held ≥300ms unless One-shot is on.";
+            } else {
+              hintEl.textContent = mode === "standard"
+                ? "Standard: holding ramps (volume/brightness) or repeats harmlessly."
+                : "Custom hold: releasing early fires Press, holding fires Hold.";
+            }
+          }
           content.querySelectorAll("[data-pick-tab]").forEach((b) => {
             b.setAttribute("aria-selected", String(b.dataset.pickTab === tab));
             if (b.dataset.pickTab === "hold") b.disabled = !m;
           });
-          $("[data-pick-chips]").innerHTML = devices.map((d) => `<button type="button" class="chip" data-pick-device="${escapeHtml(d.id)}" aria-pressed="${d.id === deviceId}">${escapeHtml(d.name)}</button>`).join("");
+          $("[data-pick-chips]").innerHTML = devices.map((d) => {
+            const isMember = roleIds.includes(String(d.id));
+            const ha = !isMember && isHaDevice(d);
+            const tag = !isMember ? (ha ? " · HA" : " · extra") : "";
+            return `<button type="button" class="chip" data-pick-device="${escapeHtml(d.id)}" aria-pressed="${d.id === deviceId}" title="${isMember ? "Activity member" : "Extra control · not powered by activity"}">${escapeHtml(d.name)}${tag}</button>`;
+          }).join("");
           $("[data-pick-foot]").innerHTML = changedKeys().includes(key)
             ? `<button type="button" class="btn btn-text" data-pick="undo">Undo my change</button>`
             : "";
@@ -724,6 +833,12 @@ export function createWizardView(section) {
         }
 
         content.addEventListener("click", (event) => {
+          const modeBtn = event.target.closest("[data-pick-modebtn]");
+          if (modeBtn) {
+            const mode = modeBtn.dataset.pickModebtn;
+            finish(() => setPressMode(key, mode));
+            return;
+          }
           const tabBtn = event.target.closest("[data-pick-tab]");
           if (tabBtn) {
             if (tabBtn.disabled || tabBtn.dataset.pickTab === tab) return;

@@ -1446,6 +1446,54 @@
     );
   }
 
+  function touchHardKey(buttonKey) {
+    const key = buttonKey === "Dvr" ? "DVR" : text(buttonKey);
+    const known = new Set(["Blue", "ChannelDown", "ChannelUp", "DVR", "DirectionDown", "DirectionLeft", "DirectionRight", "DirectionUp", "Exit", "FastForward", "Green", "Guide", "Info", "Menu", "Pause", "Play", "PrevChannel", "Record", "Red", "Rewind", "Select", "Stop", "VolumeDown", "VolumeMute", "VolumeUp", "Yellow"]);
+    return known.has(key) ? key : "";
+  }
+
+  // P06 #1: a hard-key edit on 16414 must reach the Touch's own 16417 map.
+  // The Touch answers hard keys from 16417 only. Mirror the edited key,
+  // preserving the Touch button's ButtonId and key spelling (Dvr→DVR).
+  function mirrorHardKeyToTouch(activityId, buttonKey, sourceButton) {
+    const touchKey = touchHardKey(buttonKey);
+    if (!touchKey) return;
+    const touchMap = activityMaps(activityId).find((m) =>
+      text(m && m.ButtonMapIdentifier) === `16417Activity${activityId}`);
+    if (!touchMap || !Array.isArray(touchMap.Buttons)) return;
+    const existing = touchMap.Buttons.find((b) =>
+      text(b && b.__type).includes("HardRemoteButton") && text(b && b.ButtonKey) === touchKey);
+    const hasAction = sourceButton && (sourceButton.ButtonAction || sourceButton.ButtonLongPressAction || sourceButton.ButtonDoublePressAction);
+    if (!hasAction) {
+      // Dropping a key on 16414 drops it on the Touch too (explicit remove).
+      if (existing) {
+        touchMap.Buttons = touchMap.Buttons.filter((b) => b !== existing);
+        if (Object.prototype.hasOwnProperty.call(touchMap, "DateModified")) touchMap.DateModified = harmonyDate();
+      }
+      return;
+    }
+    if (existing) {
+      existing.ButtonAction = sourceButton.ButtonAction ? clone(sourceButton.ButtonAction) : null;
+      existing.ButtonLongPressAction = sourceButton.ButtonLongPressAction ? clone(sourceButton.ButtonLongPressAction) : null;
+      existing.ButtonDoublePressAction = sourceButton.ButtonDoublePressAction ? clone(sourceButton.ButtonDoublePressAction) : null;
+      existing.FunctionGroupType = 0;
+      existing.ButtonKey = touchKey;
+      existing.ButtonState = 1;
+    } else {
+      touchMap.Buttons.push({
+        ButtonId: newButtonId(),
+        __type: "HardRemoteButton",
+        ButtonAction: sourceButton.ButtonAction ? clone(sourceButton.ButtonAction) : null,
+        ButtonDoublePressAction: sourceButton.ButtonDoublePressAction ? clone(sourceButton.ButtonDoublePressAction) : null,
+        FunctionGroupType: 0,
+        ButtonState: 1,
+        ButtonKey: touchKey,
+        ButtonLongPressAction: sourceButton.ButtonLongPressAction ? clone(sourceButton.ButtonLongPressAction) : null,
+      });
+    }
+    if (Object.prototype.hasOwnProperty.call(touchMap, "DateModified")) touchMap.DateModified = harmonyDate();
+  }
+
   function setButtonAction(buttonIndex, field, value) {
     const activity = selectedActivity();
     if (!activity) return;
@@ -1462,9 +1510,18 @@
         if (activityNow) renderMappings(activityNow);
         return;
       }
+      // P06 #2: genuine soft presses use EventType 0 (hard keys use 1).
+      const isTouchSoft = text(map && map.ButtonMapIdentifier).startsWith("16417")
+        && text(button.__type).includes("SoftRemoteButton")
+        && field === "ButtonAction";
       const eventType = field === "ButtonLongPressAction" ? 2 :
-        field === "ButtonDoublePressAction" ? 3 : 1;
+        field === "ButtonDoublePressAction" ? 3 : (isTouchSoft ? 0 : 1);
       button[field] = createAction(commandIndex, button[field], eventType);
+    }
+    // P06 #1: mirror 16414 hard-key edits to the Touch map.
+    if (text(map && map.ButtonMapIdentifier).startsWith("16414Activity")
+        && text(button.__type).includes("HardRemoteButton")) {
+      mirrorHardKeyToTouch(objectId(activity), text(button.ButtonKey), button);
     }
     touch(activity);
   }

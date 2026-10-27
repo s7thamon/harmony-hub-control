@@ -120,17 +120,35 @@ only. Editors work to these rules:
 
 | Map | Owned | Carried through |
 | --- | --- | --- |
-| `16417Activity<id>` | On-screen buttons, their sequences, gestures | Number pad, hard buttons, Touch-only actions |
-| `16417Device<id>` made on the hub | The whole map, built from the device's commands (`POST /api/device-screen` or `POST /api/ha-devices`) | Map and button IDs |
+| `16417Activity<id>` | On-screen buttons, their sequences, hard keys, gestures (Touch & HA Control Studio, `#touch/<id>`) | Number pad, Touch-only actions |
+| `16417Device<id>` made on the hub | The whole map, built from the device's commands (`POST /api/device-screen` or `POST /api/ha-devices`), with self-long on one-shot commands | Map and button IDs |
 | `16417Device<id>` made by Logitech | Nothing | The whole map |
-| `16414*`, any root map | Nothing | The whole map |
+| `16414*`, any root map | Nothing (wizard writes `16414Activity<id>`; advanced editor mirrors hard keys to `16417`) | The whole map |
 
 The activity wizard (web and Android) owns each activity's
 `16414Activity<id>` map and the hard buttons of its `16417Activity<id>` map.
-The Touch answers its hard keys from its own `16417` map only; Logitech's
-configs carry the same hard buttons on both maps, minus the number keys
-(which are on screen on the Touch) and with `Dvr` spelled `DVR`.
+The Touch & HA Control Studio (`#touch/<id>`) owns the on-screen rows, hard
+keys and gestures of `16417Activity<id>` directly. The Touch answers its
+hard keys from its own `16417` map only; Logitech's configs carry the same
+hard buttons on both maps, minus the number keys (which are on screen on
+the Touch) and with `Dvr` spelled `DVR`.
 
+- Non-member "Extra controls" (any device in `DeviceList`, including HA
+  lights, media players, scenes, fans, covers) work on hard keys, soft rows
+  and gestures without activity membership (P13). They are badged `Extra`
+  and never power on/off with the activity. Wizard and Touch saves never
+  strip them, and defaults never pick non-member devices.
+- Press modes (P11): Standard (hold repeats, for idempotent and step
+  commands), One-shot self-long (`ButtonLongPressAction` == `ButtonAction`,
+  `EventType: 2`, auto-default for `PowerToggle`, `PlayPause`, `Mute`,
+  `SkipForward`, `SkipBack`, `Run`, `Activate`, `Press`), and Short +
+  Separate Long. One-shot fires exactly once at release (<600ms) or once at
+  the 2nd hold (≥600ms) on both hard and soft rows.
+- Gestures (`SwipeUp/Down/Left/Right`, `Tap` plus Hold/Double-tap) resolve
+  locally on the Touch against `16417Device<id>` (P18). The editor runs the
+  lookup simulator live, warns on raw toggles (no hub one-shot on gestures)
+  and on hard-gate blocks, and offers a one-click fix to add the missing
+  hard key.
 - When the Touch map has no hard buttons (activities made in Melodious), a
   wizard save copies all of them.
 - When it already has some, a save copies only the keys that the edit
@@ -141,9 +159,12 @@ configs carry the same hard buttons on both maps, minus the number keys
 An on-screen button is a `SoftRemoteButton` whose `FunctionGroupType` is not
 2 (the number pad). Its editable fields are its label (`TextOnRemote`, text
 only), its press, long-press and double-press actions, and its menu slot.
-Actions an editor can assign are a device command or a sequence in the same
-map. Buttons that switch to another activity, and home control and program
-actions, keep working and pass through; an editor does not create them.
+Press uses `EventType: 0`; long uses `EventType: 2`. Actions an editor can
+assign are a device command or a sequence in the same map. Buttons that
+switch to another activity, and home control and program actions, keep
+working and pass through; an editor does not create them. Never use
+`ButtonHomeControlAction` on activity or device maps (only `Root` honors
+it); always use `ButtonCommandAction`.
 
 A sequence lives in its map's `Sequences`. Its steps are device commands and
 delays only, run in `Order`. Deleting a sequence deletes the buttons that

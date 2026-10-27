@@ -162,13 +162,7 @@ Home Assistant devices work in three places on the Harmony Touch:
      logs `Device not found` and drops the press. Always use ordinary
      `ButtonCommandAction` bindings to the Home Assistant device in
      `DeviceList`.
-   - Note on the activity wizard: re-saving an activity through the
-     guided wizard reconciles its button maps against the activity's
-     member roles, which strips non-member hard keys and custom hard-key
-     long-press actions while keeping member soft rows. To keep
-     non-member bindings or custom hard-key self-longs intact, edit the
-     Touch screen (`#touch/<activityId>`), use the advanced editor
-     (`#editor`), or add the device as an activity member role.
+   - The Touch & HA Control Studio (`#touch/<activityId>`) and the activity wizard both keep non-member "Extra controls" and their one-shot self-longs across saves. Re-saving never strips them, and defaults never pick non-member devices. Hub-built device screens add self-long (`EventType: 2`) to one-shot commands.
 
 ## The Home Assistant integration
 

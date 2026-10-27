@@ -334,21 +334,27 @@ class ActivityGraphAndLayoutTest {
         assertTrue(buttons.any { it["ButtonKey"]?.jsonPrimitive?.content == "Menu" })
         assertTrue(buttons.any { it["TextOnRemote"]?.jsonPrimitive?.content == "7" })
         assertTrue(buttons.any { it["TextOnRemote"]?.jsonPrimitive?.content == "123" })
-        // Editor buttons skip menu slot 0, which the 123 toggle owns; the existing button keeps its id and extra fields.
+        // P06 #5 fixed slots: existing buttons keep their IndexInMenu (Go home stays at 1);
+        // new buttons take the lowest free slot (Netflix gets 2, since 0 is owned by 123).
+        // Saving never renumbers.
         val renamed = buttons.first { it["TextOnRemote"]?.jsonPrimitive?.content == "Go home" }
         assertEquals("1878029803", renamed["ButtonId"]!!.jsonPrimitive.content)
         assertEquals("4", renamed["ImageId-"]!!.jsonPrimitive.content)
+        assertEquals(1, renamed["MenuItem"]!!.jsonObject["IndexInMenu"]!!.jsonPrimitive.content.toInt())
+        val netflix = buttons.first { it["TextOnRemote"]?.jsonPrimitive?.content == "Netflix" }
+        assertEquals(2, netflix["MenuItem"]!!.jsonObject["IndexInMenu"]!!.jsonPrimitive.content.toInt())
         val slots = buttons.filter { it["TextOnRemote"]?.jsonPrimitive?.content in setOf("Netflix", "Go home") }
             .map { it["MenuItem"]!!.jsonObject["IndexInMenu"]!!.jsonPrimitive.content.toInt() }
-        assertEquals(listOf(1, 2), slots)
+        assertEquals(listOf(2, 1), slots)
         // The other activity's map is unchanged.
         assertEquals(maps.first { it["ButtonMapIdentifier"]!!.jsonPrimitive.content == "16414Activity6" }, root["mapList"]!!.jsonObject["ButtonMaps"]!!.jsonArray[1])
 
         val reread = graph.read(ActivityGraphBuilder.parseConfigSnapshot(JsonObject(root.toMutableMap().apply { put("mapList", built.mapList) })), "5")
-        assertEquals(listOf("Netflix", "Go home"), reread.buttons.map { it.label })
+        // Reread sorts by slot: Go home (slot 1) comes before Netflix (slot 2).
+        assertEquals(listOf("Go home", "Netflix"), reread.buttons.map { it.label })
         assertEquals(1, reread.sequences.size)
         assertEquals(seq.steps, reread.sequences[0].steps)
-        val action = reread.buttons[0].action as app.melodious.protocol.graph.SoftButtonAction.RunSequence
+        val action = reread.buttons.first { it.label == "Netflix" }.action as app.melodious.protocol.graph.SoftButtonAction.RunSequence
         assertEquals(reread.sequences[0].key, action.sequenceKey)
     }
 

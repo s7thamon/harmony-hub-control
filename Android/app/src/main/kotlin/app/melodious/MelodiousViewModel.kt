@@ -1322,6 +1322,9 @@ class MelodiousViewModel(application: Application) : AndroidViewModel(applicatio
                     holdDeviceId = r.holdDeviceId,
                     holdCommandName = r.holdCommand,
                     holdFunctionId = r.holdFunctionId,
+                    doublePressDeviceId = r.doublePressDeviceId,
+                    doublePressCommandName = r.doublePressCommand,
+                    doublePressFunctionId = r.doublePressFunctionId,
                     source = ButtonMappingSource.EXISTING,
                 )
             }
@@ -1348,7 +1351,8 @@ class MelodiousViewModel(application: Application) : AndroidViewModel(applicatio
                     name = activity.name,
                     type = activity.type,
                     roles = roles,
-                    buttons = ActivityGraphBuilder.reconcileWizardButtons(existing, roles, snapshot.devices),
+                    // P06 #7: existing activities keep unmapped keys unmapped until Reset.
+                    buttons = ActivityGraphBuilder.reconcileWizardButtons(existing, roles, snapshot.devices, fillDefaults = false),
                     powerOnOrder = activity.roles.sortedBy { r -> r.powerOnOrder }.map { r -> r.deviceId }.distinct(),
                     powerOffOrder = activity.roles.sortedBy { r -> r.powerOffOrder }.map { r -> r.deviceId }.distinct(),
                     enterSteps = ActivityGraphBuilder.parseActivityActions(rawActivity?.get("EnterActions")),
@@ -1387,6 +1391,7 @@ class MelodiousViewModel(application: Application) : AndroidViewModel(applicatio
 
     fun updateWizardRoles(newRoles: List<WizardRoleDraft>) {
         _uiState.update { state ->
+            val isNew = state.wizardDraft.editActivityId.isNullOrBlank()
             state.copy(
                 wizardDraft = state.wizardDraft.copy(
                     roles = newRoles,
@@ -1394,6 +1399,7 @@ class MelodiousViewModel(application: Application) : AndroidViewModel(applicatio
                         buttons = state.wizardDraft.buttons,
                         roles = newRoles,
                         devices = state.devices,
+                        fillDefaults = isNew,
                     ),
                 )
             )
@@ -1411,9 +1417,16 @@ class MelodiousViewModel(application: Application) : AndroidViewModel(applicatio
 
     fun resetWizardButtonsToDefaults() {
         _uiState.update { state ->
+            // Keep EXISTING mappings (P06 #7); refresh defaults for the rest.
+            val kept = state.wizardDraft.buttons.filterValues { it.source == ButtonMappingSource.EXISTING }
             state.copy(
                 wizardDraft = state.wizardDraft.copy(
-                    buttons = ActivityGraphBuilder.deriveDefaultButtons(state.wizardDraft.roles, state.devices)
+                    buttons = ActivityGraphBuilder.reconcileWizardButtons(
+                        buttons = kept,
+                        roles = state.wizardDraft.roles,
+                        devices = state.devices,
+                        fillDefaults = true,
+                    )
                 )
             )
         }

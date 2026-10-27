@@ -83,6 +83,19 @@ describe("codexactivity.lua validateGraph (LuaJIT)", () => {
     });
     assert.match(out, /34\/34 checks passed/);
   });
+
+  it("gives one-shot device screens self-long and simulates Touch gestures (P11/P18)", (t) => {
+    const probe = spawnSync("luajit", ["-v"], { encoding: "utf8" });
+    if (probe.error || probe.status !== 0) {
+      t.skip("luajit is not available");
+      return;
+    }
+    const out = execFileSync("luajit", ["tools/touch-validator/codexactivity-touch-controls-test.lua"], {
+      cwd: new URL("../../../", import.meta.url).pathname,
+      encoding: "utf8",
+    });
+    assert.match(out, /15\/15 checks passed/);
+  });
 });
 
 describe("netservicestarter.lua Touch Sync guards (LuaJIT)", () => {

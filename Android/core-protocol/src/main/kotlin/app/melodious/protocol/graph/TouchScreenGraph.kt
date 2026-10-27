@@ -66,8 +66,15 @@ object TouchScreenGraph {
     private fun isEditable(button: JsonObject): Boolean {
         if (button.str("__type") != "SoftRemoteButton") return false
         if ((button["FunctionGroupType"] as? JsonPrimitive)?.intOrNull == NUMPAD_GROUP) return false
-        val type = (button["ButtonAction"] as? JsonObject)?.str("__type")
-        return type == "ButtonCommandAction" || type == "ButtonSequenceAction"
+        val action = button["ButtonAction"] as? JsonObject ?: return false
+        val type = action.str("__type")
+        // P06 #6: malformed command buttons (missing DeviceId-/CommandName)
+        // are not editable; they ride through untouched instead of being deleted.
+        return when (type) {
+            "ButtonCommandAction" -> commandStep(action) != null
+            "ButtonSequenceAction" -> true
+            else -> false
+        }
     }
 
     fun read(snapshot: HubConfigSnapshot, activityId: String): TouchScreenDraft {
@@ -157,12 +164,27 @@ object TouchScreenGraph {
             )
         })
 
-        // Keep everything the editor doesn't own, and remember which menu slots those already use.
+        // P06 #5: slots are fixed. Existing buttons keep their IndexInMenu;
+        // new buttons take the lowest free slot (filling gaps first). Nothing renumbers.
+        // Keep everything the editor doesn't own, and remember which menu slots are taken.
         val kept = (existing?.get("Buttons") as? JsonArray).orEmpty().mapNotNull { it as? JsonObject }.filterNot(::isEditable)
-        val reserved = kept.filter { it.str("__type") == "SoftRemoteButton" && (it["FunctionGroupType"] as? JsonPrimitive)?.intOrNull != NUMPAD_GROUP }
-            .mapNotNull { (it["MenuItem"] as? JsonObject)?.get("IndexInMenu")?.jsonPrimitive?.intOrNull }
-            .toSet()
-        val slots = generateSequence(0) { it + 1 }.filter { it !in reserved }.iterator()
+        val usedSlots = mutableSetOf<Int>()
+        for (b in kept) {
+            if (b.str("__type") == "SoftRemoteButton" && (b["FunctionGroupType"] as? JsonPrimitive)?.intOrNull != NUMPAD_GROUP) {
+                (b["MenuItem"] as? JsonObject)?.get("IndexInMenu")?.jsonPrimitive?.intOrNull?.let { usedSlots.add(it) }
+            }
+        }
+        // Existing editable buttons keep their slots.
+        for (button in draft.buttons) {
+            val origSlot = (button.original?.get("MenuItem") as? JsonObject)?.get("IndexInMenu")?.jsonPrimitive?.intOrNull
+            if (button.buttonId != null && origSlot != null) usedSlots.add(origSlot)
+        }
+        fun freeSlot(): Int {
+            var s = 0
+            while (s in usedSlots) s += 1
+            usedSlots.add(s)
+            return s
+        }
 
         val editorButtons = draft.buttons.mapNotNull { button ->
             val actionJson = when (val action = button.action) {
@@ -173,12 +195,29 @@ object TouchScreenGraph {
                 }
             }
             val base = button.original ?: blankSoftButton()
+            // Preserve the original slot; new buttons fill the lowest gap.
+            val slot = if (button.buttonId != null) {
+                (button.original?.get("MenuItem") as? JsonObject)?.get("IndexInMenu")?.jsonPrimitive?.intOrNull ?: freeSlot()
+            } else {
+                freeSlot()
+            }
+            val longForNew = if (button.original == null && button.action is SoftButtonAction.Command) {
+                val cmd = (button.action as SoftButtonAction.Command).step.command
+                if (ActivityGraphBuilder.isOneShotCommand(cmd)) actionJson else null
+            } else null
             JsonObject(
                 base.toMutableMap().apply {
                     put("ButtonId", JsonPrimitive(button.buttonId ?: alloc.allocateId()))
                     put("TextOnRemote", JsonPrimitive(button.label.trim().ifBlank { "Button" }))
                     put("ButtonAction", actionJson)
-                    put("MenuItem", JsonObject(mapOf("IndexInMenu" to JsonPrimitive(slots.next()), "MenuName" to JsonPrimitive("Activity.${draft.activityId}"))))
+                    put("MenuItem", JsonObject(mapOf("IndexInMenu" to JsonPrimitive(slot), "MenuName" to JsonPrimitive("Activity.${draft.activityId}"))))
+                    // P11: new one-shot soft rows default to self-long (exactly once).
+                    if (longForNew != null) {
+                        put("ButtonLongPressAction", JsonObject(longForNew.toMutableMap().apply {
+                            put("EventType", JsonPrimitive(2))
+                        }))
+                    }
+                    // Existing buttons keep their ButtonLongPressAction/DoublePress via base.
                 }
             )
         }
