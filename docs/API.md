@@ -75,6 +75,9 @@ Content-Type: application/json
 stale editor receives `409 Conflict`, preventing another local editor from
 being overwritten. A body missing any of the three resources, or a resource
 that fails validation, gives `400`; unreadable stored resources give `503`.
+If the plugin hasn't answered within 120 s, the reply is `504` with
+`"pending": true`: the save may still land, so nothing is rolled back.
+Reload `/api/activity-config` a minute later to see whether it did.
 Before writing, the Hub snapshots all resource files (see Backup retention).
 The endpoint compares parsed JSON rather than serialized bytes, so
 whitespace, object-key order, escaped characters and equivalent number

@@ -778,7 +778,10 @@ export function createTouchScreenView(section) {
       const outcome = hub.state.configError
         ? "unknown"
         : controlsSaveOutcome(hub.state.config, activityId, base, payload.mapList);
-      if (outcome === "saved") {
+      if (error.status === 504 && outcome !== "saved") {
+        // The hub's writer hasn't answered yet and may still apply this save.
+        snackbar("The hub is still saving. Your changes are still here; reload in a minute to see whether they landed before you save again.", { error: true });
+      } else if (outcome === "saved") {
         dirty = false;
         saved = true;
         reread();
