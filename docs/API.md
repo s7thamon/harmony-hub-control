@@ -835,9 +835,7 @@ The hub installs software only through the installer (`install_webui.py` or
 `POST /api/update-begin`, `/api/update-chunk` and `/api/update-apply`, plus
 `GET/POST /api/update-check-state`. Those took the checksum list from the
 same client that sent the file, so any client on the network could replace
-a hub binary. 1.3.0 removed them; they answer `404`. A signed update
-protocol for the apps is planned; see `docs/RELEASING.md` for how releases
-are signed.
+a hub binary. 1.3.0 removed them; they answer `404`.
 
 ### Backup retention
 

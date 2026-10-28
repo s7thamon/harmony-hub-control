@@ -16,21 +16,14 @@ trusted-LAN equipment.
   off, any device on the network could replace a hub program that way. 1.3.0
   removed those routes, so update older hubs with the installer.
 
-## Release signing
+## Checking a download
 
-Each release's `SHA256SUMS.txt` is signed with an Ed25519 key that the owner
-holds offline (an OpenSSH `SSHSIG`, namespace `melodious-release`). The
-signature covers every asset and `melodious-update.json`, which lists the
-SHA-256 of each hub payload file. The public keys are in
-`docs/release-signers`. Check a download with stock `ssh-keygen`:
-
-```sh
-ssh-keygen -Y verify -f docs/release-signers -I melodious-release \
-  -n melodious-release -s SHA256SUMS.txt.sig < SHA256SUMS.txt
-shasum -a 256 -c SHA256SUMS.txt
-```
-
-`docs/RELEASING.md` covers the keys, rotation and the release steps.
+Releases are not signed. Each release's `SHA256SUMS.txt` lists the SHA-256 of
+every asset, so `shasum -a 256 -c SHA256SUMS.txt` proves a download is intact.
+It doesn't prove who published it: anyone who can publish on the GitHub repo
+can replace both the files and the checksums. The Android APK is the
+exception, because Android only installs an update signed with the same key
+as the installed app (certificate SHA-256 `7a766509…0bd2de`).
 
 ## Never Commit
 

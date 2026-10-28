@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for tools/releases/release.py on a synthetic release, signed with a
-throwaway key made in a temp dir (never a real release key).
+"""Tests for tools/releases/release.py on a synthetic release.
 
   python3 tools/releases/test_release.py
 """
@@ -9,7 +8,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import subprocess
 import sys
 import tempfile
 import unittest
@@ -50,12 +48,6 @@ class ReleaseToolTest(unittest.TestCase):
         root = Path(self.tmp.name)
         self.dir = root / "release"
         self.dir.mkdir()
-        self.key = root / "test_key"
-        subprocess.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", "test-only", "-f", str(self.key)],
-                       check=True)
-        pub = " ".join(self.key.with_suffix(".pub").read_text().split()[:2])
-        self.signers = root / "signers"
-        self.signers.write_text(f'{release.PRINCIPAL} namespaces="{release.NAMESPACE}" {pub}\n')
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -72,12 +64,8 @@ class ReleaseToolTest(unittest.TestCase):
         release.write_sums(self.dir, release.ordered_assets(series, VERSION) + [release.MANIFEST_NAME])
         return manifest
 
-    def sign(self, namespace=release.NAMESPACE, key=None):
-        subprocess.run(["ssh-keygen", "-Y", "sign", "-f", str(key or self.key), "-n", namespace,
-                        str(self.dir / release.SUMS_NAME)], check=True, capture_output=True)
-
     def verify(self):
-        return release.verify_release(self.dir, self.signers, apk_reader=fake_apk)
+        return release.verify_release(self.dir, apk_reader=fake_apk)
 
     def assertRejected(self, pattern):
         with self.assertRaisesRegex(release.ReleaseError, pattern):
@@ -85,7 +73,6 @@ class ReleaseToolTest(unittest.TestCase):
 
     def test_hub_release_round_trip(self):
         manifest = self.make_release()
-        self.sign()
         report = self.verify()
         self.assertIn("matches the assets", report[-1])
         self.assertEqual(manifest["commit"], COMMIT)
@@ -98,43 +85,17 @@ class ReleaseToolTest(unittest.TestCase):
 
     def test_desktop_release_round_trip(self):
         manifest = self.make_release(series="desktop")
-        self.sign()
         self.verify()
         self.assertEqual(manifest["tag"], f"desktop-v{VERSION}")
         self.assertNotIn("hub", manifest)
 
-    def test_unsigned_is_rejected(self):
-        self.make_release()
-        self.assertRejected("SHA256SUMS.txt.sig is missing")
-
-    def test_other_key_is_rejected(self):
-        self.make_release()
-        other = Path(self.tmp.name) / "other_key"
-        subprocess.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", str(other)], check=True)
-        self.sign(key=other)
-        self.assertRejected("signature check failed")
-
-    def test_wrong_namespace_is_rejected(self):
-        self.make_release()
-        self.sign(namespace="file")
-        self.assertRejected("signature check failed")
-
-    def test_tampered_sums_are_rejected(self):
-        self.make_release()
-        self.sign()
-        sums = self.dir / release.SUMS_NAME
-        sums.write_text(sums.read_text().replace("a", "b", 1))
-        self.assertRejected("signature check failed")
-
     def test_tampered_asset_is_rejected(self):
         self.make_release()
-        self.sign()
         (self.dir / f"melodious-{VERSION}.apk").write_bytes(b"swapped")
         self.assertRejected("SHA-256 does not match")
 
     def test_extra_unlisted_asset_is_rejected(self):
         self.make_release()
-        self.sign()
         (self.dir / "surprise.bin").write_bytes(b"x")
         self.assertRejected("not covered")
 
@@ -157,6 +118,12 @@ class ReleaseToolTest(unittest.TestCase):
         with self.assertRaisesRegex(release.ReleaseError, "expected the release key"):
             release.build_manifest(self.dir, "hub", VERSION, "1.2.0", None, apk_reader=wrong)
 
+    def test_edited_sums_are_rejected(self):
+        self.make_release()
+        sums = self.dir / release.SUMS_NAME
+        sums.write_text(sums.read_text().replace("0", "1", 1))
+        self.assertRejected("SHA-256 does not match|bad SHA256SUMS|does not match")
+
     def test_edited_manifest_is_rejected(self):
         self.make_release()
         path = self.dir / release.MANIFEST_NAME
@@ -164,15 +131,7 @@ class ReleaseToolTest(unittest.TestCase):
         data["android"]["minHub"] = "1.0.0"
         path.write_text(json.dumps(data, indent=2) + "\n")
         release.write_sums(self.dir, release.ordered_assets("hub", VERSION) + [release.MANIFEST_NAME])
-        self.sign()
         self.assertRejected("does not match the assets")
-
-    def test_missing_signers_file_is_explained(self):
-        self.make_release()
-        self.sign()
-        with self.assertRaisesRegex(release.ReleaseError, "have not been added yet"):
-            release.verify_release(self.dir, Path(self.tmp.name) / "nope", apk_reader=fake_apk)
-
 
 if __name__ == "__main__":
     unittest.main()

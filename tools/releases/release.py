@@ -1,20 +1,14 @@
 #!/usr/bin/env python3
-"""Release manifest and signature checks for Melodious releases.
+"""Release manifest and checksum checks for Melodious releases.
 
   manifest <dir>  Read the release assets in <dir>, write melodious-update.json
                   (versions, compatibility, and the SHA-256 of every hub payload
-                  file) and SHA256SUMS.txt over all assets including that file,
-                  then print the one signing command the owner runs.
-  verify <dir>    Check SHA256SUMS.txt.sig against docs/release-signers, every
-                  checksum, and that the manifest agrees with the assets.
+                  file) and SHA256SUMS.txt over all assets including that file.
+  verify <dir>    Check every checksum, that nothing in <dir> is left out, and
+                  that the manifest agrees with the assets.
 
-The owner signs by hand; nothing here touches a private key:
-
-  ssh-keygen -Y sign -f <release-key> -n melodious-release SHA256SUMS.txt
-
-Apps and the hub trust SHA256SUMS.txt only when that signature verifies with a
-public key they pin, so the manifest and every asset hash are covered by it.
-See docs/RELEASING.md.
+Releases are not signed: the checksums prove a download is intact, not who
+published it. See docs/RELEASING.md.
 """
 
 from __future__ import annotations
@@ -24,19 +18,14 @@ import hashlib
 import json
 import os
 import re
-import shutil
 import subprocess
 import sys
 import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-SIGNERS = ROOT / "docs" / "release-signers"
-NAMESPACE = "melodious-release"
-PRINCIPAL = "melodious-release"
 MANIFEST_NAME = "melodious-update.json"
 SUMS_NAME = "SHA256SUMS.txt"
-SIG_NAME = "SHA256SUMS.txt.sig"
 SCHEMA = 1
 
 # Certificate SHA-256 of the Android release key (~/.android/melodious-release.jks).
@@ -267,28 +256,7 @@ def parse_sums(text: str) -> dict[str, str]:
 
 # ---------------------------------------------------------------- verify
 
-def verify_signature(folder: Path, signers: Path) -> str:
-    if not signers.is_file():
-        raise ReleaseError(
-            f"{signers} is missing: the release signing public keys have not been added yet (docs/RELEASING.md)"
-        )
-    sig = folder / SIG_NAME
-    if not sig.is_file():
-        raise ReleaseError(f"{SIG_NAME} is missing: sign {SUMS_NAME} first (docs/RELEASING.md)")
-    keygen = shutil.which("ssh-keygen")
-    if not keygen:
-        raise ReleaseError("ssh-keygen not found")
-    with (folder / SUMS_NAME).open("rb") as message:
-        r = subprocess.run([keygen, "-Y", "verify", "-f", str(signers), "-I", PRINCIPAL,
-                            "-n", NAMESPACE, "-s", str(sig)],
-                           stdin=message, capture_output=True, text=True, check=False)
-    if r.returncode != 0:
-        raise ReleaseError(f"signature check failed: {(r.stderr or r.stdout).strip()}")
-    return r.stdout.strip()
-
-
-def verify_release(folder: Path, signers: Path = SIGNERS, apk_reader=apk_info) -> list[str]:
-    report = [verify_signature(folder, signers)]
+def verify_release(folder: Path, apk_reader=apk_info) -> list[str]:
     sums = parse_sums((folder / SUMS_NAME).read_text())
     for name, digest in sums.items():
         path = folder / name
@@ -298,7 +266,7 @@ def verify_release(folder: Path, signers: Path = SIGNERS, apk_reader=apk_info) -
             raise ReleaseError(f"{name}: SHA-256 does not match {SUMS_NAME}")
     unlisted = sorted(p.name for p in folder.iterdir()
                       if p.is_file() and not p.name.startswith(".")
-                      and p.name not in sums and p.name not in (SUMS_NAME, SIG_NAME))
+                      and p.name not in sums and p.name != SUMS_NAME)
     if unlisted:
         raise ReleaseError(f"assets not covered by {SUMS_NAME}: {', '.join(unlisted)}")
     if MANIFEST_NAME not in sums:
@@ -316,9 +284,8 @@ def verify_release(folder: Path, signers: Path = SIGNERS, apk_reader=apk_info) -
     rebuilt = build_manifest(folder, series, version, min_hub, manifest.get("commit"), apk_reader=apk_reader)
     if rebuilt != manifest:
         raise ReleaseError(f"{MANIFEST_NAME} does not match the assets it describes")
-    report.append(f"{len(sums)} files match {SUMS_NAME}; {MANIFEST_NAME} matches the assets "
-                  f"({manifest['tag']}, commit {manifest['commit'][:12]})")
-    return report
+    return [f"{len(sums)} files match {SUMS_NAME}; {MANIFEST_NAME} matches the assets "
+            f"({manifest['tag']}, commit {manifest['commit'][:12]})"]
 
 
 # ---------------------------------------------------------------- CLI
@@ -332,24 +299,17 @@ def main(argv: list[str]) -> int:
     m.add_argument("--series", choices=("hub", "desktop"), default="hub")
     m.add_argument("--min-hub", help="oldest hub software the apps in this release work with")
     m.add_argument("--commit", help="release commit (read from the hub zip comment when omitted)")
-    v = sub.add_parser("verify", help="check the signature, checksums and manifest")
+    v = sub.add_parser("verify", help="check the checksums and manifest")
     v.add_argument("dir", type=Path)
-    v.add_argument("--signers", type=Path, default=SIGNERS)
     args = parser.parse_args(argv)
     try:
         if args.cmd == "manifest":
             manifest = build_manifest(args.dir, args.series, args.version, args.min_hub, args.commit)
             (args.dir / MANIFEST_NAME).write_text(json.dumps(manifest, indent=2) + "\n")
             write_sums(args.dir, ordered_assets(args.series, args.version) + [MANIFEST_NAME])
-            stale = args.dir / SIG_NAME
-            if stale.exists():
-                stale.unlink()
-                print(f"removed the old {SIG_NAME}: it signed the previous {SUMS_NAME}")
             print(f"wrote {args.dir / MANIFEST_NAME} and {args.dir / SUMS_NAME}")
-            print("Now sign it (the owner, with the release key):")
-            print(f"  cd {args.dir} && ssh-keygen -Y sign -f <release-key> -n {NAMESPACE} {SUMS_NAME}")
         else:
-            for line in verify_release(args.dir, args.signers):
+            for line in verify_release(args.dir):
                 print(line)
             print("release verified")
     except ReleaseError as exc:
