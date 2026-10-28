@@ -26,6 +26,9 @@ export { GESTURE_KEYS, isOneShotCommand, recommendedPressMode, simulateGestureLo
 export const LABEL_MAX = 24;
 
 const NUMPAD_GROUP = 2;
+/* Gesture presses: Logitech's gestures, and those tested on the Touch (P26
+   S4), use EventType 1. */
+const GESTURE_EVENT_TYPE = 1;
 const OWNED_ACTIONS = ["ButtonCommandAction", "ButtonSequenceAction", "ButtonActivityAction"];
 
 /** Hard keys the Touch answers (16417 spelling; no number keys, Dvr is DVR). */
@@ -124,7 +127,9 @@ function sameButtonAction(action, wanted) {
 function pressModeFromActions(shortAction, longAction) {
   const shortCmd = describeCommandAction(shortAction);
   const longCmd = describeCommandAction(longAction);
-  if (!longCmd) return "standard";
+  // A long action the editor can't show (a sequence, say) is custom with no
+  // longPress, so saving leaves it as it is.
+  if (!longCmd) return longAction && typeof longAction === "object" ? "custom" : "standard";
   if (shortCmd && sameCommandValue(shortCmd, longCmd)) return "oneShot";
   return "custom";
 }
@@ -414,6 +419,29 @@ export function saveOutcome(config, draft) {
   return JSON.stringify(now) === JSON.stringify(draft.rows.map(screenShape)) ? "saved" : "changed";
 }
 
+/* A map's buttons as the remote sees them: ButtonIds and the date left out,
+   button order ignored. */
+function controlsShape(map) {
+  return (Array.isArray(map?.Buttons) ? map.Buttons : [])
+    .map((button) => {
+      const { ButtonId, ...rest } = button ?? {};
+      void ButtonId;
+      return JSON.stringify(rest);
+    })
+    .sort();
+}
+
+/**
+ * saveOutcome for a save of on-screen buttons, hard keys and gestures
+ * together: `base` is the map text the editor read, `mapList` what it sent.
+ */
+export function controlsSaveOutcome(config, activityId, base, mapList) {
+  const now = touchMap(config, String(activityId));
+  if (JSON.stringify(now) === base) return "unchanged";
+  const sent = (mapList?.ButtonMaps ?? []).find((m) => m?.ButtonMapIdentifier === touchMapIdentifier(activityId));
+  return JSON.stringify(controlsShape(now)) === JSON.stringify(controlsShape(sent)) ? "saved" : "changed";
+}
+
 /* -- Hard keys (16417Activity hard buttons, mirrored from 16414) ------------- */
 
 export function readHardKeys(config, activityId) {
@@ -513,7 +541,7 @@ function longActionFor(row) {
   if (row.pressMode === "standard") return null;
   if (row.pressMode === "oneShot") return commandAction(row.action, 2);
   if (row.pressMode === "custom" && row.longPress) return commandAction(row.longPress, 2);
-  return null;
+  return undefined; // custom long the editor can't show: leave it alone
 }
 
 /* Logitech's key order for an on-screen button. */
@@ -622,13 +650,8 @@ export function buildTouchControlsMapList(config, edits, { now = Date.now() } = 
         button.ButtonAction.EventType = 0;
       }
       // Press mode: old drafts (pressMode == null) leave the hub value alone.
-      if (row.pressMode != null) {
-        button.ButtonLongPressAction = longActionFor(row);
-        if (row.doublePress !== undefined && row.action.kind === "command") {
-          // Preserve double-press unless the draft explicitly changed it.
-          // Soft rows rarely use double-press; carry through.
-        }
-      }
+      const long = longActionFor(row);
+      if (long !== undefined) button.ButtonLongPressAction = long;
       buttons.push(button);
     }
     for (const row of softDraft.rows) {
@@ -708,20 +731,24 @@ export function buildTouchControlsMapList(config, edits, { now = Date.now() } = 
       const row = byKey.get(key);
       if (!row) continue; // removed
       seen.add(key);
-      if (row.action?.kind === "command") {
+      // Only what the owner changed is written: a gesture they didn't touch
+      // keeps its actions and EventType as they are (Logitech's and the
+      // hardware-tested ones use EventType 1).
+      if (row.action?.kind === "command" && !sameCommand(button.ButtonAction, row.action)) {
         if (typeOf(button.ButtonAction).includes("ButtonCommandAction")) {
           button.ButtonAction["DeviceId-"] = Number(row.action.deviceId);
           button.ButtonAction.CommandName = row.action.command;
           button.ButtonAction["FunctionId-"] = Number(row.action.functionId) || 0;
-          button.ButtonAction.EventType = 0;
         } else {
-          button.ButtonAction = commandAction(row.action, 0);
+          button.ButtonAction = commandAction(row.action, GESTURE_EVENT_TYPE);
         }
       }
-      if (row.longPress) button.ButtonLongPressAction = commandAction(row.longPress, 2);
-      else if (row.longPress === null) button.ButtonLongPressAction = null;
+      if (row.longPress && !sameCommand(button.ButtonLongPressAction, row.longPress)) {
+        button.ButtonLongPressAction = commandAction(row.longPress, 2);
+      } else if (row.longPress === null && describeCommandAction(button.ButtonLongPressAction)) {
+        button.ButtonLongPressAction = null;
+      }
       if (row.doublePress !== undefined) button.ButtonDoublePressAction = row.doublePress;
-      // Gesture ButtonKey never changes; EventType stays 0 for press.
       buttons.push(button);
     }
     for (const row of gestureEdits.rows) {
@@ -733,7 +760,7 @@ export function buildTouchControlsMapList(config, edits, { now = Date.now() } = 
       buttons.push({
         ButtonId: alloc.id(),
         __type: "GestureRemoteButton",
-        ButtonAction: commandAction(row.action, 0),
+        ButtonAction: commandAction(row.action, GESTURE_EVENT_TYPE),
         ButtonDoublePressAction: row.doublePress ?? null,
         FunctionGroupType: 0,
         ButtonState: 1,

@@ -14,6 +14,7 @@ import {
   TOUCH_HARD_KEYS,
   addButton,
   buildTouchControlsMapList,
+  controlsSaveOutcome,
   gestureSimulation,
   isChanged,
   isOneShotCommand,
@@ -748,31 +749,48 @@ export function createTouchScreenView(section) {
 
   async function save() {
     if (saving || !dirty) return;
+    let payload;
+    try {
+      payload = currentPayload();
+    } catch (error) {
+      snackbar(`Not saved — ${error.message}`, { error: true });
+      return;
+    }
+    const base = softDraft.base;
     saving = true;
     render();
-    try {
-      await api.saveActivity(currentPayload());
-      dirty = false;
-      saved = true;
-      await hub.reloadConfig();
+    const reread = () => {
       softDraft = readTouchScreen(hub.state.config, activityId);
       hardRows = readHardKeys(hub.state.config, activityId).rows;
       gestureRows = readGestures(hub.state.config, activityId).rows;
-      baseMapText = JSON.stringify(hub.state.config.mapList.ButtonMaps.find((m) => m.ButtonMapIdentifier === `16417Activity${activityId}`));
+    };
+    try {
+      await api.saveActivity(payload);
+      dirty = false;
+      saved = true;
+      await hub.reloadConfig();
+      reread();
       snackbar("Saved. The Touch picks up the change by itself.");
     } catch (error) {
+      // The hub can apply a save and still report a failure (a slow engine),
+      // so look at what it has now before saying what happened.
       await hub.reloadConfig();
-      // Best-effort outcome: if the hub has our edits, treat as saved.
-      try {
-        const tmp = currentPayload();
-        void tmp;
+      const outcome = hub.state.configError
+        ? "unknown"
+        : controlsSaveOutcome(hub.state.config, activityId, base, payload.mapList);
+      if (outcome === "saved") {
         dirty = false;
         saved = true;
-        softDraft = readTouchScreen(hub.state.config, activityId);
-        hardRows = readHardKeys(hub.state.config, activityId).rows;
-        gestureRows = readGestures(hub.state.config, activityId).rows;
+        reread();
         snackbar("Saved, though the hub was slow to confirm. The Touch picks up the change by itself.");
-      } catch (_) {
+      } else if (outcome === "unchanged") {
+        snackbar(`Not saved — ${error.message || "hub error"}. Nothing changed on the hub; your changes are still here, so you can try again.`, { error: true });
+      } else if (outcome === "changed") {
+        dirty = false;
+        saved = true;
+        reread();
+        snackbar("The hub didn't confirm the save, and its copy of this screen changed. This shows what the hub has now.", { error: true });
+      } else {
         snackbar(`Couldn't save — ${error.message || "hub error"}. Reload to see what the hub has.`, { error: true });
       }
     } finally {

@@ -171,7 +171,9 @@ delays only, run in `Order`. Deleting a sequence deletes the buttons that
 run it.
 
 Gestures are `GestureRemoteButton` entries keyed by `ButtonKey`:
-`SwipeUp`, `SwipeDown`, `SwipeLeft`, `SwipeRight`, and `Tap`.
+`SwipeUp`, `SwipeDown`, `SwipeLeft`, `SwipeRight`, and `Tap`. Their press
+uses `EventType: 1`, as Logitech's gestures and the hardware-tested ones do.
+A save changes only the gestures the owner edited.
 
 ### Menu slots
 
