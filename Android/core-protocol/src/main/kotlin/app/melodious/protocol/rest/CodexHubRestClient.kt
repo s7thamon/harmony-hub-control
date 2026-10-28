@@ -12,6 +12,8 @@ import app.melodious.protocol.model.SavedBtScript
 import app.melodious.protocol.catalog.CatalogCommandRow
 import app.melodious.protocol.catalog.hubProtocolNames
 import app.melodious.protocol.model.SystemStatusSnapshot
+import app.melodious.protocol.update.HubSoftware
+import app.melodious.protocol.update.ReleaseVersion
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
@@ -23,6 +25,7 @@ import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -457,6 +460,23 @@ class CodexHubRestClient(
                 cloudBlocked = cloudText != "0",
                 timezone = tzZone,
             )
+        }
+
+    /**
+     * `GET /api/version`: the Melodious release the hub runs. Hubs before 1.3.0 have no such
+     * route and answer 404, reported as [HubSoftware.Legacy]; null when the hub can't be asked.
+     */
+    suspend fun getHubSoftware(endpoint: HubEndpoint): HubSoftware? =
+        withContext(Dispatchers.IO) {
+            try {
+                getJson(endpoint, "/api/version")["version"]?.jsonPrimitive?.contentOrNull
+                    ?.takeIf { ReleaseVersion.parse(it) != null }
+                    ?.let { HubSoftware.Known(it) }
+            } catch (e: HubApiException) {
+                if (e.statusCode == 404) HubSoftware.Legacy else null
+            } catch (e: IOException) {
+                null
+            }
         }
 
     /**

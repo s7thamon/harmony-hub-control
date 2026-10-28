@@ -302,11 +302,17 @@ bundle copy, catalog package or token is ever committed.
   device downloaded.
 - Nothing about the hub: no hub id, address, device list or codes.
 
-**No background traffic:**
-- No telemetry, no crash upload, no update check.
-- The app makes no network request on its own except the SSDP search when
-  the connect screen opens, and `/api/system-status` checks of hubs that
-  answer it.
+**Background traffic:**
+- No telemetry and no crash upload.
+- Update checks happen only if you choose "Check daily" (asked once) or
+  click Check now / Melodious → Check for Updates…. A check is one request
+  to `api.github.com/repos/schlambos/harmony-hub-control/releases`, which
+  shows GitHub your IP address and the app's version, plus
+  `GET /api/version` on your hub. Nothing downloads; the app only opens the
+  release page on github.com. Turn checks off in Settings → Updates.
+- Otherwise the app makes no network request on its own except the SSDP
+  search when the connect screen opens, and `/api/system-status` checks of
+  hubs that answer it.
 
 ## Packaging and release
 

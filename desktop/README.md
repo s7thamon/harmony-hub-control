@@ -77,7 +77,8 @@ npm run test:dist
 - Ad-hoc signed (`identity: "-"`, hardened runtime off). No Developer ID,
   no notarisation, so macOS asks before the first launch (see below).
 - No update feed, no URL scheme, no login item and no helper beyond
-  Electron's own.
+  Electron's own. Update checks (opt-in, `src/updates.js`) read GitHub's
+  release list and only open the release page; they install nothing.
 - `scripts/after-pack.js` gives the main executable its own LC_UUID before
   signing, derived from the bundle id and arch (`scripts/macho-uuid.js`).
   macOS Local Network privacy identifies apps by that UUID, and Electron's
