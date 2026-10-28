@@ -3,6 +3,7 @@
 (() => {
   const bridge = window.melodiousDesktop?.hub;
   const catalogBridge = window.melodiousDesktop?.catalog;
+  const updatesBridge = window.melodiousDesktop?.updates;
   const root = document.getElementById("connectRoot");
   const appbar = document.getElementById("connectAppbar");
   const backBtn = document.getElementById("settingsBackBtn");
@@ -37,6 +38,8 @@
   let statusMsg = "";
   let statusError = false;
   let snackTimer = null;
+  let updates = null; // desktop:updates-get / -check result
+  let updatesBusy = false;
 
   function escapeHtml(value) {
     return String(value ?? "").replace(/[&<>"']/g, (c) =>
@@ -225,6 +228,8 @@
         </div>
       </div>
 
+      ${renderUpdatesSection()}
+
       <h3 class="m-section">Advanced</h3>
       <form id="clientIdForm" class="m-card m-form" novalidate>
         <div class="m-field">
@@ -237,6 +242,81 @@
         </div>
       </form>
     `;
+  }
+
+  function formatCheckedAt(ms) {
+    if (!ms) return "Not checked yet";
+    return `Last checked ${new Date(ms).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}`;
+  }
+
+  function renderUpdatesSection() {
+    if (!updatesBridge) return "";
+    const u = updates;
+    const appTitle = !u
+      ? "Checking…"
+      : u.app
+        ? `Melodious ${u.app.version} is available`
+        : `Melodious ${u.appVersion}`;
+    const appSub = !u
+      ? ""
+      : u.app
+        ? `You have ${u.appVersion}. Download the new version from the release page.`
+        : `${u.checks ? "Checks once a day" : "Daily checks are off"} · ${formatCheckedAt(u.lastCheckedAt)}`;
+    let hubRow = "";
+    if (u && u.hub) {
+      const hubTitle = u.hub.legacy ? "Hub: Melodious 1.2 or older" : `Hub: Melodious ${u.hub.version}`;
+      const hubSub = u.hubNote || (u.latestHub ? "Up to date" : "");
+      hubRow = `
+        <div class="m-row">
+          <span class="m-row-text">
+            <span class="m-row-title" id="updatesHubTitle">${escapeHtml(hubTitle)}</span>
+            <span class="m-row-sub">${escapeHtml(hubSub)}</span>
+          </span>
+          ${
+            u.hubNote && u.latestHub
+              ? `<button type="button" class="btn btn-tonal btn-sm" data-release-url="${escapeHtml(u.latestHub.url)}">Release page</button>`
+              : ""
+          }
+        </div>`;
+    }
+    return `
+      <h3 class="m-section">Updates</h3>
+      <div class="m-list">
+        <div class="m-row">
+          <span class="m-row-text">
+            <span class="m-row-title" id="updatesAppTitle">${escapeHtml(appTitle)}</span>
+            <span class="m-row-sub" id="updatesAppSub">${escapeHtml(appSub)}</span>
+          </span>
+          ${
+            u && u.app
+              ? `<button type="button" class="btn btn-filled btn-sm" data-release-url="${escapeHtml(u.app.url)}">Release page</button>`
+              : ""
+          }
+        </div>
+        ${hubRow}
+      </div>
+      <div style="display:flex;gap:var(--space-2);flex-wrap:wrap;margin-top:var(--space-3)">
+        <button type="button" class="btn btn-tonal" id="updatesCheckBtn" ${updatesBusy ? "disabled" : ""}>
+          ${updatesBusy ? '<span class="m-spinner" aria-hidden="true"></span>' : ""}<span>${updatesBusy ? "Checking…" : "Check now"}</span>
+        </button>
+        ${
+          u
+            ? `<button type="button" class="btn btn-outlined" id="updatesToggleBtn">${u.checks ? "Turn off daily checks" : "Check daily"}</button>`
+            : ""
+        }
+      </div>
+      <p class="m-field-hint">Checks ask GitHub (api.github.com) for Melodious's releases. GitHub sees your IP address and this app's version; nothing about your hub or devices is sent. Nothing downloads unless you open the release page.</p>
+    `;
+  }
+
+  async function loadUpdates() {
+    if (!updatesBridge) return;
+    try {
+      updates = await updatesBridge.get();
+    } catch {
+      updates = null;
+    }
+    render();
   }
 
   function render() {
@@ -360,6 +440,36 @@
 
   root.addEventListener("click", async (event) => {
     const target = event.target;
+    const releaseBtn = target.closest("[data-release-url]");
+    if (releaseBtn && updatesBridge) {
+      await updatesBridge.openRelease(releaseBtn.dataset.releaseUrl);
+      return;
+    }
+    if (target.closest("#updatesCheckBtn") && updatesBridge && !updatesBusy) {
+      updatesBusy = true;
+      render();
+      try {
+        updates = await updatesBridge.check();
+        if (updates.state === "rate-limited") {
+          showSnackbar("GitHub is limiting requests from this network. Try again later.", true);
+        } else if (updates.state === "error") {
+          showSnackbar(updates.error || "Couldn't check for updates.", true);
+        } else if (!updates.app) {
+          showSnackbar("Melodious is up to date.");
+        }
+      } catch (err) {
+        showSnackbar(err?.message || "Couldn't check for updates.", true);
+      } finally {
+        updatesBusy = false;
+        render();
+      }
+      return;
+    }
+    if (target.closest("#updatesToggleBtn") && updatesBridge && updates) {
+      await updatesBridge.setEnabled(!updates.checks);
+      await loadUpdates();
+      return;
+    }
     if (target.closest("#toggleSignInBtn")) {
       syncInputsFromDom();
       showSignIn = true;
@@ -499,6 +609,7 @@
     formClientId = state.clientId || "";
     showSignIn = Boolean(state.hasHubAuth);
     render();
+    if (state.mode === "settings") loadUpdates();
     runDiscovery();
   }
 

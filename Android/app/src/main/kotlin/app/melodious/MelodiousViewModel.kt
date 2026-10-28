@@ -54,6 +54,12 @@ import app.melodious.protocol.model.SystemStatusSnapshot
 import app.melodious.protocol.model.WizardButtonMapping
 import app.melodious.protocol.model.WizardRoleDraft
 import app.melodious.protocol.rest.CodexHubRestClient
+import app.melodious.protocol.update.GitHubReleaseClient
+import app.melodious.protocol.update.GitHubReleases
+import app.melodious.protocol.update.HubSoftware
+import app.melodious.protocol.update.LatestRelease
+import app.melodious.protocol.update.ReleaseFetch
+import app.melodious.protocol.update.ReleaseVersion
 import app.melodious.ssh.HubSshProvisioner
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -90,6 +96,9 @@ data class SendLogEntry(
 )
 
 data class UiMessage(val id: Long, val text: String, val isError: Boolean)
+
+/** "A newer version is out" dialog: for this app, or for the hub when the app is current. */
+data class UpdatePrompt(val title: String, val text: String, val url: String, val version: String, val forHub: Boolean)
 
 /** State of the Import sheet's Logitech catalog tab, kept in the ViewModel. */
 data class CatalogTabState(
@@ -167,7 +176,21 @@ data class MelodiousUiState(
     val systemStatus: SystemStatusSnapshot = SystemStatusSnapshot(),
     val sshConsoleOutput: String = "",
     val sshBusy: Boolean = false,
+
+    // Update notices (nothing is downloaded or installed)
+    val appVersion: String = "",
+    /** Null until the user answers "Check for updates?". */
+    val updateChecks: Boolean? = null,
+    val updateChecking: Boolean = false,
+    val updateLastChecked: Long = 0L,
+    /** Newer than this app, or null. */
+    val latestApp: LatestRelease? = null,
+    val latestHub: LatestRelease? = null,
+    val hubSoftware: HubSoftware? = null,
+    val updatePrompt: UpdatePrompt? = null,
 ) {
+    val hubUpdateNote: String get() = GitHubReleases.hubNote(hubSoftware, latestHub)
+
     val isConnected: Boolean get() = connection == HubConnection.CONNECTED && configSnapshot != null
 
     val activities: List<HubActivity>
@@ -260,6 +283,10 @@ class MelodiousViewModel(application: Application) : AndroidViewModel(applicatio
     private val discovery = HubDiscovery()
     private val hbusClient = HBusWebSocketClient(viewModelScope)
     private val sshProvisioner = HubSshProvisioner()
+    private val releaseClient = GitHubReleaseClient()
+    private val appVersion: String = runCatching {
+        application.packageManager.getPackageInfo(application.packageName, 0).versionName
+    }.getOrNull() ?: "0.0.0"
     private val catalogService = CatalogService(
         http = OkHttpCatalogHttp(),
         tokenStore = LogitechTokenStore(application),
@@ -277,6 +304,11 @@ class MelodiousViewModel(application: Application) : AndroidViewModel(applicatio
             notificationPromptHandled = prefs.notificationPromptHandled,
             catalogSignedIn = catalogService.status().signedIn,
             logitechClientId = prefs.logitechClientId,
+            appVersion = appVersion,
+            updateChecks = prefs.updateChecks,
+            updateLastChecked = prefs.updateLastChecked,
+            latestApp = newerThanThisApp(prefs.updateLatestApp),
+            latestHub = prefs.updateLatestHub,
         )
     )
     val uiState: StateFlow<MelodiousUiState> = _uiState.asStateFlow()
@@ -322,6 +354,7 @@ class MelodiousViewModel(application: Application) : AndroidViewModel(applicatio
                 }
         }
         start()
+        checkForUpdatesIfDue()
     }
 
     // ========================================================================
@@ -432,6 +465,7 @@ class MelodiousViewModel(application: Application) : AndroidViewModel(applicatio
             hbusClient.connect(endpoint)
             startStatePolling(endpoint)
             refreshHubDetails()
+            refreshHubSoftware(endpoint)
             true
         } catch (e: Exception) {
             _uiState.update {
@@ -515,6 +549,7 @@ class MelodiousViewModel(application: Application) : AndroidViewModel(applicatio
         _uiState.update { it.copy(notificationPermissionGranted = RemoteNotification.hasPermission(getApplication())) }
         if (inForeground) return
         inForeground = true
+        checkForUpdatesIfDue()
         val state = _uiState.value
         val endpoint = state.activeEndpoint
         if (endpoint == null || !state.isConnected) {
@@ -896,6 +931,97 @@ class MelodiousViewModel(application: Application) : AndroidViewModel(applicatio
             subtitle = state.deviceNamesFor(activity).joinToString(" · "),
             keys = state.keyMap(RemoteTarget.Activity(activity.id)),
         )
+    }
+
+    // ========================================================================
+    // Update notices: GitHub's release list, once a day after the user says yes
+    // ========================================================================
+
+    private fun newerThanThisApp(release: LatestRelease?): LatestRelease? {
+        val latest = ReleaseVersion.parse(release?.version) ?: return null
+        val mine = ReleaseVersion.parse(appVersion) ?: return null
+        return release.takeIf { latest > mine }
+    }
+
+    fun setUpdateChecks(enabled: Boolean) {
+        prefs.updateChecks = enabled
+        _uiState.update { it.copy(updateChecks = enabled) }
+        if (enabled) checkForUpdatesIfDue()
+    }
+
+    private fun checkForUpdatesIfDue() {
+        if (prefs.updateChecks != true) return
+        if (System.currentTimeMillis() - prefs.updateLastChecked < GitHubReleases.CHECK_INTERVAL_MS) return
+        checkForUpdates(manual = false)
+    }
+
+    /** Scheduled checks speak only about versions not yet dismissed; a manual check always answers. */
+    fun checkForUpdates(manual: Boolean = true) {
+        if (_uiState.value.updateChecking) return
+        _uiState.update { it.copy(updateChecking = true) }
+        viewModelScope.launch {
+            val etag = prefs.updateEtag.takeIf { prefs.updateLastChecked > 0 }
+            val result = releaseClient.fetch(etag, "Melodious/$appVersion (Android)")
+            when (result) {
+                is ReleaseFetch.Fresh -> {
+                    prefs.updateLatestApp = GitHubReleases.latestAndroid(result.releases)
+                    prefs.updateLatestHub = GitHubReleases.latestHub(result.releases)
+                    prefs.updateEtag = result.etag
+                    prefs.updateLastChecked = System.currentTimeMillis()
+                }
+                ReleaseFetch.NotModified -> prefs.updateLastChecked = System.currentTimeMillis()
+                is ReleaseFetch.RateLimited ->
+                    if (manual) showMessage("GitHub is limiting requests from this network. Try again later.", isError = true)
+                is ReleaseFetch.Failed -> if (manual) showMessage(result.message, isError = true)
+            }
+            _uiState.value.activeEndpoint?.let { refreshHubSoftware(it).join() }
+            val latestApp = newerThanThisApp(prefs.updateLatestApp)
+            val latestHub = prefs.updateLatestHub
+            _uiState.update {
+                it.copy(
+                    updateChecking = false,
+                    updateLastChecked = prefs.updateLastChecked,
+                    latestApp = latestApp,
+                    latestHub = latestHub,
+                )
+            }
+            val state = _uiState.value
+            val prompt = when {
+                latestApp != null && (manual || latestApp.version != prefs.updateDismissed) -> UpdatePrompt(
+                    title = "Melodious ${latestApp.version} is available",
+                    text = "You have $appVersion. Download the new version from the release page on GitHub." +
+                        state.hubUpdateNote.takeIf { it.isNotEmpty() }?.let { "\n\n$it" }.orEmpty(),
+                    url = latestApp.url,
+                    version = latestApp.version,
+                    forHub = false,
+                )
+                latestHub != null && state.hubUpdateNote.isNotEmpty() &&
+                    (manual || latestHub.version != prefs.updateDismissedHub) -> UpdatePrompt(
+                    title = "Hub software ${latestHub.version} is available",
+                    text = state.hubUpdateNote,
+                    url = latestHub.url,
+                    version = latestHub.version,
+                    forHub = true,
+                )
+                else -> null
+            }
+            _uiState.update { it.copy(updatePrompt = prompt) }
+            if (manual && prompt == null && (result is ReleaseFetch.Fresh || result == ReleaseFetch.NotModified)) {
+                showMessage("Melodious is up to date.")
+            }
+        }
+    }
+
+    /** "Later" (or opening the release page): scheduled checks stop mentioning this version. */
+    fun dismissUpdatePrompt() {
+        val prompt = _uiState.value.updatePrompt ?: return
+        if (prompt.forHub) prefs.updateDismissedHub = prompt.version else prefs.updateDismissed = prompt.version
+        _uiState.update { it.copy(updatePrompt = null) }
+    }
+
+    private fun refreshHubSoftware(endpoint: HubEndpoint) = viewModelScope.launch {
+        val software = restClient.getHubSoftware(endpoint) ?: return@launch
+        _uiState.update { it.copy(hubSoftware = software) }
     }
 
     fun consumeMessage(id: Long) {

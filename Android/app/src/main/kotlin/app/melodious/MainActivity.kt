@@ -262,6 +262,8 @@ private fun MelodiousApp(
         null -> Unit
     }
 
+    UpdateDialogs(state, viewModel)
+
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         snackbarHost = { AppSnackbarHost(snackbar) },
@@ -312,6 +314,41 @@ private fun MelodiousApp(
 
 private fun snackbarFallback(viewModel: MelodiousViewModel) {
     viewModel.showHint("Swipe down twice, tap the pencil, then drag “Melodious: Turn off” into your tiles.")
+}
+
+/** Asks once whether to check GitHub for updates, then shows "a newer version is out". */
+@Composable
+private fun UpdateDialogs(state: MelodiousUiState, viewModel: MelodiousViewModel) {
+    val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
+    if (state.updateChecks == null && state.isConnected) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = {},
+            title = { Text("Check for updates?") },
+            text = {
+                Text(
+                    "Melodious can ask GitHub once a day whether a newer version is out. GitHub sees your IP " +
+                        "address and this app's version; nothing about your hub or devices is sent. Nothing " +
+                        "downloads unless you choose to. You can change this in Settings."
+                )
+            },
+            confirmButton = { androidx.compose.material3.TextButton(onClick = { viewModel.setUpdateChecks(true) }) { Text("Check daily") } },
+            dismissButton = { androidx.compose.material3.TextButton(onClick = { viewModel.setUpdateChecks(false) }) { Text("Not now") } },
+        )
+        return
+    }
+    val prompt = state.updatePrompt ?: return
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = viewModel::dismissUpdatePrompt,
+        title = { Text(prompt.title) },
+        text = { Text(prompt.text) },
+        confirmButton = {
+            androidx.compose.material3.TextButton(onClick = {
+                if (app.melodious.protocol.update.GitHubReleases.isGitHubUrl(prompt.url)) uriHandler.openUri(prompt.url)
+                viewModel.dismissUpdatePrompt()
+            }) { Text("Open release page") }
+        },
+        dismissButton = { androidx.compose.material3.TextButton(onClick = viewModel::dismissUpdatePrompt) { Text("Later") } },
+    )
 }
 
 @Composable

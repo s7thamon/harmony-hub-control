@@ -3,6 +3,8 @@ package app.melodious.system
 import android.content.Context
 import android.content.SharedPreferences
 import app.melodious.protocol.model.HubEndpoint
+import app.melodious.protocol.update.LatestRelease
+import kotlinx.serialization.json.Json
 
 /**
  * Single source of truth for the hub the user last connected to plus phone-side preferences.
@@ -81,6 +83,46 @@ class HubPrefs(context: Context) {
         get() = prefs.getString(KEY_WIDGET_PENDING, null)
         set(value) = prefs.edit().putString(KEY_WIDGET_PENDING, value).apply()
 
+    /** Null until the user answers "Check for updates?"; then their choice. */
+    var updateChecks: Boolean?
+        get() = if (prefs.contains(KEY_UPDATE_CHECKS)) prefs.getBoolean(KEY_UPDATE_CHECKS, false) else null
+        set(value) = prefs.edit().apply {
+            if (value == null) remove(KEY_UPDATE_CHECKS) else putBoolean(KEY_UPDATE_CHECKS, value)
+        }.apply()
+
+    var updateLastChecked: Long
+        get() = prefs.getLong(KEY_UPDATE_LAST, 0L)
+        set(value) = prefs.edit().putLong(KEY_UPDATE_LAST, value).apply()
+
+    /** ETag of the last release list; a 304 reuses the picks below. */
+    var updateEtag: String
+        get() = prefs.getString(KEY_UPDATE_ETAG, "").orEmpty()
+        set(value) = prefs.edit().putString(KEY_UPDATE_ETAG, value).apply()
+
+    var updateLatestApp: LatestRelease?
+        get() = readRelease(KEY_UPDATE_APP)
+        set(value) = writeRelease(KEY_UPDATE_APP, value)
+
+    var updateLatestHub: LatestRelease?
+        get() = readRelease(KEY_UPDATE_HUB)
+        set(value) = writeRelease(KEY_UPDATE_HUB, value)
+
+    /** App version the user already said "Later" to; scheduled checks stay quiet about it. */
+    var updateDismissed: String
+        get() = prefs.getString(KEY_UPDATE_DISMISSED, "").orEmpty()
+        set(value) = prefs.edit().putString(KEY_UPDATE_DISMISSED, value).apply()
+
+    var updateDismissedHub: String
+        get() = prefs.getString(KEY_UPDATE_DISMISSED_HUB, "").orEmpty()
+        set(value) = prefs.edit().putString(KEY_UPDATE_DISMISSED_HUB, value).apply()
+
+    private fun readRelease(key: String): LatestRelease? =
+        prefs.getString(key, null)?.let { runCatching { Json.decodeFromString(LatestRelease.serializer(), it) }.getOrNull() }
+
+    private fun writeRelease(key: String, value: LatestRelease?) = prefs.edit().apply {
+        if (value == null) remove(key) else putString(key, Json.encodeToString(LatestRelease.serializer(), value))
+    }.apply()
+
     private companion object {
         const val KEY_HOST = "saved_hub_host"
         const val KEY_PORT = "saved_hub_port"
@@ -95,5 +137,12 @@ class HubPrefs(context: Context) {
         const val KEY_ACTIVITIES = "cached_activities"
         const val KEY_CURRENT = "cached_current_activity"
         const val KEY_WIDGET_PENDING = "widget_pending_activity"
+        const val KEY_UPDATE_CHECKS = "update_checks"
+        const val KEY_UPDATE_LAST = "update_last_checked"
+        const val KEY_UPDATE_ETAG = "update_etag"
+        const val KEY_UPDATE_APP = "update_latest_app"
+        const val KEY_UPDATE_HUB = "update_latest_hub"
+        const val KEY_UPDATE_DISMISSED = "update_dismissed"
+        const val KEY_UPDATE_DISMISSED_HUB = "update_dismissed_hub"
     }
 }

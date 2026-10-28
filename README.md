@@ -556,7 +556,9 @@ address.
 
 Your Logitech tokens stay in the app's background process, encrypted with
 your Keychain. The web page, the hub and the logs never see them. The app has
-no telemetry and no update check. Without the app, the same tab opens a
+no telemetry. If you turn on update checks, it asks GitHub once a day for
+Melodious's releases; GitHub sees your IP address and the app's version,
+nothing else. Without the app, the same tab opens a
 package made with `tools/catalog/harmony_catalog.py` (see
 [its README](tools/catalog/README.md)).
 

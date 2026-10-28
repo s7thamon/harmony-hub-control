@@ -339,6 +339,8 @@ Harmony signin, discovery, the anonymous model check, search, and the one
 device downloaded. Nothing about the hub: no hub ID, address, device list
 or codes.
 
-**No background traffic:** no telemetry, no update check, no request on a
-timer. The only network calls are the ones listed above, each started by
-a tap or, for the model check, by typing.
+**No background traffic:** no telemetry. The only network calls are the ones
+listed above, each started by a tap or, for the model check, by typing, plus
+the update check if you turn it on: once a day (when the app opens), one
+request to `api.github.com` for Melodious's releases, which shows GitHub your
+IP address and the app's version.

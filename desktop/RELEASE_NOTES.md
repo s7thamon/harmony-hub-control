@@ -41,12 +41,12 @@ Needs macOS 13 or later and a hub running Melodious 1.2.0 or newer. The app carr
 
 - Logitech tokens stay in the app's background process and are stored encrypted with your Keychain. Sign out deletes them.
 - The hub gets only the imported commands. Logitech gets the sign-in, the searches and the one device you download; nothing about your hub.
-- No telemetry, no crash upload, no update check. The app contacts Logitech only when you sign in, type a model, search or download.
+- No telemetry, no crash upload. If you turn on update checks (the app asks once), it asks GitHub once a day for Melodious's releases; GitHub sees your IP address and the app's version. The app contacts Logitech only when you sign in, type a model, search or download.
 
 ## Known limits
 
 - **Slow saves:** with an activity running, a save can take up to two minutes. If the hub still hasn't finished, the app says so; reload a minute later to check before saving again.
-- **Updates:** download each new version from the release page; the app doesn't update itself. Each build has a new signature, so macOS may ask once more to let Melodious use "Melodious Safe Storage" in your Keychain. Choose Always Allow.
+- **Updates:** the app tells you when a new version is out (if you turn on checks) and opens the release page; download and install it from there. Each build has a new signature, so macOS may ask once more to let Melodious use "Melodious Safe Storage" in your Keychain. Choose Always Allow.
 - **Protocols:** catalog codes import only if the hub already has their IR protocol. The others are listed as skipped.
 - **Sign-in:** Google sign-in is tested. Logitech email-and-password sign-in uses the same page but hasn't been run.
 - **Logitech's service:** this uses your own Logitech account. If Logitech closes this path, IRDB search, code files and learning still work.

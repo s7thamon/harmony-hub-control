@@ -30,10 +30,19 @@ const {
 const { createCatalogService } = require("./catalog/client");
 const { runSignInWindow } = require("./catalog/signin-window");
 const { registerCatalogIpcHandlers } = require("./ipc");
+const {
+  createUpdateChecker,
+  createUpdateStore,
+  fetchHubVersion,
+  isGitHubUrl,
+} = require("./updates");
 
 // Test hooks (stand-in safeStorage, stub catalog) exist only when running from
 // source; a packaged app ignores MELODIOUS_E2E.
 const E2E = process.env.MELODIOUS_E2E === "1" && !app.isPackaged;
+// Test runs (packaged ones too) never ask about update checks or call GitHub.
+const UPDATE_PROMPTS = process.env.MELODIOUS_E2E !== "1";
+const UPDATE_SCHEDULE_MS = 60 * 60 * 1000;
 
 if (process.env.MELODIOUS_USER_DATA_DIR) {
   app.setPath("userData", process.env.MELODIOUS_USER_DATA_DIR);
@@ -90,6 +99,8 @@ let settingsStore = null;
 let catalogService = null;
 let pageMode = "connect";
 let lastUnreachableError = null;
+let updateChecker = null;
+let updateStore = null;
 
 function getActiveCatalogService() {
   return (E2E && globalThis.__melodiousCatalogService) || catalogService;
@@ -111,6 +122,10 @@ function buildAppMenu() {
             label: app.name,
             submenu: [
               { role: "about" },
+              {
+                label: "Check for Updates…",
+                click: () => checkForUpdatesNow(),
+              },
               { type: "separator" },
               {
                 label: "Settings…",
@@ -173,6 +188,107 @@ function buildAppMenu() {
     },
   ];
   return Menu.buildFromTemplate(template);
+}
+
+/* ---- update notices ------------------------------------------------- */
+
+function openReleasePage(url) {
+  if (!isGitHubUrl(url)) return false;
+  shell.openExternal(url);
+  return true;
+}
+
+function updateDialogParent() {
+  return mainWindow && !mainWindow.isDestroyed() ? mainWindow : undefined;
+}
+
+async function showMessage(options) {
+  const parent = updateDialogParent();
+  return parent ? dialog.showMessageBox(parent, options) : dialog.showMessageBox(options);
+}
+
+async function askAboutUpdateChecks() {
+  const { response } = await showMessage({
+    type: "question",
+    message: "Check for updates?",
+    detail:
+      "Melodious can ask GitHub once a day whether a newer version is out. " +
+      "GitHub sees your IP address and this app's version; nothing about your hub or devices is sent. " +
+      "Nothing downloads unless you choose to. You can change this in Settings.",
+    buttons: ["Check daily", "Not now"],
+    defaultId: 0,
+    cancelId: 1,
+  });
+  updateChecker.setEnabled(response === 0);
+}
+
+/** Tell the user about a check. Scheduled checks speak only about versions
+    they haven't dismissed; a manual check always answers. */
+async function announceUpdate(result, { manual }) {
+  const hubLine = result.hubNote ? `\n\n${result.hubNote}` : "";
+  if (result.app && (manual || result.app.version !== result.dismissed)) {
+    const { response } = await showMessage({
+      type: "info",
+      message: `Melodious ${result.app.version} is available`,
+      detail: `You have ${result.appVersion}. Download the new version from the release page on GitHub.${hubLine}`,
+      buttons: ["Open Release Page", "Later"],
+      defaultId: 0,
+      cancelId: 1,
+    });
+    if (response === 0) openReleasePage(result.app.url);
+    else updateChecker.dismiss(result.app.version);
+    return;
+  }
+  const hubVersion = result.latestHub?.version || "";
+  if (result.hubNote && (manual || updateStore.read().dismissedHub !== hubVersion)) {
+    const { response } = await showMessage({
+      type: "info",
+      message: `Hub software ${hubVersion} is available`,
+      detail: result.hubNote,
+      buttons: ["Open Release Page", "Later"],
+      defaultId: 0,
+      cancelId: 1,
+    });
+    if (response === 0) openReleasePage(result.latestHub.url);
+    else updateStore.write({ dismissedHub: hubVersion });
+    return;
+  }
+  if (!manual) return;
+  if (result.state === "rate-limited") {
+    const when = new Date(result.until).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    await showMessage({ type: "warning", message: "Couldn't check for updates", detail: `GitHub is limiting requests from this network. Try again after ${when}.` });
+  } else if (result.state === "error") {
+    await showMessage({ type: "warning", message: "Couldn't check for updates", detail: result.error });
+  } else {
+    await showMessage({ type: "info", message: "Melodious is up to date", detail: `You have ${result.appVersion}, the newest version.` });
+  }
+}
+
+async function checkForUpdatesNow() {
+  const result = await updateChecker.check();
+  await announceUpdate(result, { manual: true });
+  return result;
+}
+
+async function runScheduledUpdateCheck() {
+  if (!updateChecker.isDue()) return;
+  const result = await updateChecker.check();
+  await announceUpdate(result, { manual: false });
+}
+
+function startUpdateSchedule() {
+  if (!UPDATE_PROMPTS) return;
+  setTimeout(async () => {
+    try {
+      if (updateStore.read().checks === null) await askAboutUpdateChecks();
+      await runScheduledUpdateCheck();
+    } catch (err) {
+      console.error("update check failed:", err?.message || err);
+    }
+  }, 4000);
+  setInterval(() => {
+    runScheduledUpdateCheck().catch((err) => console.error("update check failed:", err?.message || err));
+  }, UPDATE_SCHEDULE_MS);
 }
 
 function registerIpcHandlers() {
@@ -345,6 +461,27 @@ function registerIpcHandlers() {
     return { ok: true, mode: pageMode };
   });
 
+  ipcMain.handle("desktop:updates-get", async (event) => {
+    checkSender(event);
+    return updateChecker.status();
+  });
+
+  ipcMain.handle("desktop:updates-set-enabled", (event, args = {}) => {
+    checkSender(event);
+    updateChecker.setEnabled(Boolean(args.enabled));
+    return { ok: true };
+  });
+
+  ipcMain.handle("desktop:updates-check", async (event) => {
+    checkSender(event);
+    return updateChecker.check();
+  });
+
+  ipcMain.handle("desktop:updates-open-release", (event, args = {}) => {
+    checkSender(event);
+    return { ok: openReleasePage(args.url) };
+  });
+
   registerCatalogIpcHandlers({
     ipcMain,
     getMainWindow: () => mainWindow,
@@ -404,6 +541,19 @@ app.whenReady().then(() => {
       }),
   });
 
+  updateStore = createUpdateStore({ dir: app.getPath("userData") });
+  updateChecker = createUpdateChecker({
+    store: updateStore,
+    appVersion: app.getVersion(),
+    arch: process.arch,
+    getHubVersion: () => {
+      const hub = settingsStore.getHub();
+      return hub
+        ? fetchHubVersion({ host: hub.host, port: hub.port, authHeader: settingsStore.getHubAuthHeader() })
+        : Promise.resolve(null);
+    },
+  });
+
   if (process.env.MELODIOUS_INITIAL_HOST) {
     settingsStore.setHub({
       host: process.env.MELODIOUS_INITIAL_HOST,
@@ -449,6 +599,7 @@ app.whenReady().then(() => {
   registerIpcHandlers();
   Menu.setApplicationMenu(buildAppMenu());
   createMainWindow();
+  startUpdateSchedule();
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {

@@ -18,6 +18,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import app.melodious.MelodiousUiState
@@ -29,6 +30,10 @@ import app.melodious.ui.components.ListRow
 import app.melodious.ui.components.ScreenTitle
 import app.melodious.ui.components.SectionLabel
 import app.melodious.ui.components.SwitchRow
+import app.melodious.protocol.update.GitHubReleases
+import app.melodious.protocol.update.HubSoftware
+import java.text.DateFormat
+import java.util.Date
 
 @Composable
 fun SettingsTab(
@@ -87,6 +92,8 @@ fun SettingsTab(
                     )
                 }
             }
+
+            UpdatesSection(state, viewModel)
 
             Column {
                 SectionLabel("This phone")
@@ -162,6 +169,60 @@ fun SettingsTab(
                 }
             }
             Spacer(Modifier.height(8.dp))
+        }
+    }
+}
+
+@Composable
+private fun UpdatesSection(state: MelodiousUiState, viewModel: MelodiousViewModel) {
+    val uriHandler = LocalUriHandler.current
+    val open: (String) -> Unit = { url -> if (GitHubReleases.isGitHubUrl(url)) uriHandler.openUri(url) }
+    val lastChecked = if (state.updateLastChecked > 0)
+        "Last checked " + DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(Date(state.updateLastChecked))
+    else "Not checked yet"
+    Column {
+        SectionLabel("Updates")
+        ListGroup {
+            val app = state.latestApp
+            ListRow(
+                title = if (app != null) "Melodious ${app.version} is available" else "Melodious ${state.appVersion}",
+                subtitle = if (app != null) "You have ${state.appVersion}. Download the new version from the release page."
+                else lastChecked,
+                trailing = if (app != null) {
+                    { OutlinedButton(onClick = { open(app.url) }) { Text("Open") } }
+                } else null,
+            )
+            state.hubSoftware?.let { hub ->
+                GroupDivider()
+                val note = state.hubUpdateNote
+                val latestHub = state.latestHub
+                ListRow(
+                    title = when (hub) {
+                        HubSoftware.Legacy -> "Hub: Melodious 1.2 or older"
+                        is HubSoftware.Known -> "Hub: Melodious ${hub.version}"
+                    },
+                    subtitle = note.ifEmpty { if (latestHub != null) "Up to date" else "" }.ifEmpty { null },
+                    trailing = if (note.isNotEmpty() && latestHub != null) {
+                        { OutlinedButton(onClick = { open(latestHub.url) }) { Text("Open") } }
+                    } else null,
+                )
+            }
+            GroupDivider()
+            SwitchRow(
+                title = "Check for updates daily",
+                subtitle = "Asks GitHub for Melodious's releases. GitHub sees your IP address and this app's version; nothing about your hub is sent.",
+                checked = state.updateChecks == true,
+                onCheckedChange = viewModel::setUpdateChecks,
+            )
+            GroupDivider()
+            ListRow(
+                title = "Check now",
+                trailing = if (state.updateChecking) {
+                    { CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp) }
+                } else null,
+                enabled = !state.updateChecking,
+                onClick = { viewModel.checkForUpdates(manual = true) },
+            )
         }
     }
 }

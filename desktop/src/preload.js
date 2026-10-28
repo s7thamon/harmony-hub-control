@@ -33,6 +33,12 @@ contextBridge.exposeInMainWorld("melodiousDesktop", {
     openConnect: () => ipcRenderer.invoke("desktop:open-connect"),
     openSettings: () => ipcRenderer.invoke("desktop:open-settings"),
   },
+  updates: {
+    get: () => ipcRenderer.invoke("desktop:updates-get"),
+    setEnabled: (enabled) => ipcRenderer.invoke("desktop:updates-set-enabled", { enabled }),
+    check: () => ipcRenderer.invoke("desktop:updates-check"),
+    openRelease: (url) => ipcRenderer.invoke("desktop:updates-open-release", { url }),
+  },
   catalog: {
     status: () => invokeCatalog("catalog:status"),
     signIn: () => invokeCatalog("catalog:sign-in"),
