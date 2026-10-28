@@ -5,9 +5,10 @@
  *
  * Roles derived from the manifest:
  *   install  — every MANIFEST name (uploaded by installers)
- *   update   — every MANIFEST name except dropbearmulti (C UPDATE_FILES /
- *              browser allow-list; dropbear is install-only plumbing)
- *   restart  — daemons init.sh / post-apply restart must relaunch
+ *   update   — every MANIFEST name except dropbearmulti (C UPDATE_FILES,
+ *              which GET /api/update-status reports; dropbear is
+ *              install-only plumbing)
+ *   restart  — daemons init.sh launches and an update must restart
  *
  * Usage:
  *   node tools/payload_bin_inventory.mjs           # print inventory JSON
@@ -22,10 +23,10 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const MANIFEST_PATH = path.join(ROOT, "payload/bin/MANIFEST.txt");
 const BIN_DIR = path.join(ROOT, "payload/bin");
 
-/** Install-only: not part of the browser/C staged update allow-list. */
+/** Install-only: not reported by /api/update-status. */
 const INSTALL_ONLY = new Set(["dropbearmulti"]);
 
-/** Daemons that must come back after update-apply restart (matches init.sh). */
+/** Daemons init.sh launches; an update must restart them. */
 const RESTART_SET = [
   "codex_bt_pair_agent",
   "codex_bthid_keyboard",
@@ -66,12 +67,6 @@ function extractCUpdateFiles(src) {
   );
   if (!block) return null;
   return [...block[1].matchAll(/"([^"]+)"/g)].map((m) => m[1]);
-}
-
-function extractEmbeddedUpdateNames(src) {
-  const m = src.match(/const UPDATE_NAMES=\[([^\]]+)\]/);
-  if (!m) return null;
-  return [...m[1].matchAll(/'([^']+)'/g)].map((x) => x[1]);
 }
 
 function extractPyUploadNames(src) {
@@ -119,42 +114,13 @@ export function checkDrift(inventory = buildInventory(fs.readFileSync(MANIFEST_P
     );
   }
 
-  const embedded = extractEmbeddedUpdateNames(cSrc);
-  if (!embedded) {
-    problems.push("could not parse embedded UPDATE_NAMES from codex_webui.c");
-  } else if (!sameSet(embedded, inventory.update)) {
-    problems.push(
-      `embedded UPDATE_NAMES drift: js=[${embedded.join(",")}] inventory.update=[${inventory.update.join(",")}]`,
-    );
-  }
-
-  /* Restart must relaunch pair agent the way init.sh does (BT_PAIR_AGENT_BIN + flags). */
-  const restartBlock = cSrc.match(
-    /if \(restart\) \{[\s\S]*?execl\("\/bin\/sh"[\s\S]*?_exit\(127\);/,
-  );
-  if (!restartBlock) {
-    problems.push("could not locate update-apply restart execl block");
-  } else {
-    const block = restartBlock[0];
-    if (!/killall codex_bt_pair_agent/.test(block)) {
-      problems.push("update-apply restart does not stop codex_bt_pair_agent");
+  /* The hub installs nothing over HTTP (removed in 1.3.0: the client sent
+     its own MD5 list, so any LAN client could replace a binary). Updates go
+     through the installer until a signed update protocol exists. */
+  for (const route of ["/api/update-begin", "/api/update-chunk", "/api/update-apply"]) {
+    if (cSrc.includes(`"${route}"`)) {
+      problems.push(`codex_webui.c serves ${route} again; unsigned HTTP installs were removed`);
     }
-    if (!/BT_PAIR_AGENT_BIN/.test(block) || !/--hid-control-daemon/.test(block)) {
-      problems.push(
-        "update-apply restart does not relaunch pair agent with init.sh --hid-control-daemon flags",
-      );
-    }
-    if (/killall codex_bt_pair_agent/.test(block) && !/--hid-control-daemon/.test(block)) {
-      problems.push("update-apply kills pair agent without relaunch");
-    }
-  }
-
-  /* Self-update may only default to this project's own repository. */
-  const OWN_REPO = "schlambos/harmony-hub-control";
-  const urls = cSrc.match(/https:\/\/(?:raw\.githubusercontent\.com|api\.github\.com\/repos|(?:cdn|fastly)\.jsdelivr\.net\/gh|github\.com)\/[A-Za-z0-9_.-]+\/harmony-hub-control/g) || [];
-  const foreign = [...new Set(urls.filter((u) => !u.endsWith(`/${OWN_REPO}`)))];
-  if (foreign.length) {
-    problems.push(`update URLs point outside ${OWN_REPO}: ${foreign.join(", ")}`);
   }
 
   const py = read("install_webui.py");

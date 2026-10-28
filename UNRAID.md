@@ -102,8 +102,9 @@ success marker. Correct the setting or network/key issue, then start it again.
 The container's steady-state job is only the reverse proxy. Harmony commands,
 MQTT, Bluetooth, and the dashboard runtime execute on the Hub itself.
 
-The hub dashboard's **System > Software update** function can update the
-hub-side payload from upstream without rebuilding this container.
+The hub doesn't update itself. To update the hub-side payload, rebuild this
+container from a newer release, or run that release's installer from a
+computer.
 
 To deliberately redeploy the payload currently baked into the image:
 

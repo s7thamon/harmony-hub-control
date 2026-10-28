@@ -211,6 +211,7 @@ async function main() {
     for (const [name, url] of Object.entries({
       inventory: '/api/inventory',
       update: '/api/update-status',
+      version: '/api/version',
       bluetoothText: '/api/bt-text-status'
     })) {
       try {
@@ -320,18 +321,6 @@ async function main() {
       log: document.querySelector('#labLog')?.textContent?.slice(-900) || ''
     };
   })()`, 120000);
-  const updateUi = await evaluate(`(async () => {
-    showView('system');
-    const repo = document.querySelector('#updateRepo');
-    if (repo) repo.value = 'https://raw.githubusercontent.com/schlambos/harmony-hub-control/main/payload/bin/';
-    if (typeof updateCheckRepo !== 'function') return { ok: false, error: 'updateCheckRepo is not available' };
-    await updateCheckRepo();
-    const log = document.querySelector('#updateLog')?.textContent || '';
-    return {
-      ok: /Already current\\.|file\\(s\\) need update/.test(log) && !/update check failed/i.test(log),
-      log: log.slice(-900)
-    };
-  })()`, 90000);
   const systemUi = await evaluate(`(async () => {
     showView('system');
     const checkbox = document.querySelector('input[name="cloudBlocker"]');
@@ -363,7 +352,6 @@ async function main() {
     lgSearch,
     wizardFlow,
     lab,
-    updateUi,
     systemUi,
     browserMessages: eventText(recentEvents),
     failedNetwork: failedNetwork(recentEvents),

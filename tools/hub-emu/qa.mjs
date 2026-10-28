@@ -535,24 +535,7 @@ check("cloud_reboot kept the blocker at 1", expCloud3.text.trim() === "1");
 const statusAfter2 = await req(CTRL, "/status");
 check("second reboot request recorded (rebootCount 2)", statusAfter2.json?.rebootCount === 2, JSON.stringify(statusAfter2.json));
 
-console.log("\n== auth + update state: set, observed, then cleared by reset ==");
-const updatePost = await req(API, "/api/update-check-state", form({
-  available: "1",
-  changes: "2",
-  message: "QA fake update",
-  source: "https://updates.hub-emu.invalid/",
-}));
-check(
-  "POST /api/update-check-state form -> 200 ok",
-  updatePost.status === 200 && updatePost.json?.ok === true && updatePost.json?.available === true,
-  updatePost.text.slice(0, 160)
-);
-const updateGet = await req(API, "/api/update-check-state");
-check(
-  "update state persisted to /data/codex/update_state.conf",
-  updateGet.json?.available === true && updateGet.json?.changes === 2 && updateGet.json?.message === "QA fake update",
-  updateGet.text.slice(0, 160)
-);
+console.log("\n== auth: set, observed, then cleared by reset ==");
 const authForm = await req(API, "/system", form({
   action: "auth",
   authEnabled: "on",
@@ -608,13 +591,6 @@ check(
   unlocked.status === 200 && unlocked.json?.ok === true,
   `got ${unlocked.status}`
 );
-const updateCleared = await req(API, "/api/update-check-state");
-check(
-  "reset removed update_state.conf (back to not-checked)",
-  updateCleared.json?.available === false && Number(updateCleared.json?.checkedAt) === 0,
-  updateCleared.text.slice(0, 160)
-);
-
 console.log("\n== reset restores the seeded fake settings ==");
 const expMqtt4 = await req(API, "/export/mqtt");
 check(
@@ -636,51 +612,46 @@ check("cloud blocker still 1 after reset", expCloud4.text.trim() === "1");
 const statusReset2 = await req(CTRL, "/status");
 check("reboot log cleared by reset (rebootCount 0)", statusReset2.json?.rebootCount === 0, JSON.stringify(statusReset2.json));
 
-console.log("\n== software update apply: rollback creation through real MIPS ==");
-const updatePayload = await readFile(new URL("./stubs/codex_hbus", import.meta.url));
-const updateMd5 = createHash("md5").update(updatePayload).digest("hex");
-const updateManifest = [
-  `${updateMd5}  codex_hbus`,
-  "00000000000000000000000000000000  codex_webui",
-  "",
-].join("\n");
-const updateBegin = await req(
-  API, "/api/update-begin", form({ manifest: updateManifest }));
-const updateChunk = await req(
-  API,
-  "/api/update-chunk",
-  form({ file: "codex_hbus", offset: "0", hex: updatePayload.toString("hex") }),
-);
-const updateApply = await req(
-  API, "/api/update-apply", form({ restart: "0" }));
-const updateInventory = await req(CTRL, "/retention/inspect");
-const updateGenerations =
-  updateInventory.json?.families?.updates?.generations ?? [];
+console.log("\n== software version; no installs over HTTP ==");
+const version = await req(API, "/api/version");
 check(
-  "real MIPS update staging accepts a manifest and byte-exact allowed payload",
-  updateBegin.status === 200 && updateBegin.json?.ok === true &&
-    updateChunk.status === 200 && updateChunk.json?.ok === true &&
-    updateChunk.json?.bytes === updatePayload.length,
-  `${updateBegin.text} ${updateChunk.text}`,
+  "GET /api/version -> 200 melodious version, api level and features",
+  version.status === 200 && version.json?.ok === true && version.json?.product === "melodious" &&
+    /^\d+\.\d+\.\d+$/.test(version.json?.version ?? "") && version.json?.api >= 1 &&
+    version.json?.update?.protocol === 0 && version.json?.features?.includes("activity-save"),
+  version.text.slice(0, 200),
 );
+const updateStatus = await req(API, "/api/update-status");
 check(
-  "real MIPS update apply creates a valid rollback and replaces the file without restart",
-  updateApply.status === 200 && updateApply.json?.ok === true &&
-    updateApply.json?.updated === "codex_hbus" &&
-    updateApply.json?.restart === false &&
-    updateGenerations.length === 1 &&
-    updateGenerations[0]?.regularFiles === 1 &&
-    updateGenerations[0]?.bytes === updatePayload.length &&
-    updateApply.json?.backupDir?.endsWith(`/${updateGenerations[0]?.name}`),
-  `${updateApply.text} ${JSON.stringify(updateInventory.json)}`,
+  "GET /api/update-status reports the same version and 7 binaries, read-only",
+  updateStatus.status === 200 && updateStatus.json?.version === version.json?.version &&
+    updateStatus.json?.files?.length === 7 && !("rawBase" in (updateStatus.json ?? {})),
+  updateStatus.text.slice(0, 200),
 );
-const aliveAfterUpdate = await req(API, "/api/activity-state");
-check(
-  "identical update leaves normal real MIPS application behavior available",
-  aliveAfterUpdate.status === 200 && aliveAfterUpdate.json?.ok === true,
-  aliveAfterUpdate.text.slice(0, 160),
-);
-await req(CTRL, "/reset", { method: "POST" });
+/* 1.2.0 and older let any client stage a binary with its own MD5 list and
+   install it (no signature, no Origin check). Those routes are gone. */
+const hbusEntry = (status) => JSON.stringify(status.json?.files?.find((file) => file.name === "codex_hbus") ?? null);
+const hbusBefore = hbusEntry(updateStatus);
+const evilHex = Buffer.from("evil").toString("hex");
+const evilMd5 = createHash("md5").update("evil").digest("hex");
+const removed = [];
+for (const [route, body] of [
+  ["/api/update-begin", form({ manifest: `${evilMd5}  codex_hbus\n00000000000000000000000000000000  codex_webui\n` })],
+  ["/api/update-chunk", form({ file: "codex_hbus", offset: "0", hex: evilHex })],
+  ["/api/update-apply", form({ restart: "0" })],
+  ["/api/update-check-state", form({ available: "1" })],
+]) {
+  const r = await req(API, route, { ...body, headers: { ...body.headers, Origin: "http://evil.example" } });
+  removed.push(`${route} ${r.status}`);
+}
+check("unsigned install routes and the update-check record answer 404",
+  removed.every((line) => line.endsWith(" 404")), removed.join(" | "));
+const checkStateGet = await req(API, "/api/update-check-state");
+check("GET /api/update-check-state -> 404", checkStateGet.status === 404, `got ${checkStateGet.status}`);
+const hbusAfter = hbusEntry(await req(API, "/api/update-status"));
+check("codex_hbus untouched by the attempted install",
+  hbusBefore === hbusAfter && !hbusAfter.includes(evilMd5),
+  `${hbusBefore} -> ${hbusAfter}`);
 
 console.log("\n== unified backup retention: real MIPS maintenance mode ==");
 const parseRetentionSummary = (text) => Object.fromEntries(

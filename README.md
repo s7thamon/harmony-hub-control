@@ -437,7 +437,7 @@ so you can bookmark it.
 - **Wi-Fi**: the network the hub joins. Changes take effect after a reboot.
 - **Backup**: downloads and restore.
 - **System**: status and logs, the cloud blocker, the time zone, sign-in,
-  software update, Home Assistant discovery and reboot.
+  the hub's software version, Home Assistant discovery and reboot.
 
 <details>
 <summary>More web app screenshots</summary>
@@ -718,7 +718,6 @@ Logitech cloud ✕  cloud tasks not started, hosts refused, WAN route removed
   | Backups | Folder | Kept |
   | --- | --- | --- |
   | Resource backups (`YYYYMMDD_HHMMSS`), taken before each write | `/data/codex/resource-backups` | Newest 5 |
-  | Software-update backups | `/data/codex/update-backups` | Newest 3 |
   | Installer handoffs (`webui-handoff-*`) | `/data/codex-backups` | Newest 3 |
 
   Only folders with those exact names are ever removed.
