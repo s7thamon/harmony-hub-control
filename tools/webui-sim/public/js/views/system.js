@@ -1,6 +1,7 @@
 /* System view: GET /api/system-status provides bounded read-only firmware,
-   uptime, memory, uname, logs, and sign-in status. Cloud egress, updates,
-   discovery, and reboot use only endpoints the hub already serves.
+   uptime, memory, uname, logs, and sign-in status. Cloud egress, discovery
+   and reboot use only endpoints the hub already serves; the software panel
+   only reads the hub's version and installed binaries.
 
    Safety shape, per the binding review:
    - the cloud blocker is one-way: when blocked there is NO disable control,
@@ -9,12 +10,11 @@
    - sign-in enable/disable is a two-step confirm; the confirm names the
      username but the password is only ever read into the request body — it is
      never rendered, logged, or left in the DOM.
-   - update apply defaults to restart=0 and is never one amber click; the
-     restart variant is a separately armed danger action. This page never
-     fetches from GitHub/the WAN and never stages anything.
+   - the hub installs no software over HTTP: updates come from the installer.
+     This page never fetches from GitHub/the WAN.
    - the single amber primary on the whole page is "Refresh status". */
 
-import { postHubForm, postApiForm, getJson, getText, probeBasicAuth } from "../api.js";
+import { postHubForm, getJson, getText, probeBasicAuth } from "../api.js";
 import { parseCloudFlag } from "../setup-parsers.js";
 import { viewHead, notice, el, clear, dangerGuard } from "../setup-kit.js";
 import {
@@ -29,7 +29,7 @@ import {
   authProbeFailureMessage,
   authDisabledMessage,
   formatBytes,
-  updateCheckSummary,
+  hubVersionSummary,
   missingBinariesRemedy,
   browserTimeZone,
   parseTimezoneConf,
@@ -48,8 +48,8 @@ export function createSystemView(section) {
   let cloudError = null;
   let updateStatus = null;
   let updateStatusError = null;
-  let checkState = null;
-  let checkStateError = null;
+  let hubVersion = null; // GET /api/version
+  let hubVersionError = null;
   let savedZone; // undefined = not read yet, null = unset, else { zone, posix }
   let zoneError = null;
   const disarms = []; // guard teardowns run on onHide
@@ -120,14 +120,14 @@ export function createSystemView(section) {
   }
 
   async function loadUpdate() {
-    const [statusRes, checkRes] = await Promise.allSettled([
+    const [statusRes, versionRes] = await Promise.allSettled([
       getJson("/api/update-status"),
-      getJson("/api/update-check-state"),
+      getJson("/api/version"),
     ]);
     updateStatusError = statusRes.status === "rejected" ? statusRes.reason : null;
     if (statusRes.status === "fulfilled") updateStatus = statusRes.value;
-    checkStateError = checkRes.status === "rejected" ? checkRes.reason : null;
-    if (checkRes.status === "fulfilled") checkState = checkRes.value;
+    hubVersionError = versionRes.status === "rejected" ? versionRes.reason : null;
+    hubVersion = versionRes.status === "fulfilled" ? versionRes.value : null;
     renderUpdate();
   }
 
@@ -266,21 +266,6 @@ export function createSystemView(section) {
     }
   }
 
-  async function applyUpdate(restart) {
-    try {
-      const res = await postApiForm("/api/update-apply", { restart });
-      setResult(
-        els.updateResult,
-        "ok",
-        `Applied: ${res.updated || "staged files"}. Backup: ${res.backupDir || "—"}. ` +
-          (res.restart ? "Services are restarting." : "Services were left running."),
-      );
-      await loadUpdate(); // refresh installed binary hashes/sizes
-    } catch (error) {
-      setResult(els.updateResult, "error", `Apply failed: ${error.message}`);
-    }
-  }
-
   async function rediscover() {
     try {
       const res = await postHubForm("/system", { action: "rediscover" });
@@ -362,15 +347,8 @@ export function createSystemView(section) {
   }
 
   function renderUpdate() {
-    clear(els.checkSummary);
-    if (checkStateError) {
-      els.checkSummary.appendChild(notice("error", `Could not read the saved update-check state: ${checkStateError.message}`));
-    } else if (checkState) {
-      els.checkSummary.appendChild(el("p", { className: "mini", text: updateCheckSummary(checkState) }));
-      if (checkState.message) {
-        els.checkSummary.appendChild(el("p", { className: "setup-field-hint", text: checkState.message }));
-      }
-    }
+    clear(els.versionSummary);
+    els.versionSummary.appendChild(el("p", { className: "mini", text: hubVersionSummary(hubVersion, hubVersionError) }));
 
     clear(els.binList);
     if (updateStatusError) {
@@ -392,7 +370,7 @@ export function createSystemView(section) {
   /* ---- build the DOM once --------------------------------------------- */
 
   section.appendChild(
-    viewHead("System", "Firmware, logs, sign-in, updates, and reboot — read from the hub, never from the internet."),
+    viewHead("System", "Firmware, logs, sign-in, software version, and reboot — read from the hub, never from the internet."),
   );
 
   /* Status */
@@ -567,48 +545,19 @@ export function createSystemView(section) {
     ]),
   );
 
-  /* Software update */
-  els.checkSummary = el("div", {});
+  /* Software */
+  els.versionSummary = el("div", {});
   els.binList = el("div", {});
-  els.updateResult = el("div", { className: "setup-status" });
-  els.applyBtn = el("button", { className: "btn btn-danger", text: "Apply staged update", attrs: { type: "button" } });
-  els.applyRestartBtn = el("button", { className: "btn btn-danger", text: "Apply and restart services", attrs: { type: "button" } });
-  disarms.push(
-    dangerGuard(els.applyBtn, {
-      consequence:
-        "Applies whatever update is already staged on the hub, overwriting the binaries in /data/codex/bin. " +
-        "A backup of the current binaries is kept (the last three are retained). This page downloads and stages nothing.",
-      confirmLabel: "Confirm: apply staged update",
-      onConfirm: () => applyUpdate("0"),
-    }).disarm,
-    dangerGuard(els.applyRestartBtn, {
-      consequence:
-        "Applies the staged update, then immediately kills and restarts codex_webui and the Bluetooth runtime. " +
-        "The web UI drops off the network during the restart and this session may not recover in the emulator.",
-      confirmLabel: "Confirm: apply and restart",
-      onConfirm: () => applyUpdate("1"),
-    }).disarm,
-  );
   section.appendChild(
-    panel("Software update", null, [
-      notice(
-        "info",
-        "This page never downloads binaries and never points at a public GitHub owner. " +
-          "Browser self-update against a hardcoded repository is disabled until release signing exists " +
-          "(see payload/bin/MANIFEST.txt as the install/update inventory). " +
-          "Only an already-staged update on the hub can be applied here.",
-      ),
-      els.checkSummary,
+    panel("Software", null, [
+      els.versionSummary,
       els.binList,
-      el("div", { className: "setup-actions", children: [els.applyBtn, els.applyRestartBtn] }),
       el("p", {
         className: "setup-field-hint",
         text:
-          "Apply acts only on files already staged under /tmp/codex_update (allow-listed names from MANIFEST). " +
-          "If nothing is staged, the hub says so. Apply keeps services running; the restart variant restarts " +
-          "codex_webui, codex_bthid_keyboard, and codex_bt_pair_agent (same as init.sh).",
+          "To update the hub, download the latest Melodious release on a computer on this network and run its " +
+          "installer (install_webui.py or install_webui.ps1). The hub never downloads or installs software by itself.",
       }),
-      els.updateResult,
     ]),
   );
 

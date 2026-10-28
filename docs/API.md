@@ -798,7 +798,26 @@ empty when no time zone is stored.
 `/export/bluetooth` returns the saved Bluetooth device store as
 `bt-devices.json`; it returns an empty device list when no store exists.
 
-## Software updates
+## Software version and updates
+
+Read which Melodious release the hub runs (`render_version_json()`):
+
+```powershell
+Invoke-RestMethod "http://<hub-ip>:8080/api/version"
+```
+
+```json
+{"ok":true,"product":"melodious","version":"1.3.0","api":1,"update":{"protocol":0},
+ "features":["activity-save","activity-sync","catalog-import","device-commands",
+             "device-screen","device-settings","ha-devices","irdb-import"]}
+```
+
+- `version` is the release the hub software belongs to (`MELODIOUS_VERSION`).
+- `api` rises when a route the apps rely on changes shape.
+- `features` names routes an app may need, so it can say "update the hub"
+  before trying one.
+- `update.protocol` is `0`: the hub installs no software over HTTP.
+- Hubs older than 1.3.0 answer `404`; treat them as 1.2.x or older.
 
 Read the installed control binaries and their checksums
 (`render_update_status_json()`):
@@ -807,64 +826,24 @@ Read the installed control binaries and their checksums
 Invoke-RestMethod "http://<hub-ip>:8080/api/update-status"
 ```
 
-The response lists each allow-listed binary with `present`, `size` and
-`md5`. The allow-list is `codex_webui`, `codex_bthid_keyboard`,
-`codex_bt_pair_agent`, `codex_hal_ltcp`, `codex_hbus`, `codex_portal` and
-`codex_dhcpd`. Low-level SSH/dropbear files are not part of the update.
+The response carries `version` and lists each binary with `present`, `size`
+and `md5`: `codex_webui`, `codex_bthid_keyboard`, `codex_bt_pair_agent`,
+`codex_hal_ltcp`, `codex_hbus`, `codex_portal` and `codex_dhcpd`.
 
-Read or save the record of the last update check
-(`render_update_check_state_json()`, `render_update_check_state_post_json()`):
-
-```text
-GET /api/update-check-state
-POST /api/update-check-state
-```
-
-The record carries `checkedAt`, `available`, `changes`, `message` and
-`source`. The POST takes those as form fields; a `checkedAt` that is
-missing or not positive is replaced with the current time, and a save
-failure gives `500`.
-
-Stage and apply an update already on the hub:
-
-```text
-POST /api/update-begin
-POST /api/update-chunk
-POST /api/update-apply
-```
-
-`/api/update-begin` (`render_update_begin_json()`) takes a form field
-`manifest` holding the `MANIFEST.txt` text; a manifest with no
-`codex_webui` entry gives `400`. It clears the staging directory
-`/tmp/codex_update` and stores the manifest there.
-
-`/api/update-chunk` (`render_update_chunk_json()`) takes form fields
-`file`, `offset` and `hex`. The file must be on the allow-list, the offset
-must equal the staged file's current size, and the hex must decode; any
-violation gives `400`.
-
-`/api/update-apply` (`render_update_apply_json()`) verifies every staged
-binary's MD5 against the staged manifest, backs up the installed binaries,
-and installs the staged ones. The form field `restart` restarts the
-services unless it is `0`. No staged manifest or no staged binaries gives
-`400`, as does a checksum mismatch.
-
-The hub applies only an update already staged on it; it downloads nothing.
-The web UI's System page acts only on staged files: it reads
-`/api/update-status` and the saved check record, and its apply actions
-call `/api/update-apply`. Staging happens outside the hub API, through the
-installer or an SSH copy into `/tmp/codex_update`.
+The hub installs software only through the installer (`install_webui.py` or
+`install_webui.ps1`, over SSH). Until 1.2.0 it also had
+`POST /api/update-begin`, `/api/update-chunk` and `/api/update-apply`, plus
+`GET/POST /api/update-check-state`. Those took the checksum list from the
+same client that sent the file, so any client on the network could replace
+a hub binary. 1.3.0 removed them; they answer `404`.
 
 ### Backup retention
 
 Backups are pruned by count, in `backup_resources()`,
-`prune_resource_backups()`, `prune_update_backups()` and the installer
-(`install_webui.py`):
+`prune_resource_backups()` and the installer (`install_webui.py`):
 
 - Resource backups under `/data/codex/resource-backups` keep the newest 5
   (`prune_resource_backups(5)`).
-- Update backups under `/data/codex/update-backups` keep the newest 3
-  (`prune_update_backups(3)`).
 - Installer handoffs (`webui-handoff-*` under the installer's backup root)
   keep the newest 3 (`HANDOFF_KEEP` in `install_webui.py`).
 - `settings_*` backups under `/data/codex/resource-backups` are never
@@ -934,10 +913,7 @@ carries.
 | GET | `/api/bt-text-status` | `render_bluetooth_text_status_json()` |
 | POST | `/api/bt-text` | `render_bluetooth_text_json()` |
 | POST | `/api/bt-saved-command` | `render_bt_saved_command_json()` |
+| GET | `/api/version` | `render_version_json()` |
 | GET | `/api/update-status` | `render_update_status_json()` |
-| GET, POST | `/api/update-check-state` | `render_update_check_state_json()`, `render_update_check_state_post_json()` |
-| POST | `/api/update-begin` | `render_update_begin_json()` |
-| POST | `/api/update-chunk` | `render_update_chunk_json()` |
-| POST | `/api/update-apply` | `render_update_apply_json()` |
 | POST | `/api/irdb-import` | `render_irdb_import_json()` |
 | POST | `/api/catalog-import` | `render_catalog_import_json()` |

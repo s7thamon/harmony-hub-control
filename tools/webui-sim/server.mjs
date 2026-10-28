@@ -1254,11 +1254,24 @@ async function handleApi(req, res, pathname, url) {
     case "POST /api/remotecentral-fetch":
       handleRemoteCentralFetch(res, params);
       return;
+    case "GET /api/version":
+      sendJson(res, 200, {
+        ok: true,
+        product: "melodious",
+        version: "1.3.0",
+        api: 1,
+        update: { protocol: 0 },
+        features: [
+          "activity-save", "activity-sync", "catalog-import", "device-commands",
+          "device-screen", "device-settings", "ha-devices", "irdb-import"
+        ]
+      });
+      return;
     case "GET /api/update-status":
       sendJson(res, 200, {
         ok: true,
+        version: "1.3.0",
         repo: "https://github.com/schlambos/harmony-hub-control",
-        rawBase: "",
         files: []
       });
       return;

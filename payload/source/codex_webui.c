@@ -33,7 +33,6 @@
 #define CLOUD_BLOCKER_CONFIG "/data/codex/cloud_blocker.conf"
 #define TIMEZONE_CONFIG "/data/codex/timezone.conf"
 #define WEBUI_AUTH_CONFIG "/data/codex/webui_auth.conf"
-#define UPDATE_STATE_CONFIG "/data/codex/update_state.conf"
 #define DEVICE_LIST "/data/resources/DeviceList.json"
 #define FUNCTION_LIST "/data/resources/FunctionList.json"
 #define PROTOCOL_LIST "/data/resources/ProtocolList.json"
@@ -64,8 +63,6 @@
 #ifndef CODEX_HBUS_BIN
 #define CODEX_HBUS_BIN CODEX_BIN_DIR "/codex_hbus"
 #endif
-#define UPDATE_STAGE_DIR "/tmp/codex_update"
-#define UPDATE_BACKUP_DIR "/data/codex/update-backups"
 #define IR_EVENT_MAX_BYTES 65536
 #define MAX_REQUEST_BODY (1024 * 1024)
 #define MAX_REQUEST_BYTES (MAX_REQUEST_BODY + 8192)
@@ -82,6 +79,15 @@
 #define MAX_BT_COMMANDS 32
 #define MAX_BT_SCRIPT_LEN 2048
 
+/* The Melodious release this hub software belongs to. Bump it in the release
+ * commit; GET /api/version reports it so the apps know which hub they talk to. */
+#define MELODIOUS_VERSION "1.3.0"
+/* Version of this hub's HTTP API as the apps see it: 1 = /api/version exists.
+ * Raise it when a route the apps rely on changes shape. */
+#define MELODIOUS_API_LEVEL 1
+
+/* Binaries GET /api/update-status reports. The hub does not install updates
+ * over HTTP: the installer (install_webui.py) does, over SSH. */
 static const char *UPDATE_FILES[] = {
     "codex_webui",
     "codex_bthid_keyboard",
@@ -133,14 +139,6 @@ struct webui_auth_config {
     int enabled;
     char username[64];
     char password[128];
-};
-
-struct update_check_state {
-    long checked_at;
-    int available;
-    int changes;
-    char message[192];
-    char source[192];
 };
 
 struct ir_command {
@@ -474,68 +472,6 @@ static int save_webui_auth(const struct webui_auth_config *cfg) {
     return 0;
 }
 
-static void load_update_state(struct update_check_state *st) {
-    char raw[768], value[256];
-    memset(st, 0, sizeof(*st));
-    strcpy(st->message, "Update status has not been checked yet.");
-    if (read_text(UPDATE_STATE_CONFIG, raw, sizeof(raw)) <= 0) return;
-    if (config_line_value(raw, "checkedAt", value, sizeof(value))) st->checked_at = atol(value);
-    if (config_line_value(raw, "available", value, sizeof(value))) st->available = atoi(value) ? 1 : 0;
-    if (config_line_value(raw, "changes", value, sizeof(value))) st->changes = atoi(value);
-    if (config_line_value(raw, "message", value, sizeof(value))) snprintf(st->message, sizeof(st->message), "%s", value);
-    if (config_line_value(raw, "source", value, sizeof(value))) snprintf(st->source, sizeof(st->source), "%s", value);
-}
-
-static int save_update_state(const struct update_check_state *st) {
-    char data[768], msg[192], source[192];
-    snprintf(msg, sizeof(msg), "%s", st->message);
-    snprintf(source, sizeof(source), "%s", st->source);
-    clean_config_value(msg);
-    clean_config_value(source);
-    snprintf(data, sizeof(data), "checkedAt=%ld\navailable=%d\nchanges=%d\nmessage=%s\nsource=%s\n",
-        st->checked_at, st->available ? 1 : 0, st->changes, msg, source);
-    if (write_file_atomic(UPDATE_STATE_CONFIG, data, strlen(data)) != 0) return -1;
-    chmod(UPDATE_STATE_CONFIG, 0644);
-    return 0;
-}
-
-static int copy_file_raw(const char *src, const char *dst) {
-    FILE *in = fopen(src, "rb");
-    FILE *out;
-    char buf[4096];
-    size_t n;
-    if (!in) return -1;
-    out = fopen(dst, "wb");
-    if (!out) {
-        fclose(in);
-        return -1;
-    }
-    while ((n = fread(buf, 1, sizeof(buf), in)) > 0) {
-        if (fwrite(buf, 1, n, out) != n) {
-            int saved_errno = errno;
-            fclose(in);
-            fclose(out);
-            unlink(dst);
-            errno = saved_errno;
-            return -1;
-        }
-    }
-    if (ferror(in)) {
-        int saved_errno = errno;
-        fclose(in);
-        fclose(out);
-        unlink(dst);
-        errno = saved_errno;
-        return -1;
-    }
-    fclose(in);
-    if (fclose(out) != 0) {
-        unlink(dst);
-        return -1;
-    }
-    return 0;
-}
-
 static void remove_tree_simple(const char *path) {
     struct stat st;
     if (lstat(path, &st) != 0) return;
@@ -554,59 +490,6 @@ static void remove_tree_simple(const char *path) {
         rmdir(path);
     } else {
         unlink(path);
-    }
-}
-
-static void remove_dir_entries_with_prefix(const char *dir, const char *prefix) {
-    DIR *d = opendir(dir);
-    struct dirent *de;
-    size_t prefix_len = strlen(prefix);
-    if (!d) return;
-    while ((de = readdir(d)) != NULL) {
-        char path[512];
-        if (strncmp(de->d_name, prefix, prefix_len) != 0) continue;
-        snprintf(path, sizeof(path), "%s/%s", dir, de->d_name);
-        remove_tree_simple(path);
-    }
-    closedir(d);
-}
-
-static int is_digit_name(const char *s) {
-    if (!s || !*s) return 0;
-    while (*s) {
-        if (!isdigit((unsigned char)*s)) return 0;
-        s++;
-    }
-    return 1;
-}
-
-static void prune_update_backups(int keep) {
-    struct backup_entry { long stamp; char name[64]; } entries[32], tmp;
-    DIR *d = opendir(UPDATE_BACKUP_DIR);
-    struct dirent *de;
-    int count = 0, i, j;
-    if (!d) return;
-    while ((de = readdir(d)) != NULL) {
-        if (!is_digit_name(de->d_name)) continue;
-        if (count >= (int)(sizeof(entries) / sizeof(entries[0]))) break;
-        entries[count].stamp = atol(de->d_name);
-        snprintf(entries[count].name, sizeof(entries[count].name), "%s", de->d_name);
-        count++;
-    }
-    closedir(d);
-    for (i = 0; i < count; i++) {
-        for (j = i + 1; j < count; j++) {
-            if (entries[j].stamp > entries[i].stamp) {
-                tmp = entries[i];
-                entries[i] = entries[j];
-                entries[j] = tmp;
-            }
-        }
-    }
-    for (i = keep; i < count; i++) {
-        char path[512];
-        snprintf(path, sizeof(path), "%s/%s", UPDATE_BACKUP_DIR, entries[i].name);
-        remove_tree_simple(path);
     }
 }
 
@@ -5985,20 +5868,6 @@ static void page_end(FILE *f) {
         "const irdbFile=$('irdbFile');if(irdbFile){irdbFile.addEventListener('change',()=>{const file=irdbFile.files&&irdbFile.files[0];if(!file)return;const reader=new FileReader();reader.onload=()=>{const p=$('irdbPaste');if(p)p.value=reader.result||'';irdbStatus('loaded file '+file.name+'; click Parse Pasted Codes');};reader.readAsText(file);});}"
         "const parsePaste=$('irdbParsePaste');if(parsePaste){parsePaste.addEventListener('click',()=>{const text=$('irdbPaste')?.value||'',file=$('irdbFile')?.files?.[0],pathBox=$('irdbPath');let path=file?file.name:(pathBox?.value||'').trim();let source;if(file){source=pickSourceForPath(path);}else{path=path||'pasted codes';if(pathBox){delete pathBox.dataset.source;pathBox.value='';}source=pickSourceForPath(path);}clearIrdPreview();if(!text.trim()){irdbStatus('paste a code file or choose a file first');return;}const rows=parseIrText(text,source,path);irdbLog('parsed pasted/file input as '+sourceLabel(source)+': '+rows.length+' commands');renderIrdRows(rows);});}"
         "async function postJson(path,data){const r=await fetch(path,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams(data||{})});const t=await r.text();let j;try{j=JSON.parse(t);}catch(e){throw new Error(t||('http '+r.status));}if(!r.ok||j.ok===false)throw new Error(j.message||j.error||('http '+r.status));return j;}"
-        "const UPDATE_NAMES=['codex_webui','codex_bthid_keyboard','codex_bt_pair_agent','codex_hal_ltcp','codex_hbus','codex_portal','codex_dhcpd'];const UPDATE_API='https://api.github.com/repos/schlambos/harmony-hub-control/contents/payload/bin/';const UPDATE_DEFAULT_RAW='https://raw.githubusercontent.com/schlambos/harmony-hub-control/main/payload/bin/';const UPDATE_CDN='https://cdn.jsdelivr.net/gh/schlambos/harmony-hub-control@main/payload/bin/';const UPDATE_CDN_FAST='https://fastly.jsdelivr.net/gh/schlambos/harmony-hub-control@main/payload/bin/';const UPDATE_AUTO_INTERVAL=6*60*60*1000;const HEX=Array.from({length:256},(_,i)=>i.toString(16).padStart(2,'0'));"
-        "function updateLog(t){const el=$('updateLog');if(el)el.textContent=t||'';}function updateAppend(t){const el=$('updateLog');if(!el)return;let p=el.textContent||'';if(/^Ready\\./.test(p))p='';el.textContent=(p?p+'\\n':'')+String(t||'');el.scrollTop=el.scrollHeight;}"
-        "function updateBase(){let b=($('updateRepo')?.value||'').trim()||UPDATE_DEFAULT_RAW;return b.endsWith('/')?b:b+'/';}function updateToken(){return($('updateToken')?.value||'').trim();}function updateUsesDefaultRepo(){return updateBase().toLowerCase()===UPDATE_DEFAULT_RAW.toLowerCase();}function updateBases(){const a=[updateBase()];if(updateUsesDefaultRepo())a.push(UPDATE_CDN,UPDATE_CDN_FAST);return Array.from(new Set(a.map(x=>x.endsWith('/')?x:x+'/')));}"
-        "function parseUpdateManifest(t){return String(t||'').replace(/\\r/g,'').split('\\n').map(line=>{const m=line.match(/^([0-9a-fA-F]{32})\\s+(\\S+)$/);return m?{md5:m[1].toLowerCase(),name:m[2]}:null;}).filter(x=>x&&UPDATE_NAMES.includes(x.name));}"
-        "async function updateFetchUrl(label,url,asText){const ctrl=new AbortController(),timer=setTimeout(()=>ctrl.abort(),25000);try{const r=await fetch(url,{cache:'no-store',signal:ctrl.signal});if(!r.ok)throw new Error('http '+r.status);return asText?await r.text():await r.arrayBuffer();}catch(e){throw new Error(label+' '+((e&&e.name)==='AbortError'?'timeout':(e&&e.message?e.message:e)));}finally{clearTimeout(timer);}}"
-        "async function updateFetch(name,token){const errs=[],asText=name==='MANIFEST.txt';if(token||updateUsesDefaultRepo()){try{const headers={'Accept':'application/vnd.github+json'};if(token)headers.Authorization='Bearer '+token;const r=await fetch(UPDATE_API+encodeURIComponent(name)+'?ref=main&t='+Date.now(),{headers:headers,cache:'no-store'});if(!r.ok)throw new Error('http '+r.status+([401,403,404].includes(r.status)?' - token required for private repos or exhausted anonymous API access':''));const j=await r.json(),bin=atob(String(j.content||'').replace(/\\s/g,'')),u=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)u[i]=bin.charCodeAt(i);return asText?new TextDecoder().decode(u):u.buffer;}catch(e){errs.push('GitHub API '+(e.message||e));if(token)throw new Error(errs.join('; '));}}for(const base of updateBases()){try{return await updateFetchUrl(base.replace(/^https?:\\/\\//,''),base+encodeURIComponent(name)+'?t='+Date.now(),asText);}catch(e){errs.push(e.message||String(e));}}throw new Error(errs.join('; ')||'no update source configured');}"
-        "function updateAgeText(ts){const d=Math.max(0,Date.now()-Number(ts||0)*1000),m=Math.floor(d/60000),h=Math.floor(d/3600000),days=Math.floor(d/86400000);if(!ts)return'not checked';if(days>0)return'checked '+days+'d ago';if(h>0)return'checked '+h+'h ago';if(m>0)return'checked '+m+'m ago';return'checked just now';}"
-        "function updateDashboardBadge(st){const b=$('dashUpdateBadge'),d=$('dashUpdateDetail');if(!b||!d)return;st=st||{};const checked=Number(st.checkedAt||0),changes=Number(st.changes||0);b.classList.remove('ok','warn','bad');if(!checked){b.classList.add('warn');b.textContent='not checked';d.textContent='Checks automatically while this page is open.';return;}if(changes<0){b.classList.add('bad');b.textContent='check failed';}else if(st.available){const n=changes||1;b.classList.add('warn');b.textContent=n+' update'+(n===1?'':'s');}else{b.classList.add('ok');b.textContent='current';}d.textContent=updateAgeText(checked)+'. '+(st.message||'');}"
-        "async function updateLoadState(){try{const r=await fetch('/api/update-check-state',{cache:'no-store'});if(!r.ok)throw new Error('http '+r.status);const j=await r.json();updateDashboardBadge(j);return j;}catch(e){return null;}}"
-        "async function updateSaveState(st){st=st||{};try{await postJson('/api/update-check-state',{checkedAt:String(st.checkedAt||Math.floor(Date.now()/1000)),available:st.available?'1':'0',changes:String(st.changes||0),message:st.message||'',source:st.source||updateBase()});updateDashboardBadge(st);}catch(e){}}"
-        "function chunkHex(bytes,start,end){let s='';for(let i=start;i<end;i++)s+=HEX[bytes[i]];return s;}async function updateLocalStatus(){const j=await(await fetch('/api/update-status')).json();const lines=['Local control binaries:'];(j.files||[]).forEach(f=>lines.push((f.present?'ok ':'missing ')+f.name+' '+(f.md5||'')+' '+(f.size||0)+' bytes'));updateLog(lines.join('\\n'));return j;}"
-        "async function updateCheckRepo(silent){try{if(!silent)updateLog('checking repository...');const token=updateToken(),manifest=await updateFetch('MANIFEST.txt',token),entries=parseUpdateManifest(manifest),local=await(await fetch('/api/update-status')).json(),byName={};(local.files||[]).forEach(f=>byName[f.name]=f);let changes=0;const lines=['Repository files:'];entries.forEach(e=>{const cur=byName[e.name]||{},same=cur.md5&&cur.md5.toLowerCase()===e.md5;changes+=same?0:1;lines.push((same?'current ':'update  ')+e.name+' repo '+e.md5+' local '+(cur.md5||'missing'));});const msg=changes?changes+' file(s) need update.':'Already current.';lines.push(msg);const st={checkedAt:Math.floor(Date.now()/1000),available:changes>0,changes:changes,message:msg,source:updateBase()};await updateSaveState(st);if(!silent)updateLog(lines.join('\\n'));return st;}catch(e){const msg='update check failed: '+(e.message||e),st={checkedAt:Math.floor(Date.now()/1000),available:false,changes:-1,message:msg,source:updateBase()};await updateSaveState(st);if(!silent)updateLog(msg);return st;}}"
-        "async function updateInstallRepo(){try{const token=updateToken();updateLog('loading manifest...');const manifest=await updateFetch('MANIFEST.txt',token),entries=parseUpdateManifest(manifest);if(!entries.length)throw new Error('manifest has no updateable codex binaries');const local=await(await fetch('/api/update-status')).json(),byName={};(local.files||[]).forEach(f=>byName[f.name]=f);const todo=entries.filter(e=>!(byName[e.name]&&String(byName[e.name].md5||'').toLowerCase()===e.md5));if(!todo.length){updateLog('Already current.');await updateSaveState({checkedAt:Math.floor(Date.now()/1000),available:false,changes:0,message:'Already current.',source:updateBase()});return;}await postJson('/api/update-begin',{manifest:manifest});updateLog('staging '+todo.length+' file(s)...');for(const e of todo){updateAppend('fetch '+e.name);const buf=await updateFetch(e.name,token),bytes=new Uint8Array(buf);let off=0;while(off<bytes.length){const end=Math.min(off+24576,bytes.length),hex=chunkHex(bytes,off,end);await postJson('/api/update-chunk',{file:e.name,offset:String(off),hex:hex});off=end;updateAppend('  '+e.name+' '+off+' / '+bytes.length);} }const j=await postJson('/api/update-apply',{restart:'1'});updateAppend('installed: '+j.updated);updateAppend('backup: '+j.backupDir);updateAppend('services are restarting; refresh in about 5 seconds.');await updateSaveState({checkedAt:Math.floor(Date.now()/1000),available:false,changes:0,message:'Update installed; services are restarting.',source:updateBase()});setTimeout(updateLocalStatus,6000);}catch(e){updateAppend('update failed: '+(e.message||e));}}"
-        "const updateRefresh=$('updateRefresh');if(updateRefresh)updateRefresh.addEventListener('click',updateLocalStatus);const updateCheck=$('updateCheck');if(updateCheck)updateCheck.addEventListener('click',()=>updateCheckRepo(false));const updateInstall=$('updateInstall');if(updateInstall)updateInstall.addEventListener('click',updateInstallRepo);if($('updateLog'))updateLocalStatus();updateLoadState().then(st=>{const last=Number(st&&st.checkedAt||0)*1000;if(!last||Date.now()-last>UPDATE_AUTO_INTERVAL)updateCheckRepo(true);});setInterval(()=>updateCheckRepo(true),UPDATE_AUTO_INTERVAL);"
         "function btFields(){return{type:$('btType')?.value||'btkeyboard',name:($('btName')?.value||'Harmony Keyboard').trim(),bdaddr:($('btAddr')?.value||'').trim(),pin:($('btPin')?.value||'').trim(),code:($('btCode')?.value||'').trim(),timeout:$('btTimeout')?.value||'8'};}"
         "function btLog(t){const el=$('btLog');if(el)el.textContent=t||'';}"
         "function btAppend(t){const el=$('btLog');if(!el)return;let p=el.textContent||'';if(/^Ready\\./.test(p))p='';if(p.length>6000)p=p.slice(-5000);el.textContent=(p?p+'\\n':'')+String(t||'');el.scrollTop=el.scrollHeight;}"
@@ -6083,15 +5952,11 @@ static void page_end(FILE *f) {
 static void status_panel(FILE *f, const struct mqtt_config *mqtt) {
     char uptime[128], version[128], ifconfig[2048], activity[1024];
     char uptime_label[80], inventory_label[80];
-    char update_badge[48], update_detail[224], update_age[64];
     char hub_id[64];
-    struct update_check_state update_state;
-    const char *update_class;
     int hub_id_ok;
     int mqtt_up = tcp_established(mqtt->host, mqtt->port);
     int device_count = -1, command_count = 0;
     int cloud_blocked = load_cloud_blocker();
-    long now = time(NULL), age;
     read_text("/proc/uptime", uptime, sizeof(uptime));
     read_text("/etc/version", version, sizeof(version));
     chomp(uptime);
@@ -6112,30 +5977,6 @@ static void status_panel(FILE *f, const struct mqtt_config *mqtt) {
     }
     if (device_count < 0) snprintf(inventory_label, sizeof(inventory_label), "unknown");
     else snprintf(inventory_label, sizeof(inventory_label), "%d devices", device_count);
-    load_update_state(&update_state);
-    if (update_state.checked_at <= 0) {
-        snprintf(update_badge, sizeof(update_badge), "not checked");
-        snprintf(update_detail, sizeof(update_detail), "Checks automatically while this page is open.");
-        update_class = "warn";
-    } else {
-        age = now - update_state.checked_at;
-        if (age < 0) age = 0;
-        if (age >= 86400) snprintf(update_age, sizeof(update_age), "%ldd ago", age / 86400);
-        else if (age >= 3600) snprintf(update_age, sizeof(update_age), "%ldh ago", age / 3600);
-        else if (age >= 60) snprintf(update_age, sizeof(update_age), "%ldm ago", age / 60);
-        else snprintf(update_age, sizeof(update_age), "just now");
-        if (update_state.changes < 0) {
-            snprintf(update_badge, sizeof(update_badge), "check failed");
-            update_class = "bad";
-        } else if (update_state.available) {
-            snprintf(update_badge, sizeof(update_badge), "%d update%s", update_state.changes, update_state.changes == 1 ? "" : "s");
-            update_class = "warn";
-        } else {
-            snprintf(update_badge, sizeof(update_badge), "current");
-            update_class = "ok";
-        }
-        snprintf(update_detail, sizeof(update_detail), "Checked %s. %s", update_age, update_state.message[0] ? update_state.message : "No details.");
-    }
     {
         char esc_id[128], cmd[384];
         if (hub_id_ok) {
@@ -6161,11 +6002,7 @@ static void status_panel(FILE *f, const struct mqtt_config *mqtt) {
         cloud_blocked ? "LAN-only egress enforced" : "cloud egress allowed");
     fprintf(f, "<div class='stat'><div class='label'>Activity API</div><div class='value'><span class='badge %s'>%s</span></div></div>",
         activity[0] ? "ok" : "warn", activity[0] ? "responding" : "quiet");
-    fprintf(f, "<div class='stat'><div class='label'>Software update</div><div class='value'><span id='dashUpdateBadge' class='badge %s'>", update_class);
-    html(f, update_badge);
-    fprintf(f, "</span></div><div id='dashUpdateDetail' class='muted mini'>");
-    html(f, update_detail);
-    fprintf(f, "</div></div>");
+    fprintf(f, "<div class='stat'><div class='label'>Melodious</div><div class='value'><span class='badge ok'>" MELODIOUS_VERSION "</span></div><div class='muted mini'>Update with the installer from the release page.</div></div>");
     fprintf(f, "</div><div class='quick-actions'><button type='button' data-view-target='activities'><strong>Manage activities</strong><div class='muted mini'>Create scenes, route device roles and inputs, map remote buttons, then refresh the paired remote locally.</div></button><button type='button' data-view-target='control'><strong>Use a remote</strong><div class='muted mini'>Send saved buttons from the remote skin or command list.</div></button><button type='button' data-view-target='ir'><strong>Add or edit remotes</strong><div class='muted mini'>Create devices, search databases, learn buttons, and edit commands.</div></button><button type='button' data-view-target='lab'><strong>Bulk test IR codes</strong><div class='muted mini'>Search many code files, skip duplicates, then send a queue.</div></button><button type='button' data-view-target='mqtt'><strong>Set up Home Assistant</strong><div class='muted mini'>Configure MQTT topics, discovery, and state publishing.</div></button><button type='button' data-view-target='backup'><strong>Back up settings</strong><div class='muted mini'>Download a restore point before larger changes.</div></button></div><div class='grid' style='margin-top:12px'>");
     fprintf(f, "<details><summary>Network details</summary><pre>");
     html(f, ifconfig[0] ? ifconfig : "ath0 not available");
@@ -7311,7 +7148,7 @@ static void system_panel(FILE *f) {
     load_webui_auth(&auth);
     run_cmd("echo '--- uname ---'; uname -a; echo; echo '--- memory ---'; cat /proc/meminfo; echo; echo '--- mounts ---'; mount; echo; echo '--- processes ---'; ps", info, sizeof(info));
     run_cmd("echo '--- startup log ---'; cat /cache/codex-init.log 2>/dev/null; echo; echo '--- recovery log ---'; cat /cache/codex-recovery.log 2>/dev/null; echo; echo '--- local service syslog ---'; logread 2>/dev/null | grep -i 'codex\\|mqtt' 2>/dev/null", logs, sizeof(logs));
-    fprintf(f, "<section id='view-system' data-view='system' class='section'><div class='section-head'><div><h2>System</h2><div class='section-lead'>Check device information, read logs, update the web interface, or reboot when a saved change needs it.</div></div></div>");
+    fprintf(f, "<section id='view-system' data-view='system' class='section'><div class='section-head'><div><h2>System</h2><div class='section-lead'>Check device information, read logs, or reboot when a saved change needs it.</div></div></div>");
     fprintf(f, "<div class='grid'><details><summary>System information</summary><pre>");
     html(f, info);
     fprintf(f, "</pre></details><details><summary>Logs</summary><pre>");
@@ -7328,7 +7165,7 @@ static void system_panel(FILE *f) {
     fprintf(f, "'><div class='help'>Use plain text without a colon.</div></div><div><label>New password</label><input name='authPassword' type='password' autocomplete='new-password' placeholder='Leave blank to keep current password'><div class='help'>Required the first time you enable sign-in.</div></div></div>");
     fprintf(f, "<div class='help'>Current mode: <strong>%s</strong>.</div>", auth.enabled ? "sign-in required" : "open on local network");
     fprintf(f, "<div class='actions'><button name='action' value='auth' type='submit'>Save sign-in setting</button></div></form></div>");
-    fprintf(f, "<div class='panel' style='margin-top:12px'><h3>Software update</h3><div class='help'>Check the public release files, copy newer binaries to the hub, verify checksums, and restart the local services. SSH access is not changed. The default public repository tries GitHub and CDN mirrors without a token. Use the token field only for private repositories.</div><form id='updateForm' autocomplete='off' onsubmit='return false'><div class='grid two'><div><label for='updateRepo'>Optional update mirror URL</label><input id='updateRepo' autocomplete='url' value='https://raw.githubusercontent.com/schlambos/harmony-hub-control/main/payload/bin/'></div><div><label for='updateToken'>GitHub token (private repos only)</label><input id='updateToken' type='password' autocomplete='new-password' placeholder='optional; used only by this browser'></div></div><div class='actions'><button id='updateCheck' type='button' class='secondary'>Check for updates</button><button id='updateInstall' type='button'>Install update</button><button id='updateRefresh' type='button' class='secondary'>Show installed versions</button></div></form><pre id='updateLog' class='mini'>Ready. Check the public repo, or paste a token if the repo is private.</pre></div><div class='panel' style='margin-top:12px'><div class='help'>Refresh Home Assistant discovery if new devices or commands do not appear after changes.</div><form method='post' action='/system#system'><div class='actions'><button name='action' value='rediscover' type='submit'>Refresh Home Assistant discovery</button><button name='action' value='reboot' type='submit' class='secondary'>Reboot hub</button></div></form></div></section>");
+    fprintf(f, "<div class='panel' style='margin-top:12px'><div class='help'>Refresh Home Assistant discovery if new devices or commands do not appear after changes.</div><form method='post' action='/system#system'><div class='actions'><button name='action' value='rediscover' type='submit'>Refresh Home Assistant discovery</button><button name='action' value='reboot' type='submit' class='secondary'>Reboot hub</button></div></form></div></section>");
 }
 
 /* Production shell: the index.html tools/package_harmony_shell.sh generates,
@@ -8984,59 +8821,8 @@ static void render_bluetooth_text_status_json(int fd) {
     fclose(f);
 }
 
-static int update_file_allowed(const char *name) {
-    size_t i;
-    if (!name || !name[0]) return 0;
-    for (i = 0; i < sizeof(UPDATE_FILES) / sizeof(UPDATE_FILES[0]); i++) {
-        if (strcmp(name, UPDATE_FILES[i]) == 0) return 1;
-    }
-    return 0;
-}
-
-static void update_stage_path(const char *name, char *out, size_t outlen) {
-    snprintf(out, outlen, UPDATE_STAGE_DIR "/%s", name);
-}
-
 static void update_dest_path(const char *name, char *out, size_t outlen) {
     snprintf(out, outlen, CODEX_BIN_DIR "/%s", name);
-}
-
-static int is_hex32(const char *s) {
-    int i;
-    if (!s) return 0;
-    for (i = 0; i < 32; i++) {
-        if (!isxdigit((unsigned char)s[i])) return 0;
-    }
-    return s[32] == 0;
-}
-
-static int manifest_expected_md5(const char *manifest, const char *name, char *out, size_t outlen) {
-    const char *p = manifest;
-    if (!manifest || !name || !out || outlen < 33) return 0;
-    out[0] = 0;
-    while (p && *p) {
-        const char *end = strchr(p, '\n');
-        const char *q;
-        size_t len = end ? (size_t)(end - p) : strlen(p);
-        if (len > 34) {
-            char hash[33], file[96];
-            size_t n = 0;
-            memcpy(hash, p, 32);
-            hash[32] = 0;
-            q = p + 32;
-            while (q < p + len && isspace((unsigned char)*q)) q++;
-            while (q < p + len && *q != '\r' && !isspace((unsigned char)*q) && n + 1 < sizeof(file)) {
-                file[n++] = *q++;
-            }
-            file[n] = 0;
-            if (is_hex32(hash) && strcmp(file, name) == 0) {
-                snprintf(out, outlen, "%s", hash);
-                return 1;
-            }
-        }
-        p = end ? end + 1 : NULL;
-    }
-    return 0;
 }
 
 static int parse_md5_text(const char *reply, char *out, size_t outlen) {
@@ -9080,66 +8866,13 @@ static int file_md5(const char *path, char *out, size_t outlen) {
     return parse_md5_text(reply, out, outlen);
 }
 
-static int write_update_hex_chunk(const char *name, long offset, const char *hex, char *err, size_t errlen, long *bytes_out) {
-    char path[256];
-    struct stat st;
-    FILE *f;
-    size_t len, i;
-    long current = 0, wrote = 0;
-    if (bytes_out) *bytes_out = 0;
-    if (!update_file_allowed(name)) {
-        snprintf(err, errlen, "file is not part of the update allow-list");
-        return -1;
-    }
-    if (!hex || !hex[0]) {
-        snprintf(err, errlen, "missing update chunk");
-        return -1;
-    }
-    len = strlen(hex);
-    if ((len & 1) != 0) {
-        snprintf(err, errlen, "chunk hex length is odd");
-        return -1;
-    }
-    for (i = 0; i < len; i++) {
-        if (!isxdigit((unsigned char)hex[i])) {
-            snprintf(err, errlen, "chunk contains non-hex data");
-            return -1;
-        }
-    }
-    mkdir(UPDATE_STAGE_DIR, 0755);
-    update_stage_path(name, path, sizeof(path));
-    if (stat(path, &st) == 0) current = (long)st.st_size;
-    if (offset != current) {
-        snprintf(err, errlen, "chunk offset mismatch for %s: got %ld expected %ld", name, offset, current);
-        return -1;
-    }
-    f = fopen(path, offset == 0 ? "wb" : "ab");
-    if (!f) {
-        snprintf(err, errlen, "cannot open staged update file");
-        return -1;
-    }
-    for (i = 0; i < len; i += 2) {
-        int hi = hexval(hex[i]), lo = hexval(hex[i + 1]);
-        unsigned char b = (unsigned char)((hi << 4) | lo);
-        if (hi < 0 || lo < 0 || fwrite(&b, 1, 1, f) != 1) {
-            fclose(f);
-            snprintf(err, errlen, "failed writing staged update chunk");
-            return -1;
-        }
-        wrote++;
-    }
-    fclose(f);
-    if (bytes_out) *bytes_out = wrote;
-    return 0;
-}
-
 static void render_update_status_json(int fd) {
     FILE *f = send_json_start(fd, "200 OK");
     size_t i;
     struct stat st;
     char path[256], md5[40];
     if (!f) return;
-    fputs("{\"ok\":true,\"repo\":\"https://github.com/schlambos/harmony-hub-control\",\"rawBase\":\"https://raw.githubusercontent.com/schlambos/harmony-hub-control/main/payload/bin/\",\"files\":[", f);
+    fputs("{\"ok\":true,\"version\":\"" MELODIOUS_VERSION "\",\"repo\":\"https://github.com/schlambos/harmony-hub-control\",\"files\":[", f);
     for (i = 0; i < sizeof(UPDATE_FILES) / sizeof(UPDATE_FILES[0]); i++) {
         if (i) fputc(',', f);
         update_dest_path(UPDATE_FILES[i], path, sizeof(path));
@@ -9158,282 +8891,31 @@ static void render_update_status_json(int fd) {
     fclose(f);
 }
 
-static void render_update_check_state_json(int fd) {
-    struct update_check_state st;
+/* GET /api/version: which Melodious release this hub runs and what its API
+ * offers, so an app can say "update the hub" before a feature fails. Hubs
+ * older than 1.3.0 answer 404 here. */
+static void render_version_json(int fd) {
+    static const char *features[] = {
+        "activity-save",
+        "activity-sync",
+        "catalog-import",
+        "device-commands",
+        "device-screen",
+        "device-settings",
+        "ha-devices",
+        "irdb-import"
+    };
     FILE *f = send_json_start(fd, "200 OK");
-    if (!f) return;
-    load_update_state(&st);
-    fputs("{\"ok\":true,\"checkedAt\":", f); fprintf(f, "%ld", st.checked_at);
-    fputs(",\"available\":", f); fputs(st.available ? "true" : "false", f);
-    fputs(",\"changes\":", f); fprintf(f, "%d", st.changes);
-    fputs(",\"message\":", f); json_write_string(f, st.message);
-    fputs(",\"source\":", f); json_write_string(f, st.source);
-    fputs("}\n", f);
-    fclose(f);
-}
-
-static void render_update_check_state_post_json(int fd, const struct request *req) {
-    struct update_check_state st;
-    char tmp[256];
-    FILE *f;
-    memset(&st, 0, sizeof(st));
-    form_value(req->body, "checkedAt", tmp, sizeof(tmp));
-    st.checked_at = atol(tmp);
-    if (st.checked_at <= 0) st.checked_at = time(NULL);
-    form_value(req->body, "available", tmp, sizeof(tmp));
-    st.available = (strcmp(tmp, "1") == 0 || strcasecmp(tmp, "true") == 0 ||
-        strcasecmp(tmp, "yes") == 0 || strcasecmp(tmp, "on") == 0) ? 1 : 0;
-    form_value(req->body, "changes", tmp, sizeof(tmp));
-    st.changes = tmp[0] ? atoi(tmp) : 0;
-    form_value(req->body, "message", st.message, sizeof(st.message));
-    if (!st.message[0]) snprintf(st.message, sizeof(st.message), "Update check completed.");
-    form_value(req->body, "source", st.source, sizeof(st.source));
-    if (save_update_state(&st) != 0) {
-        f = send_json_start(fd, "500 Internal Server Error");
-        if (!f) return;
-        fputs("{\"ok\":false,\"error\":\"failed to save update check state\"}\n", f);
-        fclose(f);
-        return;
-    }
-    f = send_json_start(fd, "200 OK");
-    if (!f) return;
-    fputs("{\"ok\":true,\"checkedAt\":", f); fprintf(f, "%ld", st.checked_at);
-    fputs(",\"available\":", f); fputs(st.available ? "true" : "false", f);
-    fputs(",\"changes\":", f); fprintf(f, "%d", st.changes);
-    fputs(",\"message\":", f); json_write_string(f, st.message);
-    fputs(",\"source\":", f); json_write_string(f, st.source);
-    fputs("}\n", f);
-    fclose(f);
-}
-
-static void render_update_begin_json(int fd, const struct request *req) {
-    char *manifest;
     size_t i;
-    FILE *f;
-    if (req->body_truncated) {
-        f = send_json_start(fd, "413 Payload Too Large");
-        if (!f) return;
-        fputs("{\"ok\":false,\"error\":\"update manifest request is too large\"}\n", f);
-        fclose(f);
-        return;
-    }
-    manifest = (char *)malloc(MAX_REQUEST_BODY);
-    if (!manifest) {
-        f = send_json_start(fd, "500 Internal Server Error");
-        if (!f) return;
-        fputs("{\"ok\":false,\"error\":\"not enough memory for update manifest\"}\n", f);
-        fclose(f);
-        return;
-    }
-    form_value(req->body, "manifest", manifest, MAX_REQUEST_BODY);
-    if (!strstr(manifest, "codex_webui")) {
-        free(manifest);
-        f = send_json_start(fd, "400 Bad Request");
-        if (!f) return;
-        fputs("{\"ok\":false,\"error\":\"manifest does not look like a Harmony control build\"}\n", f);
-        fclose(f);
-        return;
-    }
-    mkdir(UPDATE_STAGE_DIR, 0755);
-    for (i = 0; i < sizeof(UPDATE_FILES) / sizeof(UPDATE_FILES[0]); i++) {
-        char path[256];
-        update_stage_path(UPDATE_FILES[i], path, sizeof(path));
-        unlink(path);
-    }
-    if (write_file_atomic(UPDATE_STAGE_DIR "/MANIFEST.txt", manifest, strlen(manifest)) != 0) {
-        free(manifest);
-        f = send_json_start(fd, "500 Internal Server Error");
-        if (!f) return;
-        fputs("{\"ok\":false,\"error\":\"failed to stage update manifest\"}\n", f);
-        fclose(f);
-        return;
-    }
-    free(manifest);
-    f = send_json_start(fd, "200 OK");
     if (!f) return;
-    fputs("{\"ok\":true,\"message\":\"update staging started\"}\n", f);
+    fputs("{\"ok\":true,\"product\":\"melodious\",\"version\":\"" MELODIOUS_VERSION "\",", f);
+    fprintf(f, "\"api\":%d,\"update\":{\"protocol\":0},\"features\":[", MELODIOUS_API_LEVEL);
+    for (i = 0; i < sizeof(features) / sizeof(features[0]); i++) {
+        if (i) fputc(',', f);
+        json_write_string(f, features[i]);
+    }
+    fputs("]}\n", f);
     fclose(f);
-}
-
-static void render_update_chunk_json(int fd, const struct request *req) {
-    char name[64], offset_text[32], err[256];
-    char *hex;
-    long offset, wrote = 0;
-    FILE *f;
-    if (req->body_truncated) {
-        f = send_json_start(fd, "413 Payload Too Large");
-        if (!f) return;
-        fputs("{\"ok\":false,\"error\":\"update chunk is too large\"}\n", f);
-        fclose(f);
-        return;
-    }
-    form_value(req->body, "file", name, sizeof(name));
-    form_value(req->body, "offset", offset_text, sizeof(offset_text));
-    offset = atol(offset_text);
-    hex = (char *)malloc(MAX_REQUEST_BODY);
-    if (!hex) {
-        f = send_json_start(fd, "500 Internal Server Error");
-        if (!f) return;
-        fputs("{\"ok\":false,\"error\":\"not enough memory for update chunk\"}\n", f);
-        fclose(f);
-        return;
-    }
-    form_value(req->body, "hex", hex, MAX_REQUEST_BODY);
-    if (write_update_hex_chunk(name, offset, hex, err, sizeof(err), &wrote) != 0) {
-        free(hex);
-        f = send_json_start(fd, "400 Bad Request");
-        if (!f) return;
-        fputs("{\"ok\":false,\"error\":", f); json_write_string(f, err);
-        fputs("}\n", f);
-        fclose(f);
-        return;
-    }
-    free(hex);
-    f = send_json_start(fd, "200 OK");
-    if (!f) return;
-    fputs("{\"ok\":true,\"file\":", f); json_write_string(f, name);
-    fprintf(f, ",\"offset\":%ld,\"bytes\":%ld}\n", offset, wrote);
-    fclose(f);
-}
-
-static void render_update_apply_json(int fd, const struct request *req) {
-    char *manifest;
-    char restart_text[16], backup_dir[256], updated[512];
-    char stage[256], dest[256], dest_tmp[288], backup[256], expected[40], actual[40];
-    int restart, count = 0, rc = 0;
-    size_t i;
-    struct stat st;
-    FILE *f;
-    form_value(req->body, "restart", restart_text, sizeof(restart_text));
-    restart = strcmp(restart_text, "0") != 0;
-    manifest = read_file_alloc(UPDATE_STAGE_DIR "/MANIFEST.txt", MAX_REQUEST_BODY, NULL);
-    if (!manifest) {
-        f = send_json_start(fd, "400 Bad Request");
-        if (!f) return;
-        fputs("{\"ok\":false,\"error\":\"no staged update manifest found\"}\n", f);
-        fclose(f);
-        return;
-    }
-    for (i = 0; i < sizeof(UPDATE_FILES) / sizeof(UPDATE_FILES[0]); i++) {
-        update_stage_path(UPDATE_FILES[i], stage, sizeof(stage));
-        if (stat(stage, &st) != 0) continue;
-        count++;
-        if (!manifest_expected_md5(manifest, UPDATE_FILES[i], expected, sizeof(expected))) {
-            rc = -1;
-            snprintf(updated, sizeof(updated), "manifest has no md5 for %s", UPDATE_FILES[i]);
-            break;
-        }
-        if (file_md5(stage, actual, sizeof(actual)) != 0 || strcasecmp(expected, actual) != 0) {
-            rc = -1;
-            snprintf(updated, sizeof(updated), "md5 mismatch for %s", UPDATE_FILES[i]);
-            break;
-        }
-    }
-    if (rc == 0 && count <= 0) {
-        rc = -1;
-        snprintf(updated, sizeof(updated), "no staged binaries found");
-    }
-    if (rc != 0) {
-        free(manifest);
-        f = send_json_start(fd, "400 Bad Request");
-        if (!f) return;
-        fputs("{\"ok\":false,\"error\":", f); json_write_string(f, updated);
-        fputs("}\n", f);
-        fclose(f);
-        return;
-    }
-    remove_dir_entries_with_prefix(CODEX_BIN_DIR, "codex_webui.prev");
-    mkdir(UPDATE_BACKUP_DIR, 0755);
-    prune_update_backups(3);
-    snprintf(backup_dir, sizeof(backup_dir), UPDATE_BACKUP_DIR "/%ld", (long)time(NULL));
-    mkdir(backup_dir, 0755);
-    updated[0] = 0;
-    for (i = 0; i < sizeof(UPDATE_FILES) / sizeof(UPDATE_FILES[0]); i++) {
-        update_stage_path(UPDATE_FILES[i], stage, sizeof(stage));
-        if (stat(stage, &st) != 0) continue;
-        update_dest_path(UPDATE_FILES[i], dest, sizeof(dest));
-        snprintf(dest_tmp, sizeof(dest_tmp), "%s.update", dest);
-        snprintf(backup, sizeof(backup), "%s/%s", backup_dir, UPDATE_FILES[i]);
-        if (stat(dest, &st) == 0) copy_file_raw(dest, backup);
-        unlink(dest_tmp);
-        if (copy_file_raw(stage, dest_tmp) != 0) {
-            char msg[160];
-            int saved_errno = errno;
-            unlink(dest_tmp);
-            free(manifest);
-            f = send_json_start(fd, "500 Internal Server Error");
-            if (!f) return;
-            snprintf(msg, sizeof(msg), "failed to copy %s: %s", UPDATE_FILES[i], strerror(saved_errno));
-            fputs("{\"ok\":false,\"error\":", f); json_write_string(f, msg);
-            fputs("}\n", f);
-            fclose(f);
-            return;
-        }
-        if (chmod(dest_tmp, 0755) != 0) {
-            char msg[160];
-            int saved_errno = errno;
-            unlink(dest_tmp);
-            free(manifest);
-            f = send_json_start(fd, "500 Internal Server Error");
-            if (!f) return;
-            snprintf(msg, sizeof(msg), "failed to chmod %s: %s", UPDATE_FILES[i], strerror(saved_errno));
-            fputs("{\"ok\":false,\"error\":", f); json_write_string(f, msg);
-            fputs("}\n", f);
-            fclose(f);
-            return;
-        }
-        if (rename(dest_tmp, dest) != 0) {
-            char msg[160];
-            int saved_errno = errno;
-            unlink(dest_tmp);
-            free(manifest);
-            f = send_json_start(fd, "500 Internal Server Error");
-            if (!f) return;
-            snprintf(msg, sizeof(msg), "failed to rename %s: %s", UPDATE_FILES[i], strerror(saved_errno));
-            fputs("{\"ok\":false,\"error\":", f); json_write_string(f, msg);
-            fputs("}\n", f);
-            fclose(f);
-            return;
-        }
-        unlink(stage);
-        if (updated[0]) strncat(updated, ", ", sizeof(updated) - strlen(updated) - 1);
-        strncat(updated, UPDATE_FILES[i], sizeof(updated) - strlen(updated) - 1);
-    }
-    copy_file_raw(UPDATE_STAGE_DIR "/MANIFEST.txt", CODEX_BIN_DIR "/MANIFEST.txt");
-    chmod(CODEX_BIN_DIR "/MANIFEST.txt", 0644);
-    unlink(UPDATE_STAGE_DIR "/MANIFEST.txt");
-    prune_update_backups(3);
-    sync();
-    free(manifest);
-    f = send_json_start(fd, "200 OK");
-    if (!f) return;
-    fputs("{\"ok\":true,\"updated\":", f); json_write_string(f, updated);
-    fputs(",\"backupDir\":", f); json_write_string(f, backup_dir);
-    fputs(",\"restart\":", f); fputs(restart ? "true" : "false", f);
-    fputs("}\n", f);
-    fclose(f);
-    if (restart) {
-        pid_t pid;
-        shutdown(fd, SHUT_RDWR);
-        pid = fork();
-        if (pid == 0) {
-            close(fd);
-            setsid();
-            execl("/bin/sh", "sh", "-c",
-                  "sleep 3; "
-                  "killall codex_bt_pair_agent 2>/dev/null; "
-                  "rm -f " BT_HID_CONTROL_PID " " BT_PAIR_AGENT_PID "; "
-                  BT_PAIR_AGENT_BIN " btkeyboard 600 --hid-control-daemon </dev/null "
-                  "> " BT_HID_CONTROL_LOG " 2>&1 & "
-                  "echo $! > " BT_HID_CONTROL_PID "; "
-                  "killall codex_bthid_keyboard 2>/dev/null; "
-                  "/data/codex/bin/codex_bthid_keyboard >> /cache/codex-bthid-keyboard.log 2>&1 & "
-                  "killall codex_webui 2>/dev/null; "
-                  "/data/codex/bin/codex_webui 8080 >> /cache/codex-init.log 2>&1 &",
-                  (char *)NULL);
-            _exit(127);
-        }
-    }
 }
 
 static void render_bluetooth_call_json(int fd, const struct request *req) {
@@ -10288,18 +9770,10 @@ static void handle_client(int client) {
         render_bluetooth_text_json(client, &req);
     } else if (strcmp(req.method, "POST") == 0 && strcmp(req.path, "/api/bt-saved-command") == 0) {
         render_bt_saved_command_json(client, &req);
+    } else if (strcmp(req.method, "GET") == 0 && strcmp(req.path, "/api/version") == 0) {
+        render_version_json(client);
     } else if (strcmp(req.method, "GET") == 0 && strcmp(req.path, "/api/update-status") == 0) {
         render_update_status_json(client);
-    } else if (strcmp(req.method, "GET") == 0 && strcmp(req.path, "/api/update-check-state") == 0) {
-        render_update_check_state_json(client);
-    } else if (strcmp(req.method, "POST") == 0 && strcmp(req.path, "/api/update-check-state") == 0) {
-        render_update_check_state_post_json(client, &req);
-    } else if (strcmp(req.method, "POST") == 0 && strcmp(req.path, "/api/update-begin") == 0) {
-        render_update_begin_json(client, &req);
-    } else if (strcmp(req.method, "POST") == 0 && strcmp(req.path, "/api/update-chunk") == 0) {
-        render_update_chunk_json(client, &req);
-    } else if (strcmp(req.method, "POST") == 0 && strcmp(req.path, "/api/update-apply") == 0) {
-        render_update_apply_json(client, &req);
     } else if (strcmp(req.method, "POST") == 0 && strcmp(req.path, "/api/irdb-import") == 0) {
         render_irdb_import_json(client, &req);
     } else if (strcmp(req.method, "POST") == 0 && strcmp(req.path, "/api/catalog-import") == 0) {

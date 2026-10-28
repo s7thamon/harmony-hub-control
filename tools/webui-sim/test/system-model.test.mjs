@@ -14,8 +14,7 @@ import {
   authProbeFailureMessage,
   authDisabledMessage,
   formatBytes,
-  formatCheckedAt,
-  updateCheckSummary,
+  hubVersionSummary,
 } from "../public/js/views/system-model.js";
 
 describe("cloudPanelState", () => {
@@ -210,60 +209,23 @@ describe("formatBytes", () => {
   });
 });
 
-describe("formatCheckedAt", () => {
-  it("returns never for missing or invalid epochs", () => {
-    assert.equal(formatCheckedAt(0), "never");
-    assert.equal(formatCheckedAt(-1), "never");
-    assert.equal(formatCheckedAt(NaN), "never");
-    assert.equal(formatCheckedAt(undefined), "never");
-    assert.equal(formatCheckedAt(null), "never");
+describe("hubVersionSummary", () => {
+  it("names the version the hub reports", () => {
+    assert.equal(hubVersionSummary({ ok: true, version: "1.3.0", api: 1 }, null), "Melodious 1.3.0 on this hub.");
   });
 
-  it("formats a valid epoch as a locale string", () => {
-    const result = formatCheckedAt(1700000000);
-    // The exact format depends on the locale, but it must not be "never".
-    assert.notEqual(result, "never");
-    assert.ok(result.length > 0);
-  });
-});
-
-describe("updateCheckSummary", () => {
-  it("returns empty for no state", () => {
-    assert.equal(updateCheckSummary(null), "");
-    assert.equal(updateCheckSummary(undefined), "");
+  it("explains a 404 as a hub from before /api/version", () => {
+    const err = Object.assign(new Error("HTTP 404"), { status: 404 });
+    assert.match(hubVersionSummary(null, err), /1\.2 or older/);
   });
 
-  it("reports when no check has been recorded", () => {
-    assert.equal(
-      updateCheckSummary({ checkedAt: 0 }),
-      "No update check has been recorded on this hub yet.",
-    );
-    assert.equal(
-      updateCheckSummary({}),
-      "No update check has been recorded on this hub yet.",
-    );
+  it("passes other errors through", () => {
+    const err = Object.assign(new Error("HTTP 401"), { status: 401 });
+    assert.equal(hubVersionSummary(null, err), "Could not read the hub's version: HTTP 401");
   });
 
-  it("summarizes an available update with file count", () => {
-    const s = updateCheckSummary({ checkedAt: 1700000000, available: true, changes: 3 });
-    assert.ok(s.includes("Update available"));
-    assert.ok(s.includes("3 files"));
-  });
-
-  it("uses singular '1 file' for a single change", () => {
-    const s = updateCheckSummary({ checkedAt: 1700000000, available: true, changes: 1 });
-    assert.ok(s.includes("1 file"));
-    assert.ok(!s.includes("1 files"));
-  });
-
-  it("summarizes no available update", () => {
-    const s = updateCheckSummary({ checkedAt: 1700000000, available: false, changes: 0 });
-    assert.ok(s.includes("No update available"));
-  });
-
-  it("includes the source when present", () => {
-    const s = updateCheckSummary({ checkedAt: 1700000000, available: false, source: "manual" });
-    assert.ok(s.includes("via manual"));
+  it("is empty before anything loaded", () => {
+    assert.equal(hubVersionSummary(null, null), "");
   });
 });
 import {

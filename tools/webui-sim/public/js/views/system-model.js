@@ -157,27 +157,17 @@ export function formatBytes(bytes) {
   return `${(n / (1024 * 1024)).toFixed(2)} MB`;
 }
 
-/** Human label for the saved update-check epoch (seconds). */
-export function formatCheckedAt(epochSeconds) {
-  const n = Number(epochSeconds);
-  if (!Number.isFinite(n) || n <= 0) return "never";
-  const d = new Date(n * 1000);
-  return Number.isNaN(d.getTime()) ? "never" : d.toLocaleString();
-}
-
-/** One-line summary of the saved /api/update-check-state payload. The check
-    itself is outbound network work this page never performs — this only
-    describes what was last recorded on the hub. */
-export function updateCheckSummary(checkState) {
-  if (!checkState) return "";
-  if (!checkState.checkedAt) return "No update check has been recorded on this hub yet.";
-  const when = formatCheckedAt(checkState.checkedAt);
-  const via = checkState.source ? ` via ${checkState.source}` : "";
-  if (checkState.available) {
-    const files = checkState.changes === 1 ? "1 file" : `${checkState.changes ?? 0} files`;
-    return `Update available (${files}) — last checked ${when}${via}.`;
+/** One line for the System page from GET /api/version. Hubs before 1.3.0
+    have no such route and answer 404. */
+export function hubVersionSummary(version, error) {
+  if (version && typeof version.version === "string" && version.version) {
+    return `Melodious ${version.version} on this hub.`;
   }
-  return `No update available — last checked ${when}${via}.`;
+  if (error && error.status === 404) {
+    return "Melodious 1.2 or older on this hub (it does not report its version).";
+  }
+  if (error) return `Could not read the hub's version: ${error.message}`;
+  return "";
 }
 
 /**
@@ -194,8 +184,7 @@ export function missingBinariesRemedy(files) {
     : `${missing.slice(0, 3).join(", ")} and ${missing.length - 3} more`;
   return (
     `${names} ${missing.length === 1 ? "is" : "are"} not on the hub under /data/codex/bin. ` +
-    "Re-run the host installer (install_webui.py / install_webui.ps1) so every MANIFEST.txt binary is uploaded — " +
-    "browser self-update is disabled and will not restore a missing install."
+    "Re-run the host installer (install_webui.py / install_webui.ps1) so every MANIFEST.txt binary is uploaded."
   );
 }
 
