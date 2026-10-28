@@ -62,6 +62,13 @@ class CodexHubRestClient(
         isLenient = true
     }
 
+    /* Writes go through the hub's offline writer, which says nothing until it
+       has saved, reloaded the engine and published. That takes 25-50 s with an
+       activity running, and codex_webui waits up to 120 s, so allow longer. */
+    private val writerClient: OkHttpClient = httpClient.newBuilder()
+        .readTimeout(150, TimeUnit.SECONDS)
+        .build()
+
     companion object {
         private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
         private val ACTIVITY_ID_REGEX = Regex(""""(?:current)?activityId"\s*:\s*"?(-?\d+)"?""", RegexOption.IGNORE_CASE)
@@ -177,7 +184,7 @@ class CodexHubRestClient(
                 "functionList" to builtGraph.functionList,
             )
         )
-        postJson(endpoint, "/api/activity-save", bodyObj)
+        postJson(endpoint, "/api/activity-save", bodyObj, writerClient)
     }
 
     /**
@@ -186,7 +193,7 @@ class CodexHubRestClient(
      */
     suspend fun saveDeviceSettings(endpoint: HubEndpoint, deviceId: String, settings: app.melodious.protocol.model.DeviceSettings): JsonObject =
         withContext(Dispatchers.IO) {
-            postJson(endpoint, "/api/device-settings", app.melodious.protocol.model.DeviceSettingsModel.requestBody(deviceId, settings))
+            postJson(endpoint, "/api/device-settings", app.melodious.protocol.model.DeviceSettingsModel.requestBody(deviceId, settings), writerClient)
         }
 
     /**
@@ -195,7 +202,7 @@ class CodexHubRestClient(
      */
     suspend fun saveDeviceScreen(endpoint: HubEndpoint, deviceId: String, remove: Boolean): JsonObject =
         withContext(Dispatchers.IO) {
-            postJson(endpoint, "/api/device-screen", app.melodious.protocol.model.DeviceTouchScreens.requestBody(deviceId, remove))
+            postJson(endpoint, "/api/device-screen", app.melodious.protocol.model.DeviceTouchScreens.requestBody(deviceId, remove), writerClient)
         }
 
     /**
@@ -584,6 +591,7 @@ class CodexHubRestClient(
         endpoint: HubEndpoint,
         path: String,
         body: JsonElement,
+        client: OkHttpClient = httpClient,
     ): JsonObject {
         val requestBody = body.toString().toRequestBody(JSON_MEDIA_TYPE)
         val request = Request.Builder()
@@ -595,7 +603,7 @@ class CodexHubRestClient(
             .post(requestBody)
             .build()
 
-        httpClient.newCall(request).execute().use { response ->
+        client.newCall(request).execute().use { response ->
             val raw = response.body?.string().orEmpty()
             val parsed = runCatching { jsonParser.parseToJsonElement(raw).jsonObject }.getOrNull()
             if (!response.isSuccessful || parsed?.get("ok")?.jsonPrimitive?.booleanOrNull == false) {

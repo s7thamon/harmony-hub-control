@@ -268,9 +268,12 @@ graph for every kind of edit.
 
 A save writes the resources, reloads the engine, then waits for the activity
 engine before it answers. An activity that is starting can hold the engine
-for a long time. `codex_webui` gives the whole save 45 s, while the plugin's
+for a long time. `codex_webui` gives the whole save 120 s, while the plugin's
 engine-ready wait ends by the clock after 25 s, leaving room for the writes
 and the reload, and then answers; a slow engine is reported rather than
-treated as a failure. `tools/touch-validator/codexactivity-barrier-test.lua`
+treated as a failure. With an activity running, saves have taken over 45 s
+on hardware. If the plugin still hasn't answered after 120 s, `codex_webui`
+answers 504 with `"pending": true` and does not roll back: the plugin may
+still finish the save, and a rollback would then land after it and undo it. `tools/touch-validator/codexactivity-barrier-test.lua`
 checks the wait against a fake clock and against the limit in
 `codex_webui.c`.

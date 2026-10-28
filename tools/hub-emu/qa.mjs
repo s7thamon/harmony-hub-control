@@ -240,7 +240,7 @@ check(
 console.log("\n== writer requests take turns ==");
 // Each connection is its own codex_webui child and all writer requests share
 // one request file; without a lock, overlapping requests delete each other's
-// files and one waits out its whole 45 s. engine-emu answers this op at once
+// files and one waits out its whole 120 s. engine-emu answers this op at once
 // (422, unknown op), so every request should come back quickly.
 const turnsStart = Date.now();
 const turns = await Promise.all(
@@ -253,7 +253,7 @@ check(
   turns.every((t) => t.status === 422 && /unknown op/.test(t.json?.error ?? "")),
   turns.map((t) => `${t.status} ${t.json?.error ?? t.text.slice(0, 60)}`).join(" | "),
 );
-check("and none waits out the 45 s limit", turnsMs < 15000, `${turnsMs} ms`);
+check("and none waits out the writer limit", turnsMs < 15000, `${turnsMs} ms`);
 
 console.log("\n== full-graph save: writer daemon + revision semantics ==");
 const noop = await req(

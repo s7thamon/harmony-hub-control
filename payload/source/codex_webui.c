@@ -2733,13 +2733,13 @@ static int harmony_hbus_call(
 
 /* Each connection is served by its own child, and every writer request
    shares one request file and one response file: two at once delete each
-   other's files, and one waits out its whole 45 s. So requests take turns.
+   other's files, and one waits out its whole 120 s. So requests take turns.
    The wait outlasts one whole request; the lock goes when the fd closes or
    the child exits. */
 static int offline_writer_lock(void) {
     int fd = open(ACTIVITY_LOCK_FILE, O_RDWR | O_CREAT, 0600), turn;
     if (fd < 0) return -1;
-    for (turn = 0; turn < 500; turn++) {
+    for (turn = 0; turn < 1300; turn++) {
         if (flock(fd, LOCK_EX | LOCK_NB) == 0) return fd;
         usleep(100 * 1000);
     }
@@ -2748,7 +2748,12 @@ static int offline_writer_lock(void) {
 }
 
 /* Hand one request to the codexactivity plugin through its request file and
-   wait up to 45 s for the response that carries the same id. */
+   wait up to 120 s for the response that carries the same id. A save with a
+   running activity has taken over 45 s on hardware. No answer in time
+   returns OFFLINE_WRITER_NO_ANSWER: the plugin may still be applying the
+   request, so the caller must not undo it. */
+#define OFFLINE_WRITER_NO_ANSWER (-2)
+
 static int offline_writer_request(
     const char *request,
     size_t request_len,
@@ -2774,7 +2779,7 @@ static int offline_writer_request(
         goto out;
     }
     chmod(ACTIVITY_REQUEST_FILE, 0600);
-    for (attempt = 0; attempt < 450; attempt++) {
+    for (attempt = 0; attempt < 1200; attempt++) {
         response = read_file_alloc(ACTIVITY_RESPONSE_FILE, 32768, &response_len);
         if (response) {
             response_id[0] = 0;
@@ -2799,6 +2804,7 @@ static int offline_writer_request(
     }
     snprintf(msg, msg_len,
         "the offline activity writer did not answer; its local plugin may not be running");
+    rc = OFFLINE_WRITER_NO_ANSWER;
 out:
     unlink(ACTIVITY_REQUEST_FILE);
     free(response);
@@ -3282,6 +3288,18 @@ static void render_activity_save_json(int fd, const struct request *req) {
             functions, functions_len,
             activity_changed, map_changed, function_changed,
             commit_reply, sizeof(commit_reply), msg, sizeof(msg));
+        if (commit_rc == OFFLINE_WRITER_NO_ANSWER) {
+            /* The plugin may still finish this save, so a rollback now would
+               land after it and undo it. Say so and leave both alone. */
+            f = send_json_start(fd, "504 Gateway Timeout");
+            if (f) {
+                fputs("{\"ok\":false,\"saved\":false,\"pending\":true,\"localOnly\":true,"
+                    "\"rolledBack\":false,\"error\":"
+                    "\"the hub is still applying this save; reload in a minute to see whether it landed\"}\n", f);
+                fclose(f);
+            }
+            goto out;
+        }
         if (commit_rc != 0) goto rollback;
     }
     saved_activities = read_file_alloc(ACTIVITY_LIST, MAX_RESOURCE_FILE, &saved_activities_len);
